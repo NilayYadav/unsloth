@@ -616,20 +616,6 @@ class ChatCompletionRequest(BaseModel):
             "OpenAI cloud + gpt-5.5 family path; ignored otherwise."
         ),
     )
-    anthropic_code_exec_container_id: Optional[str] = Field(
-        None,
-        description = (
-            "[x-unsloth] Anthropic code_execution container id from the prior "
-            "response in the same chat thread. When set and `code_execution` "
-            "is in `enabled_tools`, the next /v1/messages call carries a "
-            "top-level `container` field so the model sees filesystem state "
-            "from earlier turns. Unset → Anthropic auto-creates a fresh "
-            "container. Stale ids surface a 4xx with a `container_expired` / "
-            "`container_not_found` hint; the backend emits a synthetic "
-            "`container_invalidated` _toolEvent so the next turn falls back "
-            "to auto-create."
-        ),
-    )
 
 
 # ── OpenAI shell-tool container management ─────────────────────
@@ -664,11 +650,11 @@ class CreateOpenAIContainerBody(OpenAIContainerRequest):
     ttl_minutes: int = Field(
         20,
         ge = 1,
-        le = 20,
+        le = 10080,  # 1 week
         description = (
             "Idle-timeout TTL the new container will inherit (anchor="
-            "last_active_at). OpenAI hard-caps this at 20 minutes and "
-            "rejects larger values with integer_above_max_value."
+            "last_active_at). OpenAI's default is 20; we cap at one "
+            "week as a safety bound."
         ),
     )
 

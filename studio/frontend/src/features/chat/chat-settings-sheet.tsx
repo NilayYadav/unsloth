@@ -243,7 +243,7 @@ function loadSavedActivePreset(): string {
   }
 }
 
-export function InfoHint({ children }: { children: ReactNode }) {
+function InfoHint({ children }: { children: ReactNode }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
