@@ -26,6 +26,7 @@ import type {
 } from "../types/api";
 import {
   getExternalProviderApiKey,
+  isCustomProviderType,
   loadExternalProviders,
   parseExternalModelId,
   supportsProviderPromptCaching,
@@ -748,7 +749,11 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
         });
         throw new Error("External provider not found.");
       }
-      if (isExternalRequest && !externalApiKey) {
+      // Local providers (llama.cpp / vLLM / Ollama) allow an empty key — only block hosted providers.
+      const externalProviderIsCustom = externalProvider
+        ? isCustomProviderType(externalProvider.providerType)
+        : false;
+      if (isExternalRequest && !externalApiKey && !externalProviderIsCustom) {
         toast.error("Missing API key for selected external provider.", {
           description: "Open Connections and set the API key again.",
         });
@@ -1028,10 +1033,14 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
               provider_id: externalProvider.id,
               provider_type: externalBackendProviderType,
               external_model: externalSelection.modelId,
-              encrypted_api_key: await encryptProviderApiKey(
-                externalApiKey,
-                forceRefreshPublicKey,
-              ),
+              ...(externalApiKey
+                ? {
+                    encrypted_api_key: await encryptProviderApiKey(
+                      externalApiKey,
+                      forceRefreshPublicKey,
+                    ),
+                  }
+                : {}),
               provider_base_url: externalProvider.baseUrl || null,
               ...(supportsProviderPromptCaching(externalProvider.providerType)
                 ? {
