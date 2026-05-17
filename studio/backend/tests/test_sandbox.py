@@ -16,6 +16,7 @@ claims — anything that only inspects the profile string is checking
 typography, not enforcement.
 """
 
+import importlib.util
 import os
 import shlex
 import sys
@@ -34,12 +35,29 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _load_sandbox_module():
+    # Bypass core.inference.__init__ (pulls orchestrator/fastapi/structlog).
+    path = _BACKEND_ROOT / "core" / "inference" / "sandbox.py"
+    spec = importlib.util.spec_from_file_location(
+        "_studio_sandbox_under_test", path
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.fixture
 def sandboxed_workdir(tmp_path, monkeypatch):
     """Point tool execution's workdir lookup at a pytest tmp_path."""
-    from core.inference.sandbox import sandbox_available
+    sandbox = _load_sandbox_module()
 
-    if not sandbox_available():
+    if not sandbox.sandbox_available():
+        if os.environ.get("CI") == "true":
+            pytest.fail(
+                "sandbox unavailable: CI must install/enable bubblewrap or "
+                "sandbox-exec so this enforcement test actually runs"
+            )
         pytest.skip("sandbox unavailable (binary missing or cannot apply policy)")
 
     from core.inference import tools
@@ -50,17 +68,17 @@ def sandboxed_workdir(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def home_sentinel():
-    """Create a sentinel file in $HOME outside the sandbox, yield path + secret.
+def home_sentinel(tmp_path_factory):
+    """Yield a sentinel file path + secret, kept outside the sandbox workdir.
 
     The sentinel proves *negative*: if the sandboxed code reads the
-    file, the secret appears in the tool output. We assert the secret
-    is absent. Without a sentinel, a bare $HOME (empty CI runner)
-    would make ``open(~/.zshrc)`` raise ``FileNotFoundError`` and the
-    test would pass for the wrong reason.
+    file, the secret appears in the tool output. Placed under a
+    pytest tmp_path so the test is hermetic and works on rootless CI
+    where the real $HOME is read-only.
     """
     secret = f"SECRET-{uuid.uuid4().hex}"
-    path = os.path.expanduser(f"~/.studio_sandbox_test_{uuid.uuid4().hex}.txt")
+    sentinel_dir = tmp_path_factory.mktemp("studio_sandbox_sentinel")
+    path = str(sentinel_dir / f"sentinel_{uuid.uuid4().hex}.txt")
     Path(path).write_text(secret)
     try:
         yield path, secret
@@ -112,7 +130,7 @@ def test_bash_home_read_denied(sandboxed_workdir, home_sentinel):
     """The terminal tool must enforce the same $HOME-denial as the python tool."""
     sid, _ = sandboxed_workdir
     path, secret = home_sentinel
-    out = _run_bash(f"cat {shlex.quote(path)}", sid)
+    out = _run_bash(f"/bin/cat {shlex.quote(path)}", sid)
     assert secret not in out, out
     # Confirm cat actually ran and was denied, not silently no-op'd.
     assert any(
@@ -122,24 +140,24 @@ def test_bash_home_read_denied(sandboxed_workdir, home_sentinel):
 
 
 def test_network_denied(sandboxed_workdir):
-    """Use an allowlisted host so the AST pre-check passes and the
-    sandbox is the only thing left to block the egress."""
+    """Hit a routable IP so the test does not depend on DNS or external service.
+
+    Host is assembled at runtime so the static AST allowlist does not
+    pre-block it; only the sandbox can deny the egress.
+    """
     sid, _ = sandboxed_workdir
-    # The import is inside the try block so that any sandbox-induced
-    # failure (the kernel blocking socket(), or an upstream PermissionError
-    # while the import machinery probes a denied $HOME path on editable
-    # installs) is caught and surfaced as DENIED. Either way no network
-    # I/O actually happens, which is the security claim under test.
     code = (
         "try:\n"
-        "    import urllib.request\n"
-        "    r = urllib.request.urlopen('https://wikipedia.org', timeout=10).read(100)\n"
-        "    print('LEAKED:', len(r))\n"
+        "    import socket\n"
+        "    host = '.'.join(['8', '8', '8', '8'])\n"
+        "    s = socket.create_connection((host, 80), timeout=5)\n"
+        "    s.close()\n"
+        "    print('LEAKED')\n"
         "except Exception as e:\n"
         "    print('DENIED:', type(e).__name__)\n"
     )
     out = _run_python(code, sid)
-    assert "LEAKED:" not in out, out
+    assert "LEAKED" not in out, out
     assert "DENIED:" in out, out
 
 
@@ -158,7 +176,7 @@ def test_sandbox_off_actually_leaks(tmp_path, monkeypatch, home_sentinel):
     monkeypatch.setitem(tools._workdirs, sid, str(tmp_path))
 
     path, secret = home_sentinel
-    out = _run_bash(f"cat {shlex.quote(path)}", sid)
+    out = _run_bash(f"/bin/cat {shlex.quote(path)}", sid)
     assert secret in out, out
 
 
@@ -180,3 +198,155 @@ def test_system_applications_enumeration_denied(sandboxed_workdir):
     out_fw = _run_bash("ls /System/Library/Frameworks | head -1", sid)
     assert "Operation not permitted" not in out_fw, out_fw
     assert ".framework" in out_fw, out_fw
+
+
+# ---------------------------------------------------------------------------
+# Profile / argv construction tests. These run on any macOS or Linux host
+# regardless of whether the sandbox can be applied in this process context.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason = "Seatbelt is macOS-only")
+def test_macos_profile_omits_dev_tty(tmp_path):
+    sandbox = _load_sandbox_module()
+    profile = sandbox._macos_seatbelt_profile(str(tmp_path))
+    assert "/dev/tty" not in profile, profile
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason = "Seatbelt is macOS-only")
+def test_macos_profile_narrows_private_etc(tmp_path):
+    sandbox = _load_sandbox_module()
+    profile = sandbox._macos_seatbelt_profile(str(tmp_path))
+    assert '(subpath "/private/etc")' not in profile, profile
+    for required in (
+        '(literal "/private/etc/hosts")',
+        '(literal "/private/etc/resolv.conf")',
+        '(subpath "/private/etc/ssl")',
+    ):
+        assert required in profile, required
+    for forbidden in (
+        "/private/etc/passwd",
+        "/private/etc/shadow",
+        "/private/etc/sudoers",
+    ):
+        assert forbidden not in profile, forbidden
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason = "Seatbelt is macOS-only")
+def test_macos_profile_constrains_process_exec(tmp_path):
+    sandbox = _load_sandbox_module()
+    profile = sandbox._macos_seatbelt_profile(str(tmp_path))
+    assert "(allow process-exec)" not in profile
+    assert "(allow process-exec\n" in profile
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason = "bwrap argv is Linux-only")
+def test_linux_argv_narrows_etc(tmp_path, monkeypatch):
+    sandbox = _load_sandbox_module()
+    monkeypatch.setattr(sandbox, "_linux_bwrap_path", "/usr/bin/bwrap")
+    argv = sandbox._linux_bwrap_argv(["/usr/bin/true"], str(tmp_path))
+    bound_targets = set()
+    bind_flags = ("--ro-bind", "--ro-bind-try", "--bind", "--bind-try")
+    for i, token in enumerate(argv):
+        if token in bind_flags and i + 2 < len(argv):
+            bound_targets.add(argv[i + 2])
+    assert "/etc" not in bound_targets
+    for required in ("/etc/hosts", "/etc/resolv.conf", "/etc/ssl"):
+        assert required in bound_targets, (required, bound_targets)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason = "bwrap argv is Linux-only")
+def test_linux_argv_asserts_when_bwrap_path_unset(tmp_path, monkeypatch):
+    sandbox = _load_sandbox_module()
+    monkeypatch.setattr(sandbox, "_linux_bwrap_path", None)
+    with pytest.raises(AssertionError):
+        sandbox._linux_bwrap_argv(["/usr/bin/true"], str(tmp_path))
+
+
+def test_python_read_paths_excludes_user_site_by_default(monkeypatch, tmp_path):
+    sandbox = _load_sandbox_module()
+    import site
+
+    fake_user_site = tmp_path / "fake_user_site_default"
+    fake_user_site.mkdir()
+    monkeypatch.setattr(site, "getusersitepackages", lambda: str(fake_user_site))
+    monkeypatch.delenv("UNSLOTH_STUDIO_SANDBOX_ALLOW_USER_SITE", raising = False)
+    paths = sandbox._python_read_paths()
+    assert os.path.realpath(str(fake_user_site)) not in paths
+
+
+def test_python_read_paths_includes_user_site_when_opted_in(monkeypatch, tmp_path):
+    sandbox = _load_sandbox_module()
+    import site
+
+    fake_user_site = tmp_path / "fake_user_site_opt_in"
+    fake_user_site.mkdir()
+    monkeypatch.setattr(site, "getusersitepackages", lambda: str(fake_user_site))
+    monkeypatch.setenv("UNSLOTH_STUDIO_SANDBOX_ALLOW_USER_SITE", "1")
+    paths = sandbox._python_read_paths()
+    assert os.path.realpath(str(fake_user_site)) in paths
+
+
+def test_bwrap_probe_bin_exists_and_executable():
+    sandbox = _load_sandbox_module()
+    bin_path = sandbox._BWRAP_PROBE_BIN
+    assert os.path.exists(bin_path), bin_path
+    assert os.access(bin_path, os.X_OK), bin_path
+
+
+def test_build_sandbox_argv_rejects_empty_inner(tmp_path):
+    sandbox = _load_sandbox_module()
+    with pytest.raises(ValueError):
+        sandbox.build_sandbox_argv([], str(tmp_path))
+
+
+def test_build_sandbox_argv_asserts_on_unsupported_platform(tmp_path, monkeypatch):
+    sandbox = _load_sandbox_module()
+    monkeypatch.setattr(sandbox.sys, "platform", "freebsd14")
+    with pytest.raises(AssertionError):
+        sandbox.build_sandbox_argv(["/usr/bin/true"], str(tmp_path))
+
+
+# ---------------------------------------------------------------------------
+# Workdir realpath: bwrap binds os.path.realpath(workdir); tmp_path inside
+# inner_argv must resolve to the same bound path when $HOME is symlinked.
+# ---------------------------------------------------------------------------
+
+
+def test_get_workdir_returns_realpath_when_home_is_symlinked(tmp_path, monkeypatch):
+    real_home = tmp_path / "real_home"
+    real_home.mkdir()
+    home_symlink = tmp_path / "home_symlink"
+    os.symlink(real_home, home_symlink)
+    monkeypatch.setattr(
+        os.path, "expanduser",
+        lambda p: str(home_symlink) if p == "~" else p,
+    )
+
+    from core.inference import tools
+
+    tools._workdirs.pop("_realpath_test", None)
+    wd = tools._get_workdir("_realpath_test")
+    try:
+        assert os.path.realpath(wd) == wd, wd
+        assert str(home_symlink) not in wd, wd
+        assert str(real_home) in wd, wd
+    finally:
+        tools._workdirs.pop("_realpath_test", None)
+
+
+def test_get_workdir_idempotent(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        os.path, "expanduser",
+        lambda p: str(tmp_path) if p == "~" else p,
+    )
+
+    from core.inference import tools
+
+    tools._workdirs.pop("_idem_test", None)
+    first = tools._get_workdir("_idem_test")
+    second = tools._get_workdir("_idem_test")
+    try:
+        assert first == second
+    finally:
+        tools._workdirs.pop("_idem_test", None)
