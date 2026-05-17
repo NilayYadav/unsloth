@@ -197,9 +197,7 @@ def _python_read_paths() -> list[str]:
     """
     candidates: list[str] = [sys.prefix, sys.base_prefix]
     candidates.extend(site.getsitepackages())
-    # why: user-site lives under the real $HOME (~/.local/lib/...). HOME is
-    # rewritten to workdir for the sandboxed child, so exposing it would
-    # contradict the deny-$HOME stance. Opt in with the env var if needed.
+    # user-site is under real $HOME; exposing it defeats the deny-$HOME stance.
     if os.environ.get("UNSLOTH_STUDIO_SANDBOX_ALLOW_USER_SITE") == "1":
         user_site = site.getusersitepackages()
         if user_site:
@@ -349,8 +347,7 @@ def _linux_bwrap_argv(inner_argv: list[str], workdir: str) -> list[str]:
     """
     wd = os.path.realpath(workdir)
     top_ro_dirs = ("/usr", "/bin", "/sbin", "/lib", "/lib64")
-    # Narrow /etc: bind only runtime essentials so sandboxed code cannot read
-    # host identity/config (sshd_config, machine-id, cloud-init, etc.).
+    # Narrow /etc to runtime essentials; deny sshd_config, machine-id, etc.
     etc_ro_entries = (
         "/etc/hosts",
         "/etc/resolv.conf",

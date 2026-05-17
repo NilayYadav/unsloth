@@ -429,9 +429,8 @@ def run_server(
         print(f"TAURI_PORT={port}", flush = True)
 
     if not silent:
-        # why: sandbox_available() spawns a probe with a 5s timeout; on
-        # hardened kernels (unprivileged_userns_clone=0) it stalls the
-        # banner output. Run it on a background thread and wait briefly.
+        # Probe in background: on kernel.unprivileged_userns_clone=0 hosts
+        # sandbox_available() stalls for its full 5s timeout otherwise.
         import threading
 
         from core.inference.sandbox import sandbox_available

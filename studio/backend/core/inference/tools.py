@@ -308,10 +308,8 @@ def _sandbox_preexec():
 
 
 def _sandbox_preexec_for_bwrap():
-    # why: setuid bwrap (older Ubuntu LTS, some hardened distros) cannot
-    # acquire helper privileges if PR_SET_NO_NEW_PRIVS is set before execve.
-    # bwrap itself reapplies NNP to the inner payload, so the sandboxed
-    # program still runs with NNP=1.
+    # Setuid bwrap can't acquire helper privileges with NNP set pre-execve.
+    # bwrap reapplies NNP to the inner payload, so the child still runs NNP=1.
     _sandbox_preexec_impl(apply_no_new_privs = False)
 
 
@@ -358,10 +356,8 @@ def _get_workdir(session_id: str | None = None) -> str:
             os.chmod(workdir, 0o700)
         except OSError:
             pass
-        # why: the bwrap argv binds os.path.realpath(workdir); if $HOME or a
-        # parent is a symlink (NixOS, Fedora Silverblue, /home -> /var/home)
-        # the non-realpath tmp_path passed via inner_argv is not reachable
-        # inside the sandbox namespace.
+        # bwrap binds the realpath; cache the same value so tmp_path resolves
+        # inside the sandbox when $HOME or a parent is a symlink.
         _workdirs[key] = os.path.realpath(workdir)
     return _workdirs[key]
 
