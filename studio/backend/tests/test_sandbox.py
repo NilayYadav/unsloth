@@ -38,9 +38,7 @@ pytestmark = pytest.mark.skipif(
 def _load_sandbox_module():
     # Bypass core.inference.__init__ (pulls orchestrator/fastapi/structlog).
     path = _BACKEND_ROOT / "core" / "inference" / "sandbox.py"
-    spec = importlib.util.spec_from_file_location(
-        "_studio_sandbox_under_test", path
-    )
+    spec = importlib.util.spec_from_file_location("_studio_sandbox_under_test", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -319,7 +317,8 @@ def test_get_workdir_returns_realpath_when_home_is_symlinked(tmp_path, monkeypat
     home_symlink = tmp_path / "home_symlink"
     os.symlink(real_home, home_symlink)
     monkeypatch.setattr(
-        os.path, "expanduser",
+        os.path,
+        "expanduser",
         lambda p: str(home_symlink) if p == "~" else p,
     )
 
@@ -337,7 +336,8 @@ def test_get_workdir_returns_realpath_when_home_is_symlinked(tmp_path, monkeypat
 
 def test_get_workdir_idempotent(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        os.path, "expanduser",
+        os.path,
+        "expanduser",
         lambda p: str(tmp_path) if p == "~" else p,
     )
 
