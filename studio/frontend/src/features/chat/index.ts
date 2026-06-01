@@ -30,6 +30,7 @@ export {
   type McpServerConfig,
 } from "./api/mcp-servers-api";
 export { setTrainingCompareHandoff } from "./lib/training-compare-handoff";
+export type { ProjectRecord } from "./types";
 export { clearAllChats, countAllChats } from "./utils/clear-all-chats";
 export { ArtifactCard } from "./artifacts/artifact-card";
 export {
@@ -43,3 +44,11 @@ export {
   useChatSidebarItems,
   type SidebarItem,
 } from "./hooks/use-chat-sidebar-items";
+export {
+  createChatProject,
+  deleteChatProject,
+  moveChatItemToProject,
+  renameChatProject,
+  updateChatProjectInstructions,
+  useChatProjects,
+} from "./hooks/use-chat-projects";
