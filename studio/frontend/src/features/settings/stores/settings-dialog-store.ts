@@ -9,6 +9,7 @@ export type SettingsTab =
   | "appearance"
   | "chat"
   | "connections"
+  | "mcp-connectors"
   | "api-keys"
   | "about";
 
@@ -41,6 +42,7 @@ function loadInitialTab(): SettingsTab {
     "appearance",
     "chat",
     "connections",
+    "mcp-connectors",
     "api-keys",
     "about",
   ];

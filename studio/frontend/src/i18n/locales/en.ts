@@ -90,6 +90,7 @@ export const en = {
       appearance: "Appearance",
       chat: "Chat",
       connections: "Connections",
+      mcpConnectors: "Connectors",
       apiKeys: "API",
       about: "Help",
     },
@@ -220,6 +221,37 @@ export const en = {
     connections: {
       title: "Connections",
       description: "Manage providers and external service connections.",
+    },
+    mcpConnectors: {
+      title: "MCP Connectors",
+      description:
+        "Connect Unsloth Studio to external apps over the Model Context Protocol (MCP). Once connected, their tools are available to your chats.",
+      supportedTitle: "Popular connectors",
+      supportedDescription:
+        "Click Connect to add one. A browser window opens so you can sign in and authorize access.",
+      connectors: {
+        gmail: "Read, search, and draft email from your Gmail account.",
+        drive: "Browse and read files stored in your Google Drive.",
+        calendar: "View and manage events on your Google Calendar.",
+        linear: "Search, create, and update issues and projects in Linear.",
+      },
+      connect: "Connect",
+      connecting: "Connecting…",
+      connected: "Connected to {name}",
+      toolsLoaded: "{count} tools available.",
+      disconnect: "Disconnect",
+      disconnectConfirm: "Disconnect {name}? Its tools will be removed from your chats.",
+      disconnectError: "Couldn't disconnect {name}",
+      connectError: "Couldn't connect {name}",
+      authFailed: "Authorization failed or was cancelled.",
+      comingSoon: "Coming soon",
+      customTitle: "Add a custom connector",
+      customDescription:
+        "Connect any other MCP server by its URL, with or without OAuth.",
+      customButton: "Add custom server",
+      oauthNoteTitle: "About OAuth account access",
+      oauthNoteBody:
+        "Connecting signs you in to the provider in your browser and grants Unsloth Studio access to that account's data within the scopes you approve. Studio never sees your password. Access tokens are stored locally on this device. You can revoke access at any time from the provider's account settings (for example, Google Account → Security or Linear → Settings → API), or by removing the server from the MCP Servers manager.",
     },
     apiKeys: {
       title: "API",

@@ -16,6 +16,7 @@ import {
   HelpCircleIcon,
   Message01Icon,
   PaintBrush02Icon,
+  PlugSocketIcon,
   Settings02Icon,
   UserIcon,
 } from "@hugeicons/core-free-icons";
@@ -32,6 +33,7 @@ import { AppearanceTab } from "./tabs/appearance-tab";
 import { ChatTab } from "./tabs/chat-tab";
 import { ConnectionsTab } from "./tabs/connections-tab";
 import { GeneralTab } from "./tabs/general-tab";
+import { McpConnectorsTab } from "./tabs/mcp-connectors-tab";
 import { ProfileTab } from "./tabs/profile-tab";
 
 interface TabDef {
@@ -57,6 +59,12 @@ const TABS: TabDef[] = [
     badgeKey: "common.new",
   },
   {
+    id: "mcp-connectors",
+    labelKey: "settings.tabs.mcpConnectors",
+    icon: PlugSocketIcon,
+    badgeKey: "common.new",
+  },
+  {
     id: "api-keys",
     labelKey: "settings.tabs.apiKeys",
     icon: Globe02Icon,
@@ -77,6 +85,8 @@ function renderTab(tab: SettingsTab) {
       return <ChatTab />;
     case "connections":
       return <ConnectionsTab />;
+    case "mcp-connectors":
+      return <McpConnectorsTab />;
     case "api-keys":
       return <ApiKeysTab />;
     case "about":
@@ -98,6 +108,7 @@ export function SettingsDialog() {
     appearance: null,
     chat: null,
     connections: null,
+    "mcp-connectors": null,
     "api-keys": null,
     about: null,
   });

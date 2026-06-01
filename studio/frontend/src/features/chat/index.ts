@@ -18,8 +18,17 @@ export {
 } from "./chat-settings-sheet";
 export { useChatRuntimeStore } from "./stores/chat-runtime-store";
 export { useChatSearchStore } from "./stores/chat-search-store";
+export { useMcpServersStore } from "./stores/mcp-servers-store";
 export { useChatModelRuntime } from "./hooks/use-chat-model-runtime";
 export { ChatSearchDialog } from "./components/chat-search-dialog";
+export { ChatMcpServersDialog } from "./chat-mcp-servers-dialog";
+export {
+  createMcpServer,
+  deleteMcpServer,
+  listMcpServers,
+  refreshMcpServerTools,
+  type McpServerConfig,
+} from "./api/mcp-servers-api";
 export { setTrainingCompareHandoff } from "./lib/training-compare-handoff";
 export { clearAllChats, countAllChats } from "./utils/clear-all-chats";
 export { ArtifactCard } from "./artifacts/artifact-card";

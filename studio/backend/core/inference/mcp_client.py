@@ -143,7 +143,25 @@ def _client(url: str, headers: Optional[dict], use_oauth: bool = False):
     if use_oauth:
         from fastmcp.client.auth import OAuth
 
-        auth = OAuth(mcp_url = url, token_storage = _oauth_store())
+        from .mcp_oauth_connectors import connector_needs_setup, connector_oauth_for
+
+        if connector_needs_setup(url):
+            raise RuntimeError(
+                "This connector isn't enabled on this server yet. Set the "
+                "connector's OAuth client credentials and try again."
+            )
+
+        override = connector_oauth_for(url)
+        if override is not None:
+            auth = OAuth(
+                mcp_url = url,
+                token_storage = _oauth_store(),
+                client_id = override.client_id,
+                client_secret = override.client_secret,
+                scopes = override.scopes,
+            )
+        else:
+            auth = OAuth(mcp_url = url, token_storage = _oauth_store())
 
     transport_cls = (
         SSETransport
@@ -153,6 +171,49 @@ def _client(url: str, headers: Optional[dict], use_oauth: bool = False):
     return Client(transport_cls(url = url, headers = headers or None, auth = auth))
 
 
+def _pick_probe_tool(tools: list) -> Optional[str]:
+    def is_read_only(tool) -> bool:
+        annotations = getattr(tool, "annotations", None)
+        return bool(annotations and getattr(annotations, "readOnlyHint", False))
+
+    def required_count(tool) -> int:
+        schema = getattr(tool, "inputSchema", None) or {}
+        required = schema.get("required") if isinstance(schema, dict) else None
+        return len(required) if isinstance(required, list) else 0
+
+    read_only = sorted(
+        (tool for tool in tools if is_read_only(tool)),
+        key = required_count,
+    )
+    return read_only[0].name if read_only else None
+
+
+def _enrich_http_error(exc: Exception) -> Exception:
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status is None:
+        return exc
+    try:
+        body = (response.text or "").strip().replace("\n", " ")
+    except Exception:  # noqa: BLE001
+        body = ""
+    if len(body) > 500:
+        body = body[:500] + "…"
+    reason = (getattr(response, "reason_phrase", "") or "").strip()
+    detail = f"{status} {reason}".strip()
+    return RuntimeError(f"{detail}: {body}" if body else detail)
+
+
+async def _has_oauth_token(url: str) -> bool:
+    try:
+        from fastmcp.client.auth import OAuth
+
+        auth = OAuth(mcp_url = url, token_storage = _oauth_store())
+        return (await auth.token_storage_adapter.get_tokens()) is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def list_tools_async(
     url: str,
     headers: Optional[dict] = None,
@@ -160,9 +221,20 @@ async def list_tools_async(
     use_oauth: bool = False,
 ) -> list[dict]:
     async def _fetch() -> list[dict]:
-        async with _client(url, headers, use_oauth) as client:
-            tools = await client.list_tools()
-        return [t.model_dump(exclude_none = True) for t in tools]
+        try:
+            async with _client(url, headers, use_oauth) as client:
+                tools = await client.list_tools()
+                if use_oauth and not await _has_oauth_token(url):
+                    probe = _pick_probe_tool(tools)
+                    if probe is not None:
+                        try:
+                            await client.call_tool(probe, {})
+                        except Exception:  # noqa: BLE001
+                            pass
+                        tools = await client.list_tools()
+            return [t.model_dump(exclude_none = True) for t in tools]
+        except Exception as exc:  # noqa: BLE001
+            raise _enrich_http_error(exc) from exc
 
     return await asyncio.wait_for(_fetch(), timeout = timeout)
 

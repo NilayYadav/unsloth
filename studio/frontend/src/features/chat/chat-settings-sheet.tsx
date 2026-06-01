@@ -90,6 +90,7 @@ import {
   providerSupportsFastMode,
 } from "./provider-capabilities";
 import { useChatRuntimeStore } from "./stores/chat-runtime-store";
+import { useMcpServersStore } from "./stores/mcp-servers-store";
 import { ChatMcpServersDialog } from "./chat-mcp-servers-dialog";
 import { listMcpServers } from "./api/mcp-servers-api";
 import type { InferenceParams } from "./types/runtime";
@@ -1510,7 +1511,8 @@ function McpServersSection() {
     null,
   );
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [refreshTick, setRefreshTick] = useState(0);
+  const revision = useMcpServersStore((s) => s.revision);
+  const notifyServersChanged = useMcpServersStore((s) => s.notifyServersChanged);
 
   useEffect(() => {
     let cancelled = false;
@@ -1525,7 +1527,7 @@ function McpServersSection() {
     return () => {
       cancelled = true;
     };
-  }, [refreshTick]);
+  }, [revision]);
 
   return (
     <div className="flex flex-col gap-3 pt-1">
@@ -1562,7 +1564,7 @@ function McpServersSection() {
         open={dialogOpen}
         onOpenChange={(next) => {
           setDialogOpen(next);
-          if (!next) setRefreshTick((tick) => tick + 1);
+          if (!next) notifyServersChanged();
         }}
       />
     </div>
