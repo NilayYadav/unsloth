@@ -12,6 +12,7 @@ from unsloth_cli.commands.train import train
 from unsloth_cli.commands.inference import inference
 from unsloth_cli.commands.chat import chat
 from unsloth_cli.commands.export import export, list_checkpoints
+from unsloth_cli.commands.update import update
 from unsloth_cli.commands.studio import (
     run as studio_run,
     studio_app,
@@ -75,6 +76,7 @@ app.command()(train)
 app.command()(inference)
 app.command()(chat)
 app.command()(export)
+app.command()(update)
 app.command("list-checkpoints")(list_checkpoints)
 app.add_typer(studio_app, name = "studio", help = "Unsloth Studio commands.")
 
