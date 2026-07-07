@@ -30,6 +30,8 @@ dependencies = [
     "pydantic",
     "pyyaml",
     "nest-asyncio",
+    "tomli; python_version < '3.11'",
+    "tomli-w",
 ]
 
 [project.scripts]

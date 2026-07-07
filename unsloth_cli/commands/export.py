@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+import shlex
 from pathlib import Path
 from typing import Optional
 
@@ -9,6 +10,95 @@ import typer
 
 EXPORT_FORMATS = ["merged-16bit", "merged-4bit", "gguf", "lora"]
 GGUF_QUANTS = ["q4_k_m", "q5_k_m", "q8_0", "f16"]
+
+# Remote-side scratch dir the verbatim `unsloth export` writes into before the
+# result is pulled back to the user's local output_dir.
+_REMOTE_EXPORTS_DIR = "~/.unsloth/studio/exports/remote"
+
+
+def _remote_export(
+    remote: str,
+    checkpoint: Path,
+    output_dir: Path,
+    extra_flags: list,
+    hf_token: Optional[str],
+) -> None:
+    """Run the same `unsloth export` CLI on the remote and pull the result back."""
+    from rich.console import Console
+
+    from unsloth_cli.remote import RemoteError, looks_like_job_id
+    from unsloth_cli.remote.agent import AgentClient
+    from unsloth_cli.remote.bootstrap import ENV_UNSLOTH
+    from unsloth_cli.remote.jobs import resolve_job, utc_now
+    from unsloth_cli.remote.registry import register_artifact
+    from unsloth_cli.remote.ssh import SSHRunner
+    from unsloth_cli.remote.state import get_remote
+
+    console = Console()
+    record = get_remote(remote)
+    runner = SSHRunner.for_remote(record)
+
+    job = None
+    if looks_like_job_id(str(checkpoint)):
+        job = resolve_job(str(checkpoint))
+        if job.remote != remote:
+            raise RemoteError(
+                f"Job {job.job_id} ran on remote '{job.remote}', not '{remote}'.",
+                hint = f"Use: unsloth export {job.job_id} ... --remote {job.remote}",
+            )
+        if not job.output_dir:
+            raise RemoteError(
+                f"Job {job.job_id} has no known output directory.",
+                hint = "Refresh with: unsloth jobs",
+            )
+        remote_checkpoint = job.output_dir
+    else:
+        remote_checkpoint = str(checkpoint)
+
+    # Exporting loads the model; refuse while a training job owns the GPU.
+    try:
+        tunnel = runner.open_tunnel(record.agent_port)
+        try:
+            status = AgentClient(tunnel.url, api_key = record.api_key).train_status()
+        finally:
+            tunnel.close()
+        if status.get("phase") in ("training", "loading_model", "configuring"):
+            raise RemoteError(
+                f"Remote '{remote}' is busy training {status.get('job_id', '')}.",
+                hint = "Wait for it to finish or cancel it first.",
+            )
+    except RemoteError as e:
+        if "busy training" in str(e):
+            raise
+        console.print("[yellow]Warning:[/yellow] could not check the agent; continuing.")
+
+    tag = job.job_id if job else Path(remote_checkpoint).name
+    remote_out = f"{_REMOTE_EXPORTS_DIR}/{tag}_{utc_now().replace(':', '')}"
+    command = " ".join([
+        f"HF_TOKEN={shlex.quote(hf_token)}" if hf_token else "",
+        ENV_UNSLOTH, "export",
+        shlex.quote(remote_checkpoint), shlex.quote(remote_out),
+        *extra_flags,
+    ]).strip()
+
+    console.print(f"Running export on {remote} ({record.destination})...")
+    code = runner.stream(command)
+    if code != 0:
+        raise RemoteError(f"Remote export failed (exit {code}).")
+
+    output_dir.mkdir(parents = True, exist_ok = True)
+    console.print(f"Pulling result into {output_dir} ...")
+    runner.rsync_down(f"{remote_out}/", f"{output_dir}/")
+    pulled = sorted(p.name for p in output_dir.iterdir())
+    for name in pulled:
+        console.print(f"  {name}")
+    if job is not None:
+        register_artifact(
+            job.job_id,
+            remote = remote,
+            gguf = [str(output_dir / n) for n in pulled if n.endswith(".gguf")],
+        )
+    console.print("[green]Export complete.[/green]")
 
 
 def list_checkpoints(
@@ -33,8 +123,15 @@ def list_checkpoints(
 
 
 def export(
-    checkpoint: Path = typer.Argument(..., help = "Path to checkpoint directory."),
+    checkpoint: Path = typer.Argument(
+        ..., help = "Path to checkpoint directory (or a job id with --remote)."
+    ),
     output_dir: Path = typer.Argument(..., help = "Directory to save exported model."),
+    remote: Optional[str] = typer.Option(
+        None,
+        "--remote",
+        help = "Run the export on a configured remote and pull the result back.",
+    ),
     format: str = typer.Option(
         "merged-16bit",
         "--format",
@@ -71,6 +168,25 @@ def export(
     if push_to_hub and not repo_id:
         typer.echo("Error: --repo-id required when using --push-to-hub", err = True)
         raise typer.Exit(code = 2)
+
+    if remote:
+        from unsloth_cli.remote import RemoteError
+
+        flags = ["--format", format, "-q", quantization,
+                 "--max-seq-length", str(max_seq_length),
+                 "--load-in-4bit" if load_in_4bit else "--no-load-in-4bit"]
+        if push_to_hub:
+            flags += ["--push-to-hub", "--repo-id", str(repo_id)]
+            if private:
+                flags.append("--private")
+        try:
+            _remote_export(remote, checkpoint, output_dir, flags, hf_token)
+        except RemoteError as e:
+            typer.echo(f"Error: {e}", err = True)
+            if e.hint:
+                typer.echo(f"Hint: {e.hint}", err = True)
+            raise typer.Exit(code = 1)
+        raise typer.Exit(code = 0)
 
     from studio.backend.core.export import ExportBackend
 

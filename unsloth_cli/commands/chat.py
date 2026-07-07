@@ -199,6 +199,18 @@ def chat(
     if model is None:
         model = _pick_trained_model(console)
 
+    # Job ids from remote training resolve to their locally pulled adapter.
+    from unsloth_cli.remote import RemoteError
+    from unsloth_cli.remote.registry import resolve_model_identifier
+
+    try:
+        model = resolve_model_identifier(model)
+    except RemoteError as e:
+        err.print(str(e), style = "red", markup = False)
+        if e.hint:
+            err.print(e.hint, style = "yellow", markup = False)
+        raise typer.Exit(code = 1)
+
     # Resolve first so --compare can be rejected before the slow load.
     model_config = resolve_model_config(model, hf_token = hf_token)
     compare_blocked = _compare_blocked_reason(model_config)

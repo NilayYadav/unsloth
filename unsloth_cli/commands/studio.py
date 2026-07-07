@@ -1927,6 +1927,25 @@ def provision_desktop_auth():
     typer.echo("Desktop auth ready.")
 
 
+@studio_app.command("create-api-key", hidden = True)
+def create_api_key(
+    name: str = typer.Option(
+        "remote",
+        "--name",
+        help = "Label for the key (shows in Studio's API-key list).",
+    ),
+):
+    """Mint an admin API key and print it once (used by `unsloth remote add`).
+
+    Prints only the raw key on stdout so callers (including over SSH) can
+    capture it; it is never persisted in plaintext server-side.
+    """
+    storage = _load_backend_auth_storage()
+    storage.ensure_default_admin()
+    raw_key = _create_api_key_inprocess(name)
+    typer.echo(raw_key)
+
+
 @studio_app.command("reset-password")
 def reset_password():
     """Reset the Studio admin password.

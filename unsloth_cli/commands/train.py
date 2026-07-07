@@ -30,6 +30,16 @@ def train(
         "--dry-run",
         help = "Show resolved config and exit without training.",
     ),
+    remote: Optional[str] = typer.Option(
+        None,
+        "--remote",
+        help = "Run on a configured remote GPU machine (see `unsloth remote`).",
+    ),
+    detach: bool = typer.Option(
+        False,
+        "--detach",
+        help = "With --remote: submit the job and return immediately.",
+    ),
     config_overrides: dict = None,
 ):
     """Launch training using the existing Unsloth training backend."""
@@ -49,6 +59,10 @@ def train(
         hf_token = None
     if isinstance(wandb_token, OptionInfo):
         wandb_token = None
+    if isinstance(remote, OptionInfo):
+        remote = None
+    if isinstance(detach, OptionInfo):
+        detach = False
     hf_token = hf_token or cfg.logging.hf_token
     wandb_token = wandb_token or cfg.logging.wandb_token
 
@@ -66,6 +80,37 @@ def train(
 
     if not cfg.data.dataset and not cfg.data.local_dataset:
         typer.echo("Error: provide --dataset or --local-dataset (or via --config)", err = True)
+        raise typer.Exit(code = 2)
+
+    # Remote execution: same config, same backend — submitted to the remote's
+    # agent instead of driving the trainer in this process. Branch before any
+    # studio/torch import so the laptop needs no ML stack.
+    if remote:
+        from rich.console import Console
+
+        from unsloth_cli.remote import RemoteError
+        from unsloth_cli.remote.run_remote import run_remote_training
+
+        console = Console()
+        try:
+            run_remote_training(
+                cfg,
+                remote,
+                console,
+                config_file = config,
+                detach = detach,
+                hf_token = hf_token,
+                wandb_token = wandb_token,
+            )
+        except RemoteError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            if e.hint:
+                console.print(f"[yellow]Hint:[/yellow] {e.hint}")
+            raise typer.Exit(code = 1)
+        raise typer.Exit(code = 0)
+
+    if detach:
+        typer.echo("Error: --detach requires --remote", err = True)
         raise typer.Exit(code = 2)
 
     # A LoRA adapter dir has adapter_config.json

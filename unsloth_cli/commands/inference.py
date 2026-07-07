@@ -69,6 +69,18 @@ def inference(
     if not verbose:
         configure_quiet_logging()
 
+    # Job ids from remote training resolve to their locally pulled adapter.
+    from unsloth_cli.remote import RemoteError
+    from unsloth_cli.remote.registry import resolve_model_identifier
+
+    try:
+        model = resolve_model_identifier(model)
+    except RemoteError as e:
+        typer.echo(f"Error: {e}", err = True)
+        if e.hint:
+            typer.echo(f"Hint: {e.hint}", err = True)
+        raise typer.Exit(code = 1)
+
     # A running Studio server keeps the model warm between runs, which is
     # exactly what a one-shot command wants.
     load_opts = dict(
