@@ -43,10 +43,12 @@ const DOC_LINKS = [
   },
 ];
 
-function buildSnippets(base: string) {
+const PLACEHOLDER_KEY = "sk-unsloth-YOUR_KEY";
+
+function buildSnippets(base: string, key: string) {
   return {
     curl: `curl ${base}/v1/chat/completions \\
-  -H "Authorization: Bearer sk-unsloth-YOUR_KEY" \\
+  -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "messages": [{"role": "user", "content": "Hello"}],
@@ -56,7 +58,7 @@ function buildSnippets(base: string) {
 
 client = OpenAI(
     base_url="${base}/v1",
-    api_key="sk-unsloth-YOUR_KEY",
+    api_key="${key}",
 )
 
 response = client.chat.completions.create(
@@ -67,7 +69,7 @@ response = client.chat.completions.create(
 for chunk in response:
     print(chunk.choices[0].delta.content or "", end="")`,
     tools: `curl ${base}/v1/chat/completions \\
-  -H "Authorization: Bearer sk-unsloth-YOUR_KEY" \\
+  -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "messages": [{"role": "user", "content": "Search Python 3.13 features"}],
@@ -78,7 +80,7 @@ for chunk in response:
   };
 }
 
-export function UsageExamples() {
+export function UsageExamples({ apiKey }: { apiKey?: string }) {
   const t = useT();
   const [lang, setLang] = useState<Lang>("curl");
   const [copied, setCopied] = useState(false);
@@ -86,8 +88,9 @@ export function UsageExamples() {
     () =>
       buildSnippets(
         typeof window !== "undefined" ? window.location.origin : "",
+        apiKey ?? PLACEHOLDER_KEY,
       ),
-    [],
+    [apiKey],
   );
 
   const handleCopy = async () => {
