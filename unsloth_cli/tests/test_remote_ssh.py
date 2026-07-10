@@ -128,6 +128,84 @@ class TestRsync:
         assert captured["argv"][-2:] == ["u@h:/remote/out/", "/local/dest/"]
 
 
+class TestTarFallback:
+    """rsync transparently degrades to tar-over-ssh when rsync is missing."""
+
+    def _runner_with_missing_rsync(self, tmp_path, monkeypatch):
+        missing = str(tmp_path / "no-such-rsync")
+        monkeypatch.setenv("UNSLOTH_REMOTE_RSYNC", missing)
+        return SSHRunner("u@h")
+
+    def test_upload_falls_back_to_tar(self, tmp_path, monkeypatch):
+        data = tmp_path / "data.jsonl"
+        data.write_text('{"text": "hi"}\n', encoding = "utf-8")
+        ssh_log = tmp_path / "ssh-args.log"
+        # Fake ssh: record the remote command, drain stdin (the tar stream).
+        ssh_stub = _stub_binary(
+            tmp_path, "ssh", f'echo "$@" >> {ssh_log}\ncat > /dev/null\nexit 0\n'
+        )
+        monkeypatch.setenv("UNSLOTH_REMOTE_SSH", ssh_stub)
+        runner = self._runner_with_missing_rsync(tmp_path, monkeypatch)
+        runner.rsync_up(str(data), "~/.unsloth/uploads/")
+        logged = ssh_log.read_text(encoding = "utf-8")
+        assert "mkdir -p ~/" in logged
+        assert "tar -C ~/" in logged and "-xf -" in logged
+
+    def test_download_falls_back_to_tar(self, tmp_path, monkeypatch):
+        # Fake ssh: emit a real tar stream containing one adapter file.
+        src = tmp_path / "remote-out"
+        src.mkdir()
+        (src / "adapter_config.json").write_text("{}", encoding = "utf-8")
+        ssh_stub = _stub_binary(tmp_path, "ssh", f'exec tar -C "{src}" -cf - .\n')
+        monkeypatch.setenv("UNSLOTH_REMOTE_SSH", ssh_stub)
+        runner = self._runner_with_missing_rsync(tmp_path, monkeypatch)
+        dest = tmp_path / "pulled"
+        runner.rsync_down("/root/outputs/run1/", str(dest))
+        assert (dest / "adapter_config.json").read_text(encoding = "utf-8") == "{}"
+
+    def test_remote_rsync_missing_falls_back(self, tmp_path, monkeypatch):
+        # Local rsync exists but the remote lacks it: exit 127 + stderr.
+        rsync_stub = _stub_binary(
+            tmp_path, "rsync", 'echo "bash: rsync: command not found" >&2\nexit 127\n'
+        )
+        src = tmp_path / "remote-out"
+        src.mkdir()
+        (src / "adapter_config.json").write_text("{}", encoding = "utf-8")
+        ssh_stub = _stub_binary(tmp_path, "ssh", f'exec tar -C "{src}" -cf - .\n')
+        monkeypatch.setenv("UNSLOTH_REMOTE_RSYNC", rsync_stub)
+        monkeypatch.setenv("UNSLOTH_REMOTE_SSH", ssh_stub)
+        dest = tmp_path / "pulled"
+        SSHRunner("u@h").rsync_down("/root/outputs/run1/", str(dest))
+        assert (dest / "adapter_config.json").exists()
+
+    def test_genuine_rsync_error_still_raises(self, tmp_path, monkeypatch):
+        rsync_stub = _stub_binary(
+            tmp_path, "rsync", 'echo "rsync error: some files could not be transferred" >&2\nexit 23\n'
+        )
+        monkeypatch.setenv("UNSLOTH_REMOTE_RSYNC", rsync_stub)
+        with pytest.raises(RemoteError, match = "rsync"):
+            SSHRunner("u@h").rsync_down("/remote/out/", str(tmp_path / "d"))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason = "ControlMaster is POSIX-only")
+class TestControlPath:
+    def test_deep_unsloth_home_falls_back_to_tempdir(self, tmp_path, monkeypatch):
+        deep = tmp_path / ("x" * 120)
+        monkeypatch.setenv("UNSLOTH_HOME", str(deep))
+        argv = SSHRunner("u@h").ssh_argv(["true"])
+        control = next(a for a in argv if a.startswith("ControlPath="))
+        socket_path = control.split("=", 1)[1]
+        # Stays under the ~104-byte unix socket limit even with the hash.
+        assert len(socket_path) < 104
+        assert str(deep) not in socket_path
+
+    def test_short_unsloth_home_keeps_private_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("UNSLOTH_HOME", "/tmp/uh")
+        argv = SSHRunner("u@h").ssh_argv(["true"])
+        control = next(a for a in argv if a.startswith("ControlPath="))
+        assert control.startswith("ControlPath=/tmp/uh/ssh/")
+
+
 class TestHostKeys:
     ED25519_LINE = "1.2.3.4 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBase64Base64Base64Base64Base64Base64Base6"
     RSA_LINE = "1.2.3.4 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCBase64Base64Base64Base64Base64Base64"

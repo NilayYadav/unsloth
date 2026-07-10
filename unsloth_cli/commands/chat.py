@@ -242,7 +242,7 @@ def chat(
 
     # Job ids from remote training resolve to their locally pulled adapter.
     from unsloth_cli.remote import RemoteError
-    from unsloth_cli.remote.registry import resolve_model_identifier
+    from unsloth_cli.remote.state import resolve_model_identifier
 
     try:
         model = resolve_model_identifier(model)

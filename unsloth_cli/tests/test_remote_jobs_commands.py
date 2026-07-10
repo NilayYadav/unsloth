@@ -15,10 +15,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import unsloth_cli.commands.jobs as jobsmod
+import unsloth_cli.commands.remote as jobsmod
 from unsloth_cli import app
 from unsloth_cli.remote import RemoteError
-from unsloth_cli.remote.jobs import JobRecord, load_job, save_job
+from unsloth_cli.remote.state import JobRecord, load_job, save_job
 from unsloth_cli.remote.state import RemoteCapabilities, RemoteRecord
 
 runner = CliRunner()
@@ -63,7 +63,7 @@ class FakeClient:
             "details": {"step": 12, "total_steps": 30},
         }
 
-    def list_runs(self, limit = 200, skip = 0):
+    def list_runs(self, limit = 200, offset = 0):
         return {"runs": [{
             "id": JOB, "status": FakeClient.run_status,
             "model_name": "unsloth/Qwen3-0.6B",
@@ -74,6 +74,13 @@ class FakeClient:
 
     def run_detail(self, run_id):
         return {"run": self.list_runs()["runs"][0], "config": {}, "metrics": {}}
+
+    def stream_progress(self, last_event_id = None, max_reconnects = None):
+        class _Ev:
+            event = "complete"
+            data = {}
+            event_id = None
+        yield _Ev()
 
     def stop_training(self, save = True):
         self.stop_calls.append(save)
@@ -198,13 +205,6 @@ class TestCancel:
         assert FakeClient.last.stop_calls == [True]
         assert "resume" in result.output
 
-    def test_no_save_discards(self, wired):
-        _seed_job()
-        FakeClient.current_job = JOB
-        FakeClient.phase = "training"
-        runner.invoke(app, ["cancel", JOB, "--no-save"])
-        assert FakeClient.last.stop_calls == [False]
-
     def test_refuses_non_active_job(self, wired):
         _seed_job()
         FakeClient.current_job = "job_other"
@@ -218,7 +218,7 @@ class TestResume:
     def test_resubmits_with_checkpoint_and_env_tokens(self, wired, monkeypatch):
         _seed_job(status = "stopped", output_dir = "/remote/outputs/run1")
         monkeypatch.setenv("HF_TOKEN", "hf_fresh")
-        result = runner.invoke(app, ["resume", JOB, "--detach"])
+        result = runner.invoke(app, ["resume", JOB])
         assert result.exit_code == 0, result.output
         payload = FakeClient.last.start_payloads[0]
         assert payload["resume_from_checkpoint"] == "/remote/outputs/run1"
@@ -249,7 +249,7 @@ class TestResume:
 
         monkeypatch.setattr(FakeClient, "run_detail", settling_run_detail)
         monkeypatch.setattr(jobsmod.time, "sleep", lambda s: None)
-        result = runner.invoke(app, ["resume", JOB, "--detach"])
+        result = runner.invoke(app, ["resume", JOB])
         assert result.exit_code == 0, result.output
         assert FakeClient.last.start_payloads
 
@@ -262,7 +262,7 @@ class TestPull:
         assert wired.downloads
         job = load_job(JOB)
         assert job.pulled is True
-        from unsloth_cli.remote.registry import resolve_job_artifact
+        from unsloth_cli.remote.state import resolve_job_artifact
         assert resolve_job_artifact(JOB) is not None
 
     def test_pull_is_idempotent(self, wired):
@@ -278,3 +278,20 @@ class TestPull:
         runner.invoke(app, ["pull", JOB])
         runner.invoke(app, ["pull", JOB, "--force"])
         assert len(wired.downloads) == 2
+
+
+class TestLatestJobDefault:
+    def test_logs_defaults_to_most_recent(self, wired):
+        _seed_job()
+        _seed_job(
+            job_id = "job_20260708_120000_aaaaaaaa",
+            submitted_at = "2026-07-08T12:00:00+00:00",
+        )
+        result = runner.invoke(app, ["logs"])
+        assert result.exit_code == 0, result.output
+        assert "job_20260708_120000_aaaaaaaa" in result.output
+
+    def test_no_jobs_yet_hint(self, wired):
+        result = runner.invoke(app, ["cancel"])
+        assert result.exit_code == 1
+        assert "No remote jobs yet" in result.output

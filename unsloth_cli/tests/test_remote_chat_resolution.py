@@ -15,8 +15,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from unsloth_cli.remote import RemoteError
-from unsloth_cli.remote.jobs import JobRecord, save_job
-from unsloth_cli.remote.registry import (
+from unsloth_cli.remote.state import JobRecord, save_job
+from unsloth_cli.remote.state import (
     ADAPTER_SUBDIR,
     job_registry_dir,
     register_artifact,

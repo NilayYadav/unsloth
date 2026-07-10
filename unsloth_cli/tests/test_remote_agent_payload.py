@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
-"""Tests for unsloth_cli.remote.payload and .agent — fake HTTP, no server."""
+"""Tests for unsloth_cli.remote.run_remote and .agent — fake HTTP, no server."""
 
 from __future__ import annotations
 
@@ -22,13 +22,13 @@ if str(_BACKEND_DIR) not in sys.path:
 
 from unsloth_cli.config import Config
 from unsloth_cli.remote import RemoteError
-from unsloth_cli.remote.agent import (
+from unsloth_cli.remote.ssh import (
     AgentClient,
     RemoteBusyError,
     SSEEvent,
     _parse_sse,
 )
-from unsloth_cli.remote.payload import (
+from unsloth_cli.remote.run_remote import (
     build_training_payload,
     remote_dataset_dir,
     training_payload_warnings,
@@ -162,7 +162,7 @@ class TestAgentClient:
             calls.append(request)
             return handler(request)
 
-        monkeypatch.setattr("unsloth_cli.remote.agent.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr("unsloth_cli.remote.ssh.urllib.request.urlopen", fake_urlopen)
         return calls
 
     def test_bearer_header_sent(self, monkeypatch):
@@ -213,12 +213,15 @@ class TestAgentClient:
     def test_auth_failure_hint(self, monkeypatch):
         def handler(req):
             raise urllib.error.HTTPError(
-                req.full_url, 401, "Unauthorized", {}, io.BytesIO(b"{}")
+                req.full_url, 401, "Unauthorized", {},
+                io.BytesIO(b'{"detail": "Invalid API key"}'),
             )
 
         self._patch_urlopen(monkeypatch, handler)
-        with pytest.raises(RemoteError, match = "API key"):
+        with pytest.raises(RemoteError, match = "rejected our credentials") as exc:
             self._client().train_status()
+        assert "Invalid API key" in str(exc.value)
+        assert "remote add" in exc.value.hint
 
     def test_connection_error_hint(self, monkeypatch):
         def handler(req):
@@ -242,8 +245,8 @@ class TestAgentClient:
             seen_headers.append(request.headers)
             return responses.pop(0)
 
-        monkeypatch.setattr("unsloth_cli.remote.agent.urllib.request.urlopen", fake_urlopen)
-        monkeypatch.setattr("unsloth_cli.remote.agent._SSE_RECONNECT_DELAY", 0)
+        monkeypatch.setattr("unsloth_cli.remote.ssh.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr("unsloth_cli.remote.ssh._SSE_RECONNECT_DELAY", 0)
         events = list(self._client().stream_progress())
         assert [e.event for e in events] == ["progress", "complete"]
         # Second connection resumed from the last seen event id.
@@ -253,8 +256,8 @@ class TestAgentClient:
         def fake_urlopen(request, timeout = None):
             raise urllib.error.URLError("down")
 
-        monkeypatch.setattr("unsloth_cli.remote.agent.urllib.request.urlopen", fake_urlopen)
-        monkeypatch.setattr("unsloth_cli.remote.agent._SSE_RECONNECT_DELAY", 0)
+        monkeypatch.setattr("unsloth_cli.remote.ssh.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr("unsloth_cli.remote.ssh._SSE_RECONNECT_DELAY", 0)
         with pytest.raises(RemoteError, match = "could not reconnect") as exc:
             list(self._client().stream_progress(max_reconnects = 2))
         assert "keeps running" in exc.value.hint

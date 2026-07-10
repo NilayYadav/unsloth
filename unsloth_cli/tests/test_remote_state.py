@@ -17,8 +17,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from unsloth_cli.remote import RemoteError, looks_like_job_id
-from unsloth_cli.remote.jobs import JobRecord, list_jobs, load_job, resolve_job, save_job
-from unsloth_cli.remote.registry import (
+from unsloth_cli.remote.state import JobRecord, list_jobs, load_job, resolve_job, save_job
+from unsloth_cli.remote.state import (
     ADAPTER_SUBDIR,
     get_artifact,
     job_registry_dir,
@@ -132,7 +132,7 @@ class TestJobRecords:
         save_job(JobRecord(job_id = "job_20260706_120000_deadbeef", remote = "gpu1"))
         bad = load_job("job_20260706_120000_deadbeef")  # ensure dir exists
         assert bad is not None
-        from unsloth_cli.remote.jobs import jobs_dir
+        from unsloth_cli.remote.state import jobs_dir
         (jobs_dir() / "job_corrupt.json").write_text("{not json", encoding = "utf-8")
         assert [r.job_id for r in list_jobs()] == ["job_20260706_120000_deadbeef"]
 

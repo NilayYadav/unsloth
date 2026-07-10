@@ -20,9 +20,9 @@ if str(_REPO_ROOT) not in sys.path:
 import unsloth_cli.remote.run_remote as runmod
 from unsloth_cli.config import Config
 from unsloth_cli.remote import RemoteError
-from unsloth_cli.remote.agent import RemoteBusyError
-from unsloth_cli.remote.jobs import load_job
-from unsloth_cli.remote.registry import get_artifact
+from unsloth_cli.remote.ssh import RemoteBusyError
+from unsloth_cli.remote.state import load_job
+from unsloth_cli.remote.state import get_artifact
 from unsloth_cli.remote.run_remote import run_remote_training
 from unsloth_cli.remote.state import RemoteCapabilities, RemoteRecord
 

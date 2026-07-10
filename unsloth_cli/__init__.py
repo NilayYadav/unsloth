@@ -18,8 +18,7 @@ from unsloth_cli.commands.studio import (
     studio_app,
     _expand_attached_np_short,
 )
-from unsloth_cli.commands.remote import remote_app
-from unsloth_cli.commands.jobs import jobs, logs, cancel, resume, pull
+from unsloth_cli.commands.remote import cancel, jobs, logs, pull, remote_app, resume
 
 
 # Canonicalise `-np<N>` only under the `unsloth` console-script;

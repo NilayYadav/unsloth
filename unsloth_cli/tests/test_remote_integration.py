@@ -26,7 +26,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from unsloth_cli.remote import RemoteError
-from unsloth_cli.remote.agent import AgentClient
+from unsloth_cli.remote.ssh import AgentClient
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("UNSLOTH_REMOTE_IT") != "1",

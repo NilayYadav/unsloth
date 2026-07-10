@@ -74,10 +74,9 @@ def inference(
     if not verbose:
         configure_quiet_logging()
 
-<<<<<<< HEAD
     # Job ids from remote training resolve to their locally pulled adapter.
     from unsloth_cli.remote import RemoteError
-    from unsloth_cli.remote.registry import resolve_model_identifier
+    from unsloth_cli.remote.state import resolve_model_identifier
 
     try:
         model = resolve_model_identifier(model)
@@ -87,9 +86,6 @@ def inference(
             typer.echo(f"Hint: {e.hint}", err = True)
         raise typer.Exit(code = 1)
 
-    # A running Studio server keeps the model warm between runs, which is
-    # exactly what a one-shot command wants.
-=======
     is_mlx_distributed, rank, _world_size = mlx_distributed_info()
     if is_mlx_distributed and mlx_distributed_uses_mpi():
         if rank == 0:
@@ -104,7 +100,6 @@ def inference(
     # A running Studio server keeps the model warm between runs. Under
     # mlx.launch, every rank must enter the local MLX path instead of rank 0
     # alone talking to a server.
->>>>>>> b5aef63c03a1927ebec6d0e662b6c95c1a41d9ae
     load_opts = dict(
         hf_token = hf_token,
         max_seq_length = max_seq_length,
