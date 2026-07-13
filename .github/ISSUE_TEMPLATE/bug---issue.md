@@ -7,6 +7,7 @@ assignees: ''
 
 ---
 Note: Please do not remove the questions. Answer beside them.
+0. Run `unsloth doctor --report` and paste the output here (answers 1, 3 and 5 for you)
 1. Did you update? `pip install --upgrade unsloth unsloth_zoo`
 2. `Colab` or `Kaggle` or local / cloud
 3. Number GPUs used, use `nvidia-smi`

@@ -11,6 +11,7 @@ from importlib.metadata import version as package_version, PackageNotFoundError
 from unsloth_cli.commands.train import train
 from unsloth_cli.commands.inference import inference
 from unsloth_cli.commands.chat import chat
+from unsloth_cli.commands.doctor import doctor
 from unsloth_cli.commands.start import start_app
 from unsloth_cli.commands.export import export, list_checkpoints
 from unsloth_cli.commands.studio import (
@@ -75,6 +76,7 @@ def main(
 app.command()(train)
 app.command()(inference)
 app.command()(chat)
+app.command()(doctor)
 app.command()(export)
 app.command("list-checkpoints")(list_checkpoints)
 app.add_typer(studio_app, name = "studio", help = "Unsloth Studio commands.")
