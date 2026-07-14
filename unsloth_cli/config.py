@@ -9,55 +9,97 @@ from pydantic import BaseModel, Field
 
 
 class DataConfig(BaseModel):
-    dataset: Optional[str] = None
-    local_dataset: Optional[List[str]] = None
-    format_type: Literal["auto", "alpaca", "chatml", "sharegpt"] = "auto"
+    dataset: Optional[str] = Field(default = None, description = "Hugging Face dataset name.")
+    local_dataset: Optional[List[str]] = Field(
+        default = None,
+        description = "Local dataset file or directory; repeat the option for multiple paths.",
+    )
+    format_type: Literal["auto", "alpaca", "chatml", "sharegpt"] = Field(
+        default = "auto", description = "Dataset prompt format."
+    )
 
 
 class TrainingConfig(BaseModel):
-    training_type: Literal["lora", "full"] = "lora"
-    max_seq_length: int = 2048
-    load_in_4bit: bool = True
-    output_dir: Path = Path("./outputs")
-    num_epochs: int = 3
-    learning_rate: float = 2e-4
-    batch_size: int = 2
-    gradient_accumulation_steps: int = 4
-    warmup_steps: int = 5
-    max_steps: int = 0
-    save_steps: int = 0
-    weight_decay: float = 0.01
-    random_seed: int = 3407
-    packing: bool = False
-    train_on_completions: bool = False
-    gradient_checkpointing: Literal["unsloth", "true", "none"] = "unsloth"
+    training_type: Literal["lora", "full"] = Field(
+        default = "lora", description = "Fine-tuning method."
+    )
+    max_seq_length: int = Field(default = 2048, description = "Maximum sequence length in tokens.")
+    load_in_4bit: bool = Field(default = True, description = "Load the model in 4-bit precision.")
+    output_dir: Path = Field(
+        default = Path("./outputs"), description = "Directory for checkpoints and logs."
+    )
+    num_epochs: int = Field(
+        default = 3, description = "Number of passes over the training dataset."
+    )
+    learning_rate: float = Field(default = 2e-4, description = "Optimizer learning rate.")
+    batch_size: int = Field(default = 2, description = "Training examples per device batch.")
+    gradient_accumulation_steps: int = Field(
+        default = 4, description = "Batches to accumulate before each optimizer step."
+    )
+    warmup_steps: int = Field(default = 5, description = "Learning-rate warmup steps.")
+    max_steps: int = Field(default = 0, description = "Maximum optimizer steps; 0 uses num_epochs.")
+    save_steps: int = Field(
+        default = 0, description = "Save a checkpoint every N steps; 0 disables periodic saves."
+    )
+    weight_decay: float = Field(default = 0.01, description = "Optimizer weight decay.")
+    random_seed: int = Field(default = 3407, description = "Random seed for reproducible training.")
+    packing: bool = Field(
+        default = False, description = "Pack multiple short examples into each sequence."
+    )
+    train_on_completions: bool = Field(
+        default = False, description = "Train only on assistant completions in chat datasets."
+    )
+    gradient_checkpointing: Literal["unsloth", "true", "none"] = Field(
+        default = "unsloth", description = "Gradient checkpointing mode."
+    )
 
 
 class LoraConfig(BaseModel):
-    lora_r: int = 64
-    lora_alpha: int = 16
-    lora_dropout: float = 0.0
-    target_modules: str = "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
-    vision_all_linear: bool = False
-    use_rslora: bool = False
-    use_loftq: bool = False
-    finetune_vision_layers: bool = True
-    finetune_language_layers: bool = True
-    finetune_attention_modules: bool = True
-    finetune_mlp_modules: bool = True
+    lora_r: int = Field(default = 64, description = "LoRA rank.")
+    lora_alpha: int = Field(default = 16, description = "LoRA scaling factor.")
+    lora_dropout: float = Field(default = 0.0, description = "Dropout applied to LoRA layers.")
+    target_modules: str = Field(
+        default = "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+        description = "Comma-separated model modules to adapt with LoRA.",
+    )
+    vision_all_linear: bool = Field(
+        default = False, description = "Adapt all linear layers in vision models."
+    )
+    use_rslora: bool = Field(default = False, description = "Use rank-stabilized LoRA.")
+    use_loftq: bool = Field(default = False, description = "Initialize LoRA weights with LoftQ.")
+    finetune_vision_layers: bool = Field(
+        default = True, description = "Fine-tune vision encoder layers."
+    )
+    finetune_language_layers: bool = Field(
+        default = True, description = "Fine-tune language-model layers."
+    )
+    finetune_attention_modules: bool = Field(
+        default = True, description = "Fine-tune attention modules."
+    )
+    finetune_mlp_modules: bool = Field(default = True, description = "Fine-tune MLP modules.")
 
 
 class LoggingConfig(BaseModel):
-    enable_wandb: bool = False
-    wandb_project: str = "unsloth-training"
-    wandb_token: Optional[str] = None
-    enable_tensorboard: bool = False
-    tensorboard_dir: str = "runs"
-    hf_token: Optional[str] = None
+    enable_wandb: bool = Field(
+        default = False, description = "Log training metrics to Weights & Biases."
+    )
+    wandb_project: str = Field(
+        default = "unsloth-training", description = "Weights & Biases project name."
+    )
+    wandb_token: Optional[str] = Field(default = None, description = "Weights & Biases API key.")
+    enable_tensorboard: bool = Field(
+        default = False, description = "Log training metrics to TensorBoard."
+    )
+    tensorboard_dir: str = Field(default = "runs", description = "Directory for TensorBoard logs.")
+    hf_token: Optional[str] = Field(
+        default = None, description = "Hugging Face token for private models or datasets."
+    )
 
 
 class Config(BaseModel):
-    model: Optional[str] = None
+    model: Optional[str] = Field(
+        default = None, description = "Base model name or local path to fine-tune."
+    )
     data: DataConfig = Field(default_factory = DataConfig)
     training: TrainingConfig = Field(default_factory = TrainingConfig)
     lora: LoraConfig = Field(default_factory = LoraConfig)

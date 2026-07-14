@@ -725,8 +725,8 @@ def studio_default(
         False,
         "--secure/--no-secure",
         help = "Expose ONLY a Cloudflare HTTPS link: bind localhost and fail closed "
-        "if the tunnel can't start. Without it, --no-secure also serves the raw "
-        "0.0.0.0 port, which is reachable from anywhere on the network.",
+        "if the tunnel can't start. Without it, a wildcard host (0.0.0.0 or ::) "
+        "also exposes the raw port on the local network.",
     ),
     not_secure: bool = typer.Option(
         False,
@@ -1103,7 +1103,7 @@ def run(
         help = (
             "llama-server parallel decode slots. N requests share one "
             "loaded model; each slot gets ctx/N KV cache. Default "
-            f"{_PARALLEL_DEFAULT_RUN} (pre-PR hardcoded value)."
+            f"{_PARALLEL_DEFAULT_RUN}."
         ),
     ),
     cloudflare: bool = typer.Option(
@@ -1118,8 +1118,8 @@ def run(
         False,
         "--secure/--no-secure",
         help = "Expose ONLY a Cloudflare HTTPS link: bind localhost and fail closed "
-        "if the tunnel can't start. Without it, --no-secure also serves the raw "
-        "0.0.0.0 port, which is reachable from anywhere on the network.",
+        "if the tunnel can't start. Without it, a wildcard host (0.0.0.0 or ::) "
+        "also exposes the raw port on the local network.",
     ),
     not_secure: bool = typer.Option(
         False,
@@ -1143,8 +1143,7 @@ def run(
     rejects managed flags with HTTP 400: model identity, network
     (--host/--port/--path/--api-prefix/--reuse-port), auth/TLS
     (--api-key/--ssl-*), single-model UI (--ui/--models-*/--webui),
-    and parallel slots (use --parallel above). Full denylist in
-    studio/backend/core/inference/llama_server_args.py. Other knobs
+    and parallel slots (use --parallel above). Other knobs
     (-c, -ngl, --jinja, --flash-attn, -t, ...) pass through and
     last-wins-override Studio's auto-set value.
 
