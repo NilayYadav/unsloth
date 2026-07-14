@@ -11,16 +11,18 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError, requires
+from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from typing import Optional
 
 import typer
 
-CORE_PACKAGES = ["torch", "triton", "xformers", "bitsandbytes", "transformers", "trl", "peft", "unsloth_zoo"]
-OPTIONAL_PACKAGES = ["vllm", "mlx", "mlx-lm"]
-APPLE_OPTIONAL = {"torch", "triton", "xformers", "bitsandbytes"}
-IMPORT_TIMEOUT = 180
+CORE_PACKAGES = ["transformers", "trl", "peft"]
+GPU_PACKAGES = ["triton", "bitsandbytes", "xformers"]
+EXTRA_PACKAGES = ["vllm", "mlx", "mlx-lm"]
+IMPORT_TIMEOUT = 90
+INSTALL_DOCS = "https://unsloth.ai/docs/get-started/install"
+UPGRADE = "pip install --upgrade unsloth unsloth_zoo"
 
 _MARKS = {
     "ok": ("✓", typer.colors.GREEN),
@@ -32,7 +34,7 @@ _MARKS = {
 
 @dataclass
 class Row:
-    status: str  # ok | warn | fail | info | header
+    status: str  # ok | warn | fail | info
     text: str
     fix: Optional[str] = None
 
@@ -113,6 +115,8 @@ def _torch_probe() -> Optional[dict]:
         "d = {'version': torch.__version__, 'cuda': torch.version.cuda,"
         " 'hip': getattr(torch.version, 'hip', None),"
         " 'available': torch.cuda.is_available()}\n"
+        "xpu = getattr(torch, 'xpu', None)\n"
+        "d['xpu'] = bool(xpu and xpu.is_available())\n"
         "d['mps'] = bool(getattr(torch.backends, 'mps', None) and torch.backends.mps.is_available())\n"
         "print(json.dumps(d))"
     )
@@ -123,6 +127,11 @@ def _torch_probe() -> Optional[dict]:
         return json.loads(out.strip().splitlines()[-1])
     except Exception:
         return None
+
+
+def _mlx_probe() -> bool:
+    code = "from unsloth_zoo.mlx import is_mlx_available; raise SystemExit(not is_mlx_available())"
+    return _run([sys.executable, "-c", code]) is not None
 
 
 def _import_probe() -> tuple[bool, str]:
@@ -139,99 +148,8 @@ def _import_probe() -> tuple[bool, str]:
         return False, str(e)
     if out.returncode == 0:
         return True, ""
-    return False, out.stderr.strip()
-
-
-_KNOWN_ERRORS = [
-    ("No module named 'unsloth'", "unsloth is not installed in this environment", "pip install unsloth"),
-    ("LLVM ERROR", "Triton kernel compilation failed — torch/triton/GPU mismatch", None),
-    ("PassManager::run failed", "Triton kernel compilation failed — torch/triton/GPU mismatch", None),
-    ("CUDA Setup failed", "bitsandbytes could not find CUDA libraries", "pip install --force-reinstall bitsandbytes"),
-    ("undefined symbol", "a package was built against a different torch — reinstall matching wheels", None),
-    ("libcuda", "CUDA driver library not found — check the NVIDIA driver install", None),
-    ("only works on NVIDIA, AMD and Intel", "no supported GPU detected by torch", None),
-]
-
-
-def _classify_import_error(stderr: str) -> tuple[str, Optional[str]]:
-    for needle, message, fix in _KNOWN_ERRORS:
-        if needle in stderr:
-            return message, fix
-    tail = stderr.strip().splitlines()[-1] if stderr.strip() else "unknown error"
-    return tail[:200], None
-
-
-# Mirrors the torch/CUDA table in unsloth/_auto_install.py
-def _install_extra(torch_version: str, cuda: Optional[str]) -> Optional[str]:
-    from packaging.version import Version as V
-
-    if not cuda or cuda == "None":
-        return None
-    cuda = str(cuda)
-    if cuda not in ("11.8", "12.1", "12.4", "12.6", "12.8", "13.0"):
-        return None
-    match = re.match(r"[0-9.]{3,}", torch_version)
-    if not match:
-        return None
-    v = V(match.group(0))
-    if v <= V("2.1.0"):
-        return None
-    table = [
-        ("2.1.1", "torch211", "le"), ("2.1.2", "torch212", "le"), ("2.3.0", "torch220", "lt"),
-        ("2.4.0", "torch230", "lt"), ("2.5.0", "torch240", "lt"), ("2.5.1", "torch250", "lt"),
-        ("2.5.1", "torch251", "le"), ("2.7.0", "torch260", "lt"), ("2.7.9", "torch270", "lt"),
-        ("2.8.0", "torch271", "lt"), ("2.8.9", "torch280", "lt"), ("2.9.1", "torch290", "lt"),
-        ("2.9.2", "torch291", "lt"), ("2.10.1", "torch2100", "lt"),
-    ]
-    tag = None
-    for bound, name, op in table:
-        if (op == "le" and v <= V(bound)) or (op == "lt" and v < V(bound)):
-            tag = name
-            break
-    if tag is None:
-        return None
-    if v > V("2.6.9") and cuda not in ("11.8", "12.6", "12.8", "13.0"):
-        return None
-    if v >= V("2.10.0") and cuda not in ("12.6", "12.8", "13.0"):
-        return None
-    return f"cu{cuda.replace('.', '')}-{tag}"
-
-
-def _best_cuda_for_driver(driver_cuda: str) -> Optional[str]:
-    try:
-        dc = tuple(int(x) for x in driver_cuda.split("."))
-    except Exception:
-        return None
-    supported = ["11.8", "12.1", "12.4", "12.6", "12.8", "13.0"]
-    best = None
-    for cuda in supported:
-        if tuple(int(x) for x in cuda.split(".")) <= dc:
-            best = cuda
-    return best
-
-
-def _torch_pin_ok(package: str, torch_version: str) -> Optional[bool]:
-    from packaging.requirements import Requirement
-    from packaging.version import Version as V
-
-    try:
-        base = re.match(r"[0-9.]{3,}", torch_version)
-        if not base:
-            return None
-        installed = V(base.group(0))
-        for line in requires(package) or []:
-            try:
-                req = Requirement(line)
-            except Exception:
-                continue
-            if req.name.lower() != "torch" or not req.specifier:
-                continue
-            if req.marker is not None and not req.marker.evaluate():
-                continue
-            return req.specifier.contains(str(installed), prereleases = True)
-    except Exception:
-        return None
-    return None
+    lines = [l for l in out.stderr.strip().splitlines() if l.strip()]
+    return False, lines[-1][:200] if lines else "unknown error"
 
 
 def _cuda_newer_than_driver(torch_cuda: str, driver_cuda: str) -> bool:
@@ -248,94 +166,118 @@ def _collect() -> list[Row]:
 
     unsloth_v = _pkg("unsloth")
     zoo_v = _pkg("unsloth_zoo")
-    latest = _latest_pypi("unsloth") if unsloth_v else None
     head = f"unsloth {unsloth_v or 'not installed'}"
     if zoo_v:
         head += f" · unsloth_zoo {zoo_v}"
-    if latest and unsloth_v and latest != unsloth_v:
-        rows.append(Row("warn", f"{head} ({latest} available)", "pip install --upgrade unsloth unsloth_zoo"))
-    elif unsloth_v:
-        rows.append(Row("ok", head + (" (latest)" if latest else "")))
-    else:
+    if not unsloth_v:
         rows.append(Row("fail", head, "pip install unsloth"))
+    else:
+        latest = _latest_pypi("unsloth")
+        if latest and latest != unsloth_v:
+            rows.append(Row("warn", f"{head} — {latest} is available", UPGRADE))
+        else:
+            rows.append(Row("ok", head + (" (latest)" if latest else "")))
 
     os_name = f"macOS {platform.mac_ver()[0]}" if sys.platform == "darwin" else f"{platform.system()} {platform.release()}"
     venv = " (venv)" if sys.prefix != sys.base_prefix else ""
-    rows.append(Row("info", f"System: {os_name} {platform.machine()} · Python {platform.python_version()}{venv} · {_env_kind()}"))
+    rows.append(Row("info", f"{os_name} {platform.machine()} · Python {platform.python_version()}{venv} · {_env_kind()}"))
 
     gpu = _gpu_info()
     torch_info = _torch_probe()
-    if gpu["gpus"]:
+    mlx_ready = _mlx_probe() if gpu["kind"] == "apple" else False
+
+    if gpu["kind"] == "apple":
+        g = gpu["gpus"][0]
+        if mlx_ready:
+            rows.append(Row("ok", f"GPU: {g['name']} · {g['memory']} · MLX available"))
+        else:
+            rows.append(Row("fail", f"GPU: {g['name']} · {g['memory']} · Unsloth's MLX backend is unavailable", "pip install --upgrade mlx unsloth_zoo"))
+    elif gpu["kind"] == "nvidia" and gpu["gpus"]:
         for g in gpu["gpus"]:
             desc = f"GPU: {g['name']} · {g['memory']}"
             if gpu["driver"]:
                 desc += f" · driver {gpu['driver']}"
-                if gpu["driver_cuda"]:
-                    desc += f" (CUDA ≤ {gpu['driver_cuda']})"
-            rows.append(Row("ok", desc))
+            if gpu["driver_cuda"]:
+                desc += f" (CUDA ≤ {gpu['driver_cuda']})"
+            if torch_info and torch_info.get("available"):
+                rows.append(Row("ok", desc))
+            else:
+                rows.append(Row("fail", desc + " · PyTorch cannot see it", f"Install a CUDA-enabled torch build: {INSTALL_DOCS}"))
     elif gpu["kind"] == "amd":
-        rows.append(Row("ok", "GPU: AMD (rocm-smi found)"))
+        if torch_info and torch_info.get("available") and torch_info.get("hip"):
+            rows.append(Row("ok", "GPU: AMD (ROCm available in PyTorch)"))
+        else:
+            rows.append(Row("fail", "GPU: AMD detected but PyTorch ROCm unavailable", f"Install a ROCm-enabled torch build: {INSTALL_DOCS}"))
     elif torch_info and torch_info.get("available"):
         rows.append(Row("ok", "GPU: detected via torch"))
+    elif torch_info and torch_info.get("xpu"):
+        rows.append(Row("ok", "GPU: Intel XPU available in PyTorch"))
     else:
         rows.append(Row("fail", "GPU: none detected — Unsloth needs an NVIDIA/AMD/Intel GPU or Apple Silicon"))
 
-    rows.append(Row("header", "Packages"))
     torch_v = torch_info["version"] if torch_info else _pkg("torch")
     torch_cuda = torch_info.get("cuda") if torch_info else None
     if torch_cuda == "None":
         torch_cuda = None
-    fix_extra = _install_extra(torch_v, torch_cuda) if torch_v else None
-    if fix_extra is None and torch_v and gpu["driver_cuda"]:
-        best = _best_cuda_for_driver(gpu["driver_cuda"])
-        fix_extra = _install_extra(torch_v, best) if best else None
-    reinstall = f'pip install --force-reinstall "unsloth[{fix_extra}]"' if fix_extra else None
 
     if torch_v:
-        if torch_cuda:
-            backend = f"cu{torch_cuda}"
-        elif torch_info and torch_info.get("hip"):
-            backend = "rocm"
-        elif torch_info and torch_info.get("mps"):
-            backend = "mps"
-        else:
-            backend = "cpu"
         if torch_cuda and gpu["driver_cuda"] and _cuda_newer_than_driver(torch_cuda, gpu["driver_cuda"]):
-            best = _best_cuda_for_driver(gpu["driver_cuda"])
-            driver_extra = _install_extra(torch_v, best) if best else None
-            driver_fix = f'pip install --force-reinstall "unsloth[{driver_extra}]"' if driver_extra else reinstall
-            rows.append(Row("fail", f"torch {torch_v} — built for CUDA {torch_cuda} but driver supports ≤ {gpu['driver_cuda']}", driver_fix))
+            rows.append(Row(
+                "fail",
+                f"torch {torch_v} — built for CUDA {torch_cuda} but driver supports ≤ {gpu['driver_cuda']}",
+                f"Reinstall torch built for CUDA ≤ {gpu['driver_cuda']}: {INSTALL_DOCS}",
+            ))
         else:
+            if torch_cuda:
+                backend = f"cu{torch_cuda}"
+            elif torch_info and torch_info.get("hip"):
+                backend = f"rocm {torch_info['hip']}"
+            elif torch_info and torch_info.get("mps"):
+                backend = "mps"
+            elif torch_info and torch_info.get("xpu"):
+                backend = "xpu"
+            else:
+                backend = "cpu"
             rows.append(Row("ok", f"torch {torch_v} ({backend})"))
     elif gpu["kind"] == "apple":
-        rows.append(Row("info", "torch not installed (optional with MLX)"))
+        rows.append(Row("info", "torch not installed (not required with MLX)"))
     else:
         rows.append(Row("fail", "torch not installed", "pip install torch"))
 
-    for name in CORE_PACKAGES[1:] + OPTIONAL_PACKAGES:
-        v = _pkg(name)
-        if v is None:
-            if name in OPTIONAL_PACKAGES:
-                continue
-            optional = gpu["kind"] == "apple" and name in APPLE_OPTIONAL or name == "triton"
-            rows.append(Row("info" if optional else "warn", f"{name} not installed"))
-            continue
-        pin_ok = _torch_pin_ok(name, torch_v) if torch_v else None
-        if pin_ok is False:
-            rows.append(Row("fail", f"{name} {v} — built for a different torch (yours is {torch_v})", reinstall))
-        else:
-            rows.append(Row("ok", f"{name} {v}"))
+    missing: list[str] = []
 
-    rows.append(Row("header", "Import"))
+    def versions(names: list[str], required: bool) -> str:
+        parts = []
+        for name in names:
+            v = _pkg(name)
+            if v:
+                parts.append(f"{name} {v}")
+            elif required:
+                missing.append(name)
+        return " · ".join(parts)
+
+    for line in (
+        versions(CORE_PACKAGES, required = True),
+        versions(GPU_PACKAGES, required = gpu["kind"] == "nvidia"),
+        versions(EXTRA_PACKAGES, required = False),
+    ):
+        if line:
+            rows.append(Row("info", line))
+    for name in missing:
+        rows.append(Row("warn", f"{name} not installed"))
+
+    for name in ("CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES"):
+        value = os.environ.get(name)
+        if value is not None:
+            rows.append(Row("info", f"{name}={value[:200]}"))
+
     if unsloth_v:
-        ok, stderr = _import_probe()
+        typer.secho("… testing `import unsloth` (can take a minute)", dim = True, err = True)
+        ok, err = _import_probe()
         if ok:
-            rows.append(Row("ok", "`import unsloth` succeeded"))
+            rows.append(Row("ok", "`import unsloth` OK"))
         else:
-            message, fix = _classify_import_error(stderr)
-            rows.append(Row("fail", f"`import unsloth` failed: {message}", fix or reinstall))
-    else:
-        rows.append(Row("info", "import check skipped (unsloth not installed)"))
+            rows.append(Row("fail", f"`import unsloth` failed: {err}", UPGRADE))
 
     return rows
 
@@ -344,9 +286,6 @@ def _render_terminal(rows: list[Row]) -> None:
     typer.secho("Unsloth Doctor 🦥", bold = True)
     typer.echo()
     for row in rows:
-        if row.status == "header":
-            typer.secho(row.text, bold = True)
-            continue
         mark, color = _MARKS[row.status]
         typer.echo("  ", nl = False)
         typer.secho(mark, fg = color, nl = False)
@@ -374,17 +313,14 @@ def _render_report(rows: list[Row]) -> None:
     typer.echo("### Unsloth `doctor` report\n")
     typer.echo("```text")
     for row in rows:
-        if row.status == "header":
-            typer.echo(row.text)
-        else:
-            typer.echo(f"  {plain[row.status]} {row.text}")
+        typer.echo(f"{plain[row.status]} {row.text}")
     typer.echo("```")
 
 
 def doctor(
     report: bool = typer.Option(False, "--report", help = "Print a markdown block to paste into GitHub issues."),
 ):
-    """Diagnose your Unsloth installation and environment."""
+    """Check your Unsloth install and print the environment info needed for bug reports."""
     rows = _collect()
     if report:
         _render_report(rows)

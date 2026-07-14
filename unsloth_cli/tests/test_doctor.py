@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
-"""Tests for `unsloth doctor` — no network, no real subprocesses."""
-
 from __future__ import annotations
 
 import sys
@@ -43,15 +41,15 @@ NVIDIA_GPU = {
 }
 
 
-def _patch_env(monkeypatch, pkgs = HEALTHY_PKGS, gpu = NVIDIA_GPU, torch_info = None, import_ok = True, import_err = ""):
+def _patch_env(monkeypatch, pkgs = HEALTHY_PKGS, gpu = NVIDIA_GPU, torch_info = None, mlx_ready = False, import_ok = True, import_err = "", latest = None):
     if torch_info is None:
-        torch_info = {"version": pkgs.get("torch"), "cuda": "12.6", "hip": None, "available": True, "mps": False}
+        torch_info = {"version": pkgs.get("torch"), "cuda": "12.6", "hip": None, "available": True, "mps": False, "xpu": False}
     monkeypatch.setattr(doctor, "_pkg", lambda name: pkgs.get(name))
-    monkeypatch.setattr(doctor, "_latest_pypi", lambda name: None)
+    monkeypatch.setattr(doctor, "_latest_pypi", lambda name: latest)
     monkeypatch.setattr(doctor, "_gpu_info", lambda: dict(gpu))
     monkeypatch.setattr(doctor, "_torch_probe", lambda: torch_info)
+    monkeypatch.setattr(doctor, "_mlx_probe", lambda: mlx_ready)
     monkeypatch.setattr(doctor, "_import_probe", lambda: (import_ok, import_err))
-    monkeypatch.setattr(doctor, "_torch_pin_ok", lambda package, torch_version: True)
 
 
 def test_healthy_env_exits_zero(monkeypatch):
@@ -59,23 +57,25 @@ def test_healthy_env_exits_zero(monkeypatch):
     result = runner.invoke(app)
     assert result.exit_code == 0, result.output
     assert "No issues found." in result.output
-    assert "torch 2.9.0+cu126" in result.output
+    assert "torch 2.9.0+cu126 (cu12.6)" in result.output
+    assert "transformers 4.56.2" in result.output
+    assert "`import unsloth` OK" in result.output
 
 
-def test_cuda_newer_than_driver_fails_with_fix(monkeypatch):
-    torch_info = {"version": "2.9.0+cu130", "cuda": "13.0", "hip": None, "available": True, "mps": False}
+def test_cuda_newer_than_driver_fails(monkeypatch):
+    torch_info = {"version": "2.9.0+cu130", "cuda": "13.0", "hip": None, "available": True, "mps": False, "xpu": False}
     _patch_env(monkeypatch, torch_info = torch_info)
     result = runner.invoke(app)
     assert result.exit_code == 1
     assert "built for CUDA 13.0 but driver supports ≤ 12.6" in result.output
-    assert 'unsloth[cu126-torch290]' in result.output
 
 
-def test_import_failure_classified(monkeypatch):
-    _patch_env(monkeypatch, import_ok = False, import_err = "blah\nLLVM ERROR: Cannot select: intrinsic")
+def test_nvidia_gpu_without_torch_cuda_fails(monkeypatch):
+    torch_info = {"version": "2.9.0+cu126", "cuda": "12.6", "hip": None, "available": False, "mps": False, "xpu": False}
+    _patch_env(monkeypatch, torch_info = torch_info)
     result = runner.invoke(app)
     assert result.exit_code == 1
-    assert "Triton kernel compilation failed" in result.output
+    assert "PyTorch cannot see it" in result.output
 
 
 def test_report_mode_prints_fenced_block(monkeypatch):
@@ -84,61 +84,72 @@ def test_report_mode_prints_fenced_block(monkeypatch):
     assert result.exit_code == 0
     assert "### Unsloth `doctor` report" in result.output
     assert "```text" in result.output
-    assert "[ok] torch 2.9.0+cu126" in result.output
+    assert "[ok] torch 2.9.0+cu126 (cu12.6)" in result.output
 
 
-def test_missing_unsloth_fails(monkeypatch):
+def test_import_failure_shows_error_tail(monkeypatch):
+    _patch_env(monkeypatch, import_ok = False, import_err = "RuntimeError: Found no NVIDIA driver on your system.")
+    result = runner.invoke(app)
+    assert result.exit_code == 1
+    assert "`import unsloth` failed: RuntimeError: Found no NVIDIA driver" in result.output
+
+
+def test_update_available_warns(monkeypatch):
+    _patch_env(monkeypatch, latest = "2026.8.0")
+    result = runner.invoke(app)
+    assert result.exit_code == 0
+    assert "2026.8.0 is available" in result.output
+    assert "pip install --upgrade unsloth unsloth_zoo" in result.output
+
+
+def test_missing_unsloth_fails_and_skips_import(monkeypatch):
     pkgs = {k: v for k, v in HEALTHY_PKGS.items() if k != "unsloth"}
     _patch_env(monkeypatch, pkgs = pkgs)
+    monkeypatch.setattr(doctor, "_import_probe", lambda: pytest.fail("unexpected import check"))
     result = runner.invoke(app)
     assert result.exit_code == 1
     assert "pip install unsloth" in result.output
 
 
-@pytest.mark.parametrize(
-    "torch_version, cuda, expected",
-    [
-        ("2.9.0", "12.4", None),
-        ("2.9.0+cu126", "12.6", "cu126-torch290"),
-        ("2.5.0", "12.4", "cu124-torch250"),
-        ("2.6.0", "12.4", "cu124-torch260"),
-        ("2.10.0", "12.8", "cu128-torch2100"),
-        ("2.10.0", "12.4", None),
-        ("2.1.0", "12.1", None),
-        ("2.9.0", "10.2", None),
-        ("2.9.0", None, None),
-    ],
-)
-def test_install_extra_mapping(torch_version, cuda, expected):
-    assert doctor._install_extra(torch_version, cuda) == expected
+def test_missing_gpu_package_warns(monkeypatch):
+    pkgs = {k: v for k, v in HEALTHY_PKGS.items() if k != "bitsandbytes"}
+    _patch_env(monkeypatch, pkgs = pkgs)
+    result = runner.invoke(app)
+    assert result.exit_code == 0
+    assert "bitsandbytes not installed" in result.output
 
 
-@pytest.mark.parametrize(
-    "stderr, expected",
-    [
-        ("LLVM ERROR: Cannot select", "Triton kernel compilation failed — torch/triton/GPU mismatch"),
-        ("CUDA Setup failed despite GPU", "bitsandbytes could not find CUDA libraries"),
-        ("ImportError: No module named 'unsloth'", "unsloth is not installed in this environment"),
-        ("something.so: undefined symbol: xyz", "a package was built against a different torch — reinstall matching wheels"),
-    ],
-)
-def test_classify_import_error(stderr, expected):
-    message, _ = doctor._classify_import_error(stderr)
-    assert message == expected
+def test_intel_xpu_is_a_supported_backend(monkeypatch):
+    torch_info = {"version": "2.10.0+xpu", "cuda": None, "hip": None, "available": False, "mps": False, "xpu": True}
+    _patch_env(monkeypatch, gpu = {"kind": None, "gpus": [], "driver": None, "driver_cuda": None}, torch_info = torch_info)
+    result = runner.invoke(app)
+    assert result.exit_code == 0
+    assert "Intel XPU available in PyTorch" in result.output
+    assert "torch 2.10.0+xpu (xpu)" in result.output
 
 
-def test_classify_unknown_error_returns_tail():
-    message, fix = doctor._classify_import_error("line1\nRuntimeError: something odd")
-    assert message == "RuntimeError: something odd"
-    assert fix is None
+def test_apple_requires_working_mlx(monkeypatch):
+    apple_gpu = {"kind": "apple", "gpus": [{"name": "Apple M4 Max", "memory": "128 GB unified"}], "driver": None, "driver_cuda": None}
+    _patch_env(monkeypatch, gpu = apple_gpu, mlx_ready = False, torch_info = {"version": None, "cuda": None, "hip": None, "available": False, "mps": True, "xpu": False})
+    monkeypatch.setattr(doctor, "_torch_probe", lambda: None)
+    result = runner.invoke(app)
+    assert result.exit_code == 1
+    assert "MLX backend is unavailable" in result.output
+
+    _patch_env(monkeypatch, gpu = apple_gpu, mlx_ready = True)
+    monkeypatch.setattr(doctor, "_torch_probe", lambda: None)
+    monkeypatch.setattr(doctor, "_pkg", lambda name: {"unsloth": "2026.7.2", "unsloth_zoo": "2026.7.1", "mlx": "0.30.0"}.get(name))
+    result = runner.invoke(app)
+    assert result.exit_code == 0
+    assert "MLX available" in result.output
+    assert "torch not installed (not required with MLX)" in result.output
 
 
-def test_best_cuda_for_driver():
-    assert doctor._best_cuda_for_driver("12.6") == "12.6"
-    assert doctor._best_cuda_for_driver("12.9") == "12.8"
-    assert doctor._best_cuda_for_driver("13.1") == "13.0"
-    assert doctor._best_cuda_for_driver("11.0") is None
-    assert doctor._best_cuda_for_driver("garbage") is None
+def test_visible_devices_env_var_is_shown(monkeypatch):
+    _patch_env(monkeypatch)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,1")
+    result = runner.invoke(app)
+    assert "CUDA_VISIBLE_DEVICES=0,1" in result.output
 
 
 def test_cuda_newer_than_driver():
