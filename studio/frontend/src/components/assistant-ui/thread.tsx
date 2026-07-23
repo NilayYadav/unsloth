@@ -1607,6 +1607,12 @@ const Composer: FC<{
     if (!mine) {
       return;
     }
+    const composer = aui.composer();
+    if (composer.getState().text.trim().length > 0) {
+      // The user is typing something else. Leave the restore queued and its
+      // durable draft intact rather than consuming it here.
+      return;
+    }
     useChatRuntimeStore.getState().claimComposerRestore(mine);
     lastSubmitDraftKeyRef.current = null;
     // The store made the prompt durable under the submit-time key; this
@@ -1614,10 +1620,7 @@ const Composer: FC<{
     if (mine.draftKey !== draftKey) {
       writeComposerDraft(mine.draftKey, "");
     }
-    const composer = aui.composer();
-    if (composer.getState().text.trim().length === 0) {
-      composer.setText(mine.text);
-    }
+    composer.setText(mine.text);
   }, [composerRestores, draftKey, composerThreadIdKey, aui]);
   const capturePendingComposerRestore = useCallback(
     (text: string) => {
@@ -1724,12 +1727,15 @@ const Composer: FC<{
         );
       },
       append: (prompt) => {
+        // Captured here, not at queue time: the queued text can still be
+        // edited, and an earlier run may still own this thread's restore.
+        capturePendingComposerRestore(prompt);
         thread.append(appendTextToThread(prompt));
       },
       cancel: () => thread.cancelRun(),
       isIndexing: () => indexingActiveRef.current,
     };
-  }, [aui, referenceThreadId]);
+  }, [aui, referenceThreadId, capturePendingComposerRestore]);
 
   const dismissWaitToast = useCallback(() => {
     if (waitToastRef.current !== null) {
@@ -1838,7 +1844,6 @@ const Composer: FC<{
           return;
         }
         const queuedPrompt = composerText.trim();
-        capturePendingComposerRestore(queuedPrompt);
         flushResourcesSync(() => {
           aui.composer().setText("");
         });
@@ -2018,7 +2023,6 @@ const Composer: FC<{
                 if (queuedPrompt.length === 0) {
                   return;
                 }
-                capturePendingComposerRestore(queuedPrompt);
                 flushResourcesSync(() => {
                   aui.composer().setText("");
                 });
