@@ -1644,11 +1644,12 @@ const Composer: FC<{
                 ? composerThreadIdKey.split("|")
                 : [],
               text: trimmed,
+              incognito: composerIsIncognito,
             }
           : null,
       );
     },
-    [draftKey, composerThreadIdKey, referenceThreadId],
+    [draftKey, composerThreadIdKey, referenceThreadId, composerIsIncognito],
   );
   // react-textarea-autosize re-measures only on value change or window resize,
   // not on the width swap from expanding, so it keeps the taller height and

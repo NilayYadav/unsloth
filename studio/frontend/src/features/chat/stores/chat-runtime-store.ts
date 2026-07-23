@@ -81,6 +81,8 @@ export type ComposerRestore = {
   draftKey: string;
   threadIds: string[];
   text: string;
+  /** Mode of the composer that captured this, not of whoever promotes it. */
+  incognito: boolean;
 };
 
 // A run finds its own pending prompt by thread: exact key, then any composer
@@ -1973,7 +1975,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
       // Make the prompt durable before any composer claims it, so it survives
       // even when the composer that sent it is gone. Temporary chats stay in
       // memory only: the queued restore still reaches their composer.
-      if (!state.incognito) {
+      if (!record.incognito) {
         writeComposerDraft(record.draftKey, record.text);
       }
       const pendingComposerRestores = { ...state.pendingComposerRestores };
