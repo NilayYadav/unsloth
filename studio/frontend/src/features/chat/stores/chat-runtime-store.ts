@@ -934,8 +934,8 @@ type ChatRuntimeStore = {
   pendingAudioBase64: string | null;
   pendingAudioName: string | null;
   pendingImageEditReference: PendingImageEditReference | null;
-  pendingComposerRestore: { draftKey: string | null; text: string } | null;
-  composerRestore: { draftKey: string | null; text: string } | null;
+  pendingComposerRestore: { draftKey: string; text: string } | null;
+  composerRestore: { draftKey: string; text: string } | null;
   contextUsage: {
     promptTokens: number;
     completionTokens: number;
@@ -1045,7 +1045,7 @@ type ChatRuntimeStore = {
   ) => void;
   clearPendingImageEditReference: () => void;
   setPendingComposerRestore: (
-    pending: { draftKey: string | null; text: string } | null,
+    pending: { draftKey: string; text: string } | null,
   ) => void;
   promoteComposerRestore: () => void;
   clearComposerRestore: () => void;

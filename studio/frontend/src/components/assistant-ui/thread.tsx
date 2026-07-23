@@ -1577,17 +1577,20 @@ const Composer: FC<{
     return () => clearTimeout(t);
   }, [composerText, draftKey]);
   const composerRestore = useChatRuntimeStore((state) => state.composerRestore);
+  const lastSubmitDraftKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (composerRestore === null) {
       return;
     }
     useChatRuntimeStore.getState().clearComposerRestore();
-    if (composerRestore.draftKey !== draftKey) {
-      if (composerRestore.draftKey) {
-        writeComposerDraft(composerRestore.draftKey, composerRestore.text);
-      }
+    if (
+      composerRestore.draftKey !== draftKey &&
+      composerRestore.draftKey !== lastSubmitDraftKeyRef.current
+    ) {
+      writeComposerDraft(composerRestore.draftKey, composerRestore.text);
       return;
     }
+    lastSubmitDraftKeyRef.current = null;
     const composer = aui.composer();
     if (composer.getState().text.trim().length === 0) {
       composer.setText(composerRestore.text);
@@ -1841,10 +1844,12 @@ const Composer: FC<{
       }
 
       const pendingText = composerText.trim();
+      const pendingDraftKey = draftKey ?? composerDraftKey(null);
+      lastSubmitDraftKeyRef.current = pendingText ? pendingDraftKey : null;
       useChatRuntimeStore
         .getState()
         .setPendingComposerRestore(
-          pendingText ? { draftKey, text: pendingText } : null,
+          pendingText ? { draftKey: pendingDraftKey, text: pendingText } : null,
         );
     },
     [
