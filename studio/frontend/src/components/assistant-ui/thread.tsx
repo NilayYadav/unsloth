@@ -1555,6 +1555,14 @@ const Composer: FC<{
   // previous thread's composer contents.
   const draftThreadId = referenceThreadId;
   const draftKey = draftThreadId ? composerDraftKey(draftThreadId) : null;
+  // A fresh chat's draft key changes once the thread is persisted, and the
+  // welcome composer is swapped for the docked one, so restores are matched on
+  // thread identity rather than on the key alone.
+  const composerThreadIdKey = compactIds([
+    referenceThreadId,
+    threadListItemId,
+    threadListItemRemoteId,
+  ]).join("|");
   const lastDraftKeyRef = useRef(draftKey);
   useEffect(() => {
     const draft = draftKey ? (readComposerDraft(draftKey) ?? "") : "";
@@ -1583,10 +1591,13 @@ const Composer: FC<{
       return;
     }
     useChatRuntimeStore.getState().clearComposerRestore();
-    if (
-      composerRestore.draftKey !== draftKey &&
-      composerRestore.draftKey !== lastSubmitDraftKeyRef.current
-    ) {
+    const isThisComposer =
+      composerRestore.draftKey === draftKey ||
+      composerRestore.draftKey === lastSubmitDraftKeyRef.current ||
+      composerThreadIdKey
+        .split("|")
+        .some((id) => id && composerRestore.threadIds.includes(id));
+    if (!isThisComposer) {
       writeComposerDraft(composerRestore.draftKey, composerRestore.text);
       return;
     }
@@ -1595,19 +1606,25 @@ const Composer: FC<{
     if (composer.getState().text.trim().length === 0) {
       composer.setText(composerRestore.text);
     }
-  }, [composerRestore, draftKey, aui]);
+  }, [composerRestore, draftKey, composerThreadIdKey, aui]);
   const capturePendingComposerRestore = useCallback(
     (text: string) => {
       const trimmed = text.trim();
       const key = draftKey ?? composerDraftKey(null);
       lastSubmitDraftKeyRef.current = trimmed ? key : null;
-      useChatRuntimeStore
-        .getState()
-        .setPendingComposerRestore(
-          trimmed ? { draftKey: key, text: trimmed } : null,
-        );
+      useChatRuntimeStore.getState().setPendingComposerRestore(
+        trimmed
+          ? {
+              draftKey: key,
+              threadIds: composerThreadIdKey
+                ? composerThreadIdKey.split("|")
+                : [],
+              text: trimmed,
+            }
+          : null,
+      );
     },
-    [draftKey],
+    [draftKey, composerThreadIdKey],
   );
   // react-textarea-autosize re-measures only on value change or window resize,
   // not on the width swap from expanding, so it keeps the taller height and
