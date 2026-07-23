@@ -1570,6 +1570,19 @@ const Composer: FC<{
     const t = setTimeout(() => writeComposerDraft(draftKey, composerText), 300);
     return () => clearTimeout(t);
   }, [composerText, draftKey]);
+  const composerRestoreText = useChatRuntimeStore(
+    (state) => state.composerRestoreText,
+  );
+  useEffect(() => {
+    if (composerRestoreText === null) {
+      return;
+    }
+    useChatRuntimeStore.getState().clearComposerRestore();
+    const composer = aui.composer();
+    if (composer.getState().text.trim().length === 0) {
+      composer.setText(composerRestoreText);
+    }
+  }, [composerRestoreText, aui]);
   // react-textarea-autosize re-measures only on value change or window resize,
   // not on the width swap from expanding, so it keeps the taller height and
   // leaves a stray blank row. Nudge a resize whenever input width changes.

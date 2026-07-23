@@ -1219,6 +1219,20 @@ function extractImageBase64(input: string): string | undefined {
   return input;
 }
 
+function latestUserMessageText(messages: RunMessages): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || message.role !== "user") {
+      continue;
+    }
+    return (message.content ?? [])
+      .map((part) => (part.type === "text" ? part.text : ""))
+      .join("")
+      .trim();
+  }
+  return "";
+}
+
 function findLatestUserImageBase64(messages: RunMessages): string | undefined {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
@@ -2107,6 +2121,10 @@ export function createOpenAIStreamAdapter(
             },
           );
           clearSelectedImageEditReference();
+          const promptText = latestUserMessageText(messages);
+          if (promptText) {
+            useChatRuntimeStore.getState().requestComposerRestore(promptText);
+          }
           throw new Error("Load a model first.");
         }
       }

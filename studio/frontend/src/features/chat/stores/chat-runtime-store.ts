@@ -934,6 +934,7 @@ type ChatRuntimeStore = {
   pendingAudioBase64: string | null;
   pendingAudioName: string | null;
   pendingImageEditReference: PendingImageEditReference | null;
+  composerRestoreText: string | null;
   contextUsage: {
     promptTokens: number;
     completionTokens: number;
@@ -1042,6 +1043,8 @@ type ChatRuntimeStore = {
     reference: PendingImageEditReference | null,
   ) => void;
   clearPendingImageEditReference: () => void;
+  requestComposerRestore: (text: string) => void;
+  clearComposerRestore: () => void;
   setContextUsage: (usage: ChatRuntimeStore["contextUsage"]) => void;
 };
 
@@ -1364,6 +1367,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
   pendingAudioBase64: null,
   pendingAudioName: null,
   pendingImageEditReference: null,
+  composerRestoreText: null,
   contextUsage: null,
   modelLoading: false,
   loadingModelPick: null,
@@ -1923,6 +1927,8 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
     set({ pendingImageEditReference }),
   clearPendingImageEditReference: () =>
     set({ pendingImageEditReference: null }),
+  requestComposerRestore: (composerRestoreText) => set({ composerRestoreText }),
+  clearComposerRestore: () => set({ composerRestoreText: null }),
   setContextUsage: (contextUsage) => set({ contextUsage }),
 }));
 
