@@ -1971,8 +1971,11 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
       if (!hit) return {};
       const record = state.pendingComposerRestores[hit];
       // Make the prompt durable before any composer claims it, so it survives
-      // even when the composer that sent it is gone.
-      writeComposerDraft(record.draftKey, record.text);
+      // even when the composer that sent it is gone. Temporary chats stay in
+      // memory only: the queued restore still reaches their composer.
+      if (!state.incognito) {
+        writeComposerDraft(record.draftKey, record.text);
+      }
       const pendingComposerRestores = { ...state.pendingComposerRestores };
       delete pendingComposerRestores[hit];
       return {

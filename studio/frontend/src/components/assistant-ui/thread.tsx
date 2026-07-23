@@ -1565,6 +1565,7 @@ const Composer: FC<{
     threadListItemId,
     threadListItemRemoteId,
   ]).join("|");
+  const composerIsIncognito = useChatRuntimeStore((s) => s.incognito);
   const lastDraftKeyRef = useRef(draftKey);
   useEffect(() => {
     const draft = draftKey ? (readComposerDraft(draftKey) ?? "") : "";
@@ -1583,9 +1584,15 @@ const Composer: FC<{
     if (!draftKey) {
       return;
     }
+    // Temporary chats never reach disk, and the slot is wiped in case the
+    // toggle flipped on with a draft already saved under this key.
+    if (composerIsIncognito) {
+      writeComposerDraft(draftKey, "");
+      return;
+    }
     const t = setTimeout(() => writeComposerDraft(draftKey, composerText), 300);
     return () => clearTimeout(t);
-  }, [composerText, draftKey]);
+  }, [composerText, draftKey, composerIsIncognito]);
   const composerRestores = useChatRuntimeStore(
     (state) => state.composerRestores,
   );
