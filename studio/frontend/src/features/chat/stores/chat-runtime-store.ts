@@ -88,15 +88,24 @@ export type ComposerRestore = {
 // A run finds its own pending prompt by thread: exact key, then any composer
 // whose identity covered that thread. Never falls back to an unrelated entry,
 // so one chat's run cannot consume or drop another chat's prompt.
+const NEW_CHAT_RESTORE_KEY = "__new__";
+
 function findComposerRestoreKey(
   restores: Record<string, ComposerRestore>,
   key: string,
 ): string | null {
-  return (
-    Object.keys(restores).find(
-      (k) => k === key || restores[k].threadIds.includes(key),
-    ) ?? null
+  const direct = Object.keys(restores).find(
+    (k) => k === key || restores[k].threadIds.includes(key),
   );
+  if (direct) return direct;
+  // A send started from a brand-new chat is captured under the new-chat slot,
+  // but by the time the run fails the chat has a real thread id, so the direct
+  // lookup misses. Fall back to the new-chat slot ONLY (never an arbitrary
+  // entry) -- that pending prompt belongs to the run that just materialized it.
+  if (key !== NEW_CHAT_RESTORE_KEY && restores[NEW_CHAT_RESTORE_KEY]) {
+    return NEW_CHAT_RESTORE_KEY;
+  }
+  return null;
 }
 
 export type RagSource = { type: "thread" } | { type: "kb"; kbId: string };
@@ -1972,7 +1981,14 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
     set((state) => {
       const hit = findComposerRestoreKey(state.pendingComposerRestores, key);
       if (!hit) return {};
-      const record = state.pendingComposerRestores[hit];
+      const found = state.pendingComposerRestores[hit];
+      // Tag the record with the thread that actually ran, so the composer now
+      // mounted for that (possibly just-created) thread claims it by identity
+      // even though it was captured under the new-chat slot.
+      const record =
+        key && !found.threadIds.includes(key)
+          ? { ...found, threadIds: [...found.threadIds, key] }
+          : found;
       // Make the prompt durable before any composer claims it, so it survives
       // even when the composer that sent it is gone. Temporary chats stay in
       // memory only: the queued restore still reaches their composer.
