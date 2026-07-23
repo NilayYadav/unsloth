@@ -251,6 +251,8 @@ let promptQueueWaitingForTargetIdle = false;
 let promptQueueStoreUnsub: (() => void) | null = null;
 let promptQueueRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
+const NEW_CHAT_RESTORE_KEY = "__new__";
+
 function compactIds(ids: Array<string | null | undefined>) {
   return Array.from(new Set(ids.filter((id): id is string => Boolean(id))));
 }
@@ -1586,11 +1588,15 @@ const Composer: FC<{
   }, [composerText, draftKey]);
   const composerRestore = useChatRuntimeStore((state) => state.composerRestore);
   const lastSubmitDraftKeyRef = useRef<string | null>(null);
+  // Declared before the claim effect so a thread switch drops the stale key
+  // first; otherwise this composer could claim the previous thread's prompt.
+  useEffect(() => {
+    lastSubmitDraftKeyRef.current = null;
+  }, [draftKey]);
   useEffect(() => {
     if (composerRestore === null) {
       return;
     }
-    useChatRuntimeStore.getState().clearComposerRestore();
     const isThisComposer =
       composerRestore.draftKey === draftKey ||
       composerRestore.draftKey === lastSubmitDraftKeyRef.current ||
@@ -1598,10 +1604,15 @@ const Composer: FC<{
         .split("|")
         .some((id) => id && composerRestore.threadIds.includes(id));
     if (!isThisComposer) {
-      writeComposerDraft(composerRestore.draftKey, composerRestore.text);
       return;
     }
+    useChatRuntimeStore.getState().clearComposerRestore();
     lastSubmitDraftKeyRef.current = null;
+    // The store made the prompt durable under the submit-time key; this
+    // composer owns it now, so drop that copy once it is reattached here.
+    if (composerRestore.draftKey !== draftKey) {
+      writeComposerDraft(composerRestore.draftKey, "");
+    }
     const composer = aui.composer();
     if (composer.getState().text.trim().length === 0) {
       composer.setText(composerRestore.text);
@@ -1613,6 +1624,7 @@ const Composer: FC<{
       const key = draftKey ?? composerDraftKey(null);
       lastSubmitDraftKeyRef.current = trimmed ? key : null;
       useChatRuntimeStore.getState().setPendingComposerRestore(
+        referenceThreadId ?? NEW_CHAT_RESTORE_KEY,
         trimmed
           ? {
               draftKey: key,
@@ -1624,7 +1636,7 @@ const Composer: FC<{
           : null,
       );
     },
-    [draftKey, composerThreadIdKey],
+    [draftKey, composerThreadIdKey, referenceThreadId],
   );
   // react-textarea-autosize re-measures only on value change or window resize,
   // not on the width swap from expanding, so it keeps the taller height and

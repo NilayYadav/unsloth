@@ -2086,8 +2086,9 @@ export function createOpenAIStreamAdapter(
         }
       };
 
+      const runRestoreKey = resolvedThreadId ?? "__new__";
       const restorePromptToComposer = () =>
-        useChatRuntimeStore.getState().promoteComposerRestore();
+        useChatRuntimeStore.getState().promoteComposerRestore(runRestoreKey);
 
       // Wait for in-progress model load before inferring.
       if (runtime.modelLoading) {
@@ -2096,7 +2097,9 @@ export function createOpenAIStreamAdapter(
           await waitForModelReady(abortSignal);
         } catch (error) {
           clearSelectedImageEditReference();
-          useChatRuntimeStore.getState().setPendingComposerRestore(null);
+          useChatRuntimeStore
+            .getState()
+            .clearPendingComposerRestore(runRestoreKey);
           throw error;
         }
       }
@@ -2276,8 +2279,6 @@ export function createOpenAIStreamAdapter(
         throw new Error("Image generation edit unavailable.");
       }
 
-      useChatRuntimeStore.getState().setPendingComposerRestore(null);
-
       // Drop refused assistant turns + their triggering user prompt;
       // otherwise context re-triggers the classifier.
       const survivingMessages: RunMessage[] = [];
@@ -2310,6 +2311,7 @@ export function createOpenAIStreamAdapter(
             description:
               "The original image reference is missing. Generate the image again, then retry the edit.",
           });
+          restorePromptToComposer();
           throw new Error("Generated image edit reference missing.");
         }
         let insertAt = outboundMessages.length;
@@ -2496,9 +2498,13 @@ export function createOpenAIStreamAdapter(
           runtime.setThreadRunning(gatedThreadKey, true);
           runtime.setThreadRunning(gatedThreadKey, false);
           clearSelectedImageEditReference();
+          restorePromptToComposer();
           throw new Error(imageGateReason);
         }
       }
+
+      useChatRuntimeStore.getState().clearPendingComposerRestore(runRestoreKey);
+
       // Clear pending audio from store after extracting (consumed on send).
       if (audioBase64) {
         const audioName = runtime.pendingAudioName;

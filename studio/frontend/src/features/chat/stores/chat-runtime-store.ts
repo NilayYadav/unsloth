@@ -22,6 +22,7 @@ import {
   loadChatSettingsWithLegacyImport,
   savePersistedChatSettingsPatch,
 } from "../utils/chat-settings-storage";
+import { writeComposerDraft } from "../utils/composer-draft";
 import { useExternalProvidersStore } from "./external-providers-store";
 import { PLUS_MENU_PINS_STORAGE_KEY } from "./plus-menu-prefs-store";
 
@@ -75,6 +76,25 @@ export const CHAT_GPU_MEMORY_MODE_KEY = "unsloth_chat_gpu_memory_mode";
 // (mtp/mtp+ngram) and spec_draft_n_max stay session-only: a persisted MTP
 // choice would silently no-op on models without an MTP head. Unknown -> auto.
 const PERSISTED_SPEC_MODES = new Set(["auto", "ngram", "off"]);
+
+export type ComposerRestore = {
+  draftKey: string;
+  threadIds: string[];
+  text: string;
+};
+
+// A run finds its own pending prompt by thread: exact key, then any composer
+// whose identity covered that thread. The single-entry fallback keeps a lone
+// in-flight run working when its thread id changed after the submit.
+function findComposerRestoreKey(
+  restores: Record<string, ComposerRestore>,
+  key: string,
+): string | null {
+  const keys = Object.keys(restores);
+  const hit = keys.find((k) => k === key || restores[k].threadIds.includes(key));
+  if (hit) return hit;
+  return keys.length === 1 ? keys[0] : null;
+}
 
 export type RagSource = { type: "thread" } | { type: "kb"; kbId: string };
 
@@ -934,16 +954,8 @@ type ChatRuntimeStore = {
   pendingAudioBase64: string | null;
   pendingAudioName: string | null;
   pendingImageEditReference: PendingImageEditReference | null;
-  pendingComposerRestore: {
-    draftKey: string;
-    threadIds: string[];
-    text: string;
-  } | null;
-  composerRestore: {
-    draftKey: string;
-    threadIds: string[];
-    text: string;
-  } | null;
+  pendingComposerRestores: Record<string, ComposerRestore>;
+  composerRestore: ComposerRestore | null;
   contextUsage: {
     promptTokens: number;
     completionTokens: number;
@@ -1053,9 +1065,11 @@ type ChatRuntimeStore = {
   ) => void;
   clearPendingImageEditReference: () => void;
   setPendingComposerRestore: (
-    pending: { draftKey: string; threadIds: string[]; text: string } | null,
+    key: string,
+    restore: ComposerRestore | null,
   ) => void;
-  promoteComposerRestore: () => void;
+  promoteComposerRestore: (key: string) => void;
+  clearPendingComposerRestore: (key: string) => void;
   clearComposerRestore: () => void;
   setContextUsage: (usage: ChatRuntimeStore["contextUsage"]) => void;
 };
@@ -1379,7 +1393,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
   pendingAudioBase64: null,
   pendingAudioName: null,
   pendingImageEditReference: null,
-  pendingComposerRestore: null,
+  pendingComposerRestores: {},
   composerRestore: null,
   contextUsage: null,
   modelLoading: false,
@@ -1940,17 +1954,36 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
     set({ pendingImageEditReference }),
   clearPendingImageEditReference: () =>
     set({ pendingImageEditReference: null }),
-  setPendingComposerRestore: (pendingComposerRestore) =>
-    set({ pendingComposerRestore }),
-  promoteComposerRestore: () =>
-    set((state) =>
-      state.pendingComposerRestore
-        ? {
-            composerRestore: state.pendingComposerRestore,
-            pendingComposerRestore: null,
-          }
-        : {},
-    ),
+  setPendingComposerRestore: (key, restore) =>
+    set((state) => {
+      const pendingComposerRestores = { ...state.pendingComposerRestores };
+      if (restore) {
+        pendingComposerRestores[key] = restore;
+      } else {
+        delete pendingComposerRestores[key];
+      }
+      return { pendingComposerRestores };
+    }),
+  promoteComposerRestore: (key) =>
+    set((state) => {
+      const hit = findComposerRestoreKey(state.pendingComposerRestores, key);
+      if (!hit) return {};
+      const record = state.pendingComposerRestores[hit];
+      // Make the prompt durable before any composer claims it, so it survives
+      // even when the composer that sent it is gone.
+      writeComposerDraft(record.draftKey, record.text);
+      const pendingComposerRestores = { ...state.pendingComposerRestores };
+      delete pendingComposerRestores[hit];
+      return { pendingComposerRestores, composerRestore: record };
+    }),
+  clearPendingComposerRestore: (key) =>
+    set((state) => {
+      const hit = findComposerRestoreKey(state.pendingComposerRestores, key);
+      if (!hit) return {};
+      const pendingComposerRestores = { ...state.pendingComposerRestores };
+      delete pendingComposerRestores[hit];
+      return { pendingComposerRestores };
+    }),
   clearComposerRestore: () => set({ composerRestore: null }),
   setContextUsage: (contextUsage) => set({ contextUsage }),
 }));
