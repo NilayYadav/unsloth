@@ -2086,6 +2086,9 @@ export function createOpenAIStreamAdapter(
         }
       };
 
+      const restorePromptToComposer = () =>
+        useChatRuntimeStore.getState().promoteComposerRestore();
+
       // Wait for in-progress model load before inferring.
       if (runtime.modelLoading) {
         toast.info("Waiting for model to finish loading…");
@@ -2107,6 +2110,7 @@ export function createOpenAIStreamAdapter(
             await autoLoadSmallestModel());
         } catch (error) {
           clearSelectedImageEditReference();
+          restorePromptToComposer();
           throw error;
         }
         if (!loaded) {
@@ -2121,12 +2125,10 @@ export function createOpenAIStreamAdapter(
             },
           );
           clearSelectedImageEditReference();
-          useChatRuntimeStore.getState().promoteComposerRestore();
+          restorePromptToComposer();
           throw new Error("Load a model first.");
         }
       }
-
-      useChatRuntimeStore.getState().setPendingComposerRestore(null);
 
       // Re-read store after auto-load / model-ready wait.
       runtime = useChatRuntimeStore.getState();
@@ -2167,6 +2169,7 @@ export function createOpenAIStreamAdapter(
             "Turn on Enable connections in Settings → Connections to use hosted models.",
         });
         clearSelectedImageEditReference();
+        restorePromptToComposer();
         throw new Error("Connections disabled.");
       }
       const externalProvider = isExternalRequest
@@ -2186,6 +2189,7 @@ export function createOpenAIStreamAdapter(
           description: "Open Settings → Connections and add it again.",
         });
         clearSelectedImageEditReference();
+        restorePromptToComposer();
         throw new Error("Connection not found.");
       }
       // Local providers and custom Gemini bases allow an empty key.
@@ -2207,6 +2211,7 @@ export function createOpenAIStreamAdapter(
           description: "Open Settings → Connections and set the API key again.",
         });
         clearSelectedImageEditReference();
+        restorePromptToComposer();
         throw new Error("Missing connection API key.");
       }
 
@@ -2263,12 +2268,15 @@ export function createOpenAIStreamAdapter(
 
       if (selectedImageEditReference && !imageGenerationEnabledForThisTurn) {
         clearSelectedImageEditReference();
+        restorePromptToComposer();
         toast.error("Image editing is unavailable", {
           description:
             "Select an OpenAI image-generation model, then retry the edit.",
         });
         throw new Error("Image generation edit unavailable.");
       }
+
+      useChatRuntimeStore.getState().setPendingComposerRestore(null);
 
       // Drop refused assistant turns + their triggering user prompt;
       // otherwise context re-triggers the classifier.

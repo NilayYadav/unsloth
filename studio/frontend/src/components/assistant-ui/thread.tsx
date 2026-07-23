@@ -1596,6 +1596,19 @@ const Composer: FC<{
       composer.setText(composerRestore.text);
     }
   }, [composerRestore, draftKey, aui]);
+  const capturePendingComposerRestore = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      const key = draftKey ?? composerDraftKey(null);
+      lastSubmitDraftKeyRef.current = trimmed ? key : null;
+      useChatRuntimeStore
+        .getState()
+        .setPendingComposerRestore(
+          trimmed ? { draftKey: key, text: trimmed } : null,
+        );
+    },
+    [draftKey],
+  );
   // react-textarea-autosize re-measures only on value change or window resize,
   // not on the width swap from expanding, so it keeps the taller height and
   // leaves a stray blank row. Nudge a resize whenever input width changes.
@@ -1746,9 +1759,16 @@ const Composer: FC<{
     setPendingSend(false);
     dismissWaitToast();
     if (text.trim().length > 0 || attachments.length > 0) {
+      capturePendingComposerRestore(text);
       aui.composer().send();
     }
-  }, [pendingSend, indexingActive, aui, dismissWaitToast]);
+  }, [
+    pendingSend,
+    indexingActive,
+    aui,
+    dismissWaitToast,
+    capturePendingComposerRestore,
+  ]);
 
   // Drop any queued send + toast on unmount (e.g. thread switch).
   useEffect(
@@ -1843,21 +1863,14 @@ const Composer: FC<{
         closeOverlay();
       }
 
-      const pendingText = composerText.trim();
-      const pendingDraftKey = draftKey ?? composerDraftKey(null);
-      lastSubmitDraftKeyRef.current = pendingText ? pendingDraftKey : null;
-      useChatRuntimeStore
-        .getState()
-        .setPendingComposerRestore(
-          pendingText ? { draftKey: pendingDraftKey, text: pendingText } : null,
-        );
+      capturePendingComposerRestore(composerText);
     },
     [
       aui,
       canQueueCurrentPrompt,
+      capturePendingComposerRestore,
       closeOverlay,
       composerText,
-      draftKey,
       createPromptQueueTarget,
       disabled,
       disableQueue,
