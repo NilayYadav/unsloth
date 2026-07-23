@@ -1586,7 +1586,9 @@ const Composer: FC<{
     const t = setTimeout(() => writeComposerDraft(draftKey, composerText), 300);
     return () => clearTimeout(t);
   }, [composerText, draftKey]);
-  const composerRestore = useChatRuntimeStore((state) => state.composerRestore);
+  const composerRestores = useChatRuntimeStore(
+    (state) => state.composerRestores,
+  );
   const lastSubmitDraftKeyRef = useRef<string | null>(null);
   // Declared before the claim effect so a thread switch drops the stale key
   // first; otherwise this composer could claim the previous thread's prompt.
@@ -1594,30 +1596,29 @@ const Composer: FC<{
     lastSubmitDraftKeyRef.current = null;
   }, [draftKey]);
   useEffect(() => {
-    if (composerRestore === null) {
+    const mine = composerRestores.find(
+      (restore) =>
+        restore.draftKey === draftKey ||
+        restore.draftKey === lastSubmitDraftKeyRef.current ||
+        composerThreadIdKey
+          .split("|")
+          .some((id) => id && restore.threadIds.includes(id)),
+    );
+    if (!mine) {
       return;
     }
-    const isThisComposer =
-      composerRestore.draftKey === draftKey ||
-      composerRestore.draftKey === lastSubmitDraftKeyRef.current ||
-      composerThreadIdKey
-        .split("|")
-        .some((id) => id && composerRestore.threadIds.includes(id));
-    if (!isThisComposer) {
-      return;
-    }
-    useChatRuntimeStore.getState().clearComposerRestore();
+    useChatRuntimeStore.getState().claimComposerRestore(mine);
     lastSubmitDraftKeyRef.current = null;
     // The store made the prompt durable under the submit-time key; this
     // composer owns it now, so drop that copy once it is reattached here.
-    if (composerRestore.draftKey !== draftKey) {
-      writeComposerDraft(composerRestore.draftKey, "");
+    if (mine.draftKey !== draftKey) {
+      writeComposerDraft(mine.draftKey, "");
     }
     const composer = aui.composer();
     if (composer.getState().text.trim().length === 0) {
-      composer.setText(composerRestore.text);
+      composer.setText(mine.text);
     }
-  }, [composerRestore, draftKey, composerThreadIdKey, aui]);
+  }, [composerRestores, draftKey, composerThreadIdKey, aui]);
   const capturePendingComposerRestore = useCallback(
     (text: string) => {
       const trimmed = text.trim();
@@ -1837,6 +1838,7 @@ const Composer: FC<{
           return;
         }
         const queuedPrompt = composerText.trim();
+        capturePendingComposerRestore(queuedPrompt);
         flushResourcesSync(() => {
           aui.composer().setText("");
         });
@@ -2016,6 +2018,7 @@ const Composer: FC<{
                 if (queuedPrompt.length === 0) {
                   return;
                 }
+                capturePendingComposerRestore(queuedPrompt);
                 flushResourcesSync(() => {
                   aui.composer().setText("");
                 });

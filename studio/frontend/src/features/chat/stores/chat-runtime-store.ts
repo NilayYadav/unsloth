@@ -84,16 +84,17 @@ export type ComposerRestore = {
 };
 
 // A run finds its own pending prompt by thread: exact key, then any composer
-// whose identity covered that thread. The single-entry fallback keeps a lone
-// in-flight run working when its thread id changed after the submit.
+// whose identity covered that thread. Never falls back to an unrelated entry,
+// so one chat's run cannot consume or drop another chat's prompt.
 function findComposerRestoreKey(
   restores: Record<string, ComposerRestore>,
   key: string,
 ): string | null {
-  const keys = Object.keys(restores);
-  const hit = keys.find((k) => k === key || restores[k].threadIds.includes(key));
-  if (hit) return hit;
-  return keys.length === 1 ? keys[0] : null;
+  return (
+    Object.keys(restores).find(
+      (k) => k === key || restores[k].threadIds.includes(key),
+    ) ?? null
+  );
 }
 
 export type RagSource = { type: "thread" } | { type: "kb"; kbId: string };
@@ -955,7 +956,7 @@ type ChatRuntimeStore = {
   pendingAudioName: string | null;
   pendingImageEditReference: PendingImageEditReference | null;
   pendingComposerRestores: Record<string, ComposerRestore>;
-  composerRestore: ComposerRestore | null;
+  composerRestores: ComposerRestore[];
   contextUsage: {
     promptTokens: number;
     completionTokens: number;
@@ -1070,7 +1071,7 @@ type ChatRuntimeStore = {
   ) => void;
   promoteComposerRestore: (key: string) => void;
   clearPendingComposerRestore: (key: string) => void;
-  clearComposerRestore: () => void;
+  claimComposerRestore: (restore: ComposerRestore) => void;
   setContextUsage: (usage: ChatRuntimeStore["contextUsage"]) => void;
 };
 
@@ -1394,7 +1395,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
   pendingAudioName: null,
   pendingImageEditReference: null,
   pendingComposerRestores: {},
-  composerRestore: null,
+  composerRestores: [],
   contextUsage: null,
   modelLoading: false,
   loadingModelPick: null,
@@ -1974,7 +1975,10 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
       writeComposerDraft(record.draftKey, record.text);
       const pendingComposerRestores = { ...state.pendingComposerRestores };
       delete pendingComposerRestores[hit];
-      return { pendingComposerRestores, composerRestore: record };
+      return {
+        pendingComposerRestores,
+        composerRestores: [...state.composerRestores, record].slice(-10),
+      };
     }),
   clearPendingComposerRestore: (key) =>
     set((state) => {
@@ -1984,7 +1988,10 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
       delete pendingComposerRestores[hit];
       return { pendingComposerRestores };
     }),
-  clearComposerRestore: () => set({ composerRestore: null }),
+  claimComposerRestore: (restore) =>
+    set((state) => ({
+      composerRestores: state.composerRestores.filter((r) => r !== restore),
+    })),
   setContextUsage: (contextUsage) => set({ contextUsage }),
 }));
 
