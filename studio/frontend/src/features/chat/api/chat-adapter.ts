@@ -2097,9 +2097,9 @@ export function createOpenAIStreamAdapter(
           await waitForModelReady(abortSignal);
         } catch (error) {
           clearSelectedImageEditReference();
-          useChatRuntimeStore
-            .getState()
-            .clearPendingComposerRestore(runRestoreKey);
+          // Aborts here include navigating away mid-load, not just an explicit
+          // stop, and nothing was sent either way, so keep the prompt.
+          restorePromptToComposer();
           throw error;
         }
       }

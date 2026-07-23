@@ -1607,14 +1607,15 @@ const Composer: FC<{
     if (!mine) {
       return;
     }
-    const composer = aui.composer();
-    if (composer.getState().text.trim().length > 0) {
-      // The user is typing something else. Leave the restore queued and its
-      // durable draft intact rather than consuming it here.
-      return;
-    }
+    // Always consumed on arrival: a restore left queued would resurface in a
+    // later, unrelated send. When the user has already typed a replacement it
+    // is retired unattached — the failed turn stays retryable in the thread.
     useChatRuntimeStore.getState().claimComposerRestore(mine);
     lastSubmitDraftKeyRef.current = null;
+    const composer = aui.composer();
+    if (composer.getState().text.trim().length > 0) {
+      return;
+    }
     // The store made the prompt durable under the submit-time key; this
     // composer owns it now, so drop that copy once it is reattached here.
     if (mine.draftKey !== draftKey) {
