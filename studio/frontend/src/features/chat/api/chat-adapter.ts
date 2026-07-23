@@ -2503,7 +2503,17 @@ export function createOpenAIStreamAdapter(
         }
       }
 
-      useChatRuntimeStore.getState().clearPendingComposerRestore(runRestoreKey);
+      // Held, not dropped: the request payload can still fail to build, and
+      // the prompt has to go back to the composer if it does.
+      const consumedRestore = useChatRuntimeStore
+        .getState()
+        .takePendingComposerRestore(runRestoreKey);
+      const returnConsumedRestore = () => {
+        if (!consumedRestore) return;
+        const store = useChatRuntimeStore.getState();
+        store.setPendingComposerRestore(runRestoreKey, consumedRestore);
+        store.promoteComposerRestore(runRestoreKey);
+      };
 
       // Clear pending audio from store after extracting (consumed on send).
       if (audioBase64) {
@@ -3273,6 +3283,7 @@ export function createOpenAIStreamAdapter(
               );
             } catch (error) {
               clearSelectedImageEditReference();
+              returnConsumedRestore();
               throw error;
             }
             clearSelectedImageEditReference();

@@ -1584,10 +1584,10 @@ const Composer: FC<{
     if (!draftKey) {
       return;
     }
-    // Temporary chats never reach disk, and the slot is wiped in case the
-    // toggle flipped on with a draft already saved under this key.
+    // Temporary chats never reach disk. Only the write is skipped: incognito
+    // is global and flips back after a saved thread mounts, so deleting here
+    // would take that thread's own unsent draft with it.
     if (composerIsIncognito) {
-      writeComposerDraft(draftKey, "");
       return;
     }
     const t = setTimeout(() => writeComposerDraft(draftKey, composerText), 300);

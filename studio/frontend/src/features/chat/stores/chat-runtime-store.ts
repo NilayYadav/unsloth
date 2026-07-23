@@ -1073,6 +1073,7 @@ type ChatRuntimeStore = {
   ) => void;
   promoteComposerRestore: (key: string) => void;
   clearPendingComposerRestore: (key: string) => void;
+  takePendingComposerRestore: (key: string) => ComposerRestore | null;
   claimComposerRestore: (restore: ComposerRestore) => void;
   setContextUsage: (usage: ChatRuntimeStore["contextUsage"]) => void;
 };
@@ -1993,6 +1994,20 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
       delete pendingComposerRestores[hit];
       return { pendingComposerRestores };
     }),
+  // Same removal, but hands the record back so a caller that fails after this
+  // point can put it back instead of losing the prompt.
+  takePendingComposerRestore: (key) => {
+    const restores = get().pendingComposerRestores;
+    const hit = findComposerRestoreKey(restores, key);
+    if (!hit) return null;
+    const record = restores[hit];
+    set((state) => {
+      const pendingComposerRestores = { ...state.pendingComposerRestores };
+      delete pendingComposerRestores[hit];
+      return { pendingComposerRestores };
+    });
+    return record;
+  },
   claimComposerRestore: (restore) =>
     set((state) => ({
       composerRestores: state.composerRestores.filter((r) => r !== restore),
