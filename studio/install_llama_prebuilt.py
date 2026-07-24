@@ -6001,9 +6001,6 @@ def validate_prebuilt_attempts(
             )
             raise ExistingInstallSatisfied(attempt, tried_fallback)
 
-        # Gate only the paths that actually consume disk; the reuse skips above
-        # need none. Too little space for this candidate still lets a later one
-        # match the existing install, so keep looking instead of failing here.
         shortfall = _insufficient_disk_reason(install_dir)
         if shortfall is not None:
             if index == len(attempt_list) - 1:
@@ -6040,6 +6037,8 @@ def validate_prebuilt_attempts(
                     f"candidate attempt failed before activation for {attempt.name}: {exc}"
                 )
             if _environment_fatal_reason(exc) or index == len(attempt_list) - 1:
+                if attempt_error is exc:
+                    raise
                 raise attempt_error from exc
             log(
                 "selected CUDA bundle failed before activation; trying next prebuilt fallback "
