@@ -4150,14 +4150,19 @@ def _normalize_url_scheme(url: str) -> str:
     """Prepend ``https://`` to bare hosts (``google.com``, ``example.com:8443``).
 
     ``urlparse`` reads the host of a ``host:port`` input as the scheme, so those
-    are detected by an empty netloc plus a port-shaped path. Real non-http
-    schemes (``ftp:``, ``file:``, ``javascript:``) are left alone to be rejected."""
+    are recognised by a dotted host-like scheme, an empty netloc and an in-range
+    port. Anything else -- real schemes (``file:``, ``javascript:``, ``mailto:``,
+    including ``file:80``) and out-of-range ports -- is returned untouched so the
+    caller rejects it."""
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
     if not parsed.scheme:
         return "https://" + url.lstrip("/")
-    if not parsed.netloc and re.fullmatch(r"\d+(/.*)?", parsed.path or ""):
+    if parsed.netloc or not re.fullmatch(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+", parsed.scheme):
+        return url
+    port_match = re.fullmatch(r"(\d+)(/.*)?", parsed.path or "")
+    if port_match and 1 <= int(port_match.group(1)) <= 65535:
         return "https://" + url
     return url
 
@@ -4188,7 +4193,10 @@ def _fetch_url_raw(
     if not parsed.hostname:
         return "Blocked: URL is missing a hostname.", "", ""
 
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return f"Blocked: invalid port in URL (got {url!r}).", "", ""
     ok, reason, pinned_ip = _resolve_with_budget(
         parsed.hostname,
         port,

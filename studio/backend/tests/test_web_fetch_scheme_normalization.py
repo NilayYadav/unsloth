@@ -40,6 +40,7 @@ def resolved(monkeypatch):
         ("http://google.com", "google.com", 80),
         ("example.com:8443/path", "example.com", 8443),
         ("example.com:8443", "example.com", 8443),
+        ("sub.example.co.uk:8080", "sub.example.co.uk", 8080),
     ],
 )
 def test_schemeless_urls_are_fetched_as_https(resolved, url, hostname, port):
@@ -51,11 +52,22 @@ def test_schemeless_urls_are_fetched_as_https(resolved, url, hostname, port):
 
 @pytest.mark.parametrize(
     "url",
-    ["ftp://x.com", "file:///etc/passwd", "javascript:alert(1)", "mailto:a@b.c"],
+    [
+        "ftp://x.com", "file:///etc/passwd", "javascript:alert(1)", "mailto:a@b.c",
+        # scheme:digits must not masquerade as host:port
+        "file:80", "javascript:443/path", "mailto:25",
+        # out-of-range ports are not host:port either
+        "example.com:99999", "example.com:0",
+    ],
 )
 def test_non_http_schemes_still_blocked(url):
     err, _, _ = tools._fetch_url_raw(url)
     assert err and "only http/https" in err
+
+
+def test_out_of_range_port_returns_error_instead_of_raising():
+    err, _, _ = tools._fetch_url_raw("https://example.com:99999")
+    assert err and "invalid port" in err
 
 
 def test_blocked_message_shows_the_url_not_the_scheme():
@@ -63,7 +75,7 @@ def test_blocked_message_shows_the_url_not_the_scheme():
     assert "ftp://x.com" in err
 
 
-@pytest.mark.parametrize("url", ["localhost", "127.0.0.1", "169.254.169.254", "localhost:8080"])
+@pytest.mark.parametrize("url", ["localhost", "127.0.0.1", "169.254.169.254", "10.0.0.1"])
 def test_normalization_does_not_bypass_ssrf_guard(url):
     err, _, _ = tools._fetch_url_raw(url, timeout = 3)
     assert err and "non-public address" in err
