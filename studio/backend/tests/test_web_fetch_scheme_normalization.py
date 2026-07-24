@@ -53,11 +53,17 @@ def test_schemeless_urls_are_fetched_as_https(resolved, url, hostname, port):
 @pytest.mark.parametrize(
     "url",
     [
-        "ftp://x.com", "file:///etc/passwd", "javascript:alert(1)", "mailto:a@b.c",
+        "ftp://x.com",
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "mailto:a@b.c",
         # scheme:digits must not masquerade as host:port
-        "file:80", "javascript:443/path", "mailto:25",
+        "file:80",
+        "javascript:443/path",
+        "mailto:25",
         # out-of-range ports are not host:port either
-        "example.com:99999", "example.com:0",
+        "example.com:99999",
+        "example.com:0",
     ],
 )
 def test_non_http_schemes_still_blocked(url):
