@@ -340,9 +340,7 @@ def _take_tool_result(pending: list, call_id) -> Optional[dict]:
 def _split_parallel_tool_calls(messages: list) -> list:
     """Llama 3.x templates render one call per message, so split parallel calls
     into consecutive single-call messages, each followed by its own result."""
-    if not any(
-        isinstance(m, dict) and len(m.get("tool_calls") or ()) > 1 for m in messages
-    ):
+    if not any(isinstance(m, dict) and len(m.get("tool_calls") or ()) > 1 for m in messages):
         return messages
 
     out: list = []
@@ -372,9 +370,7 @@ def _split_parallel_tool_calls(messages: list) -> list:
             if idx:
                 piece["content"] = ""
             out.append(piece)
-            result = _take_tool_result(
-                pending, call.get("id") if isinstance(call, dict) else None
-            )
+            result = _take_tool_result(pending, call.get("id") if isinstance(call, dict) else None)
             if result is not None:
                 out.append(result)
         out.extend(pending)

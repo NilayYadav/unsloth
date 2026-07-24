@@ -162,7 +162,12 @@ def test_unrelated_template_error_still_propagates_with_dict_args():
         apply_chat_template_for_generation(_AlwaysRaises(), _conv({"query": "x"}))
 
 
-def _parallel_conv(*, ids = ("c1", "c2"), results_have_ids = True, content = "sure"):
+def _parallel_conv(
+    *,
+    ids = ("c1", "c2"),
+    results_have_ids = True,
+    content = "sure",
+):
     a, b = ids
     return [
         {"role": "user", "content": "search then render"},
@@ -170,24 +175,44 @@ def _parallel_conv(*, ids = ("c1", "c2"), results_have_ids = True, content = "su
             "role": "assistant",
             "content": content,
             "tool_calls": [
-                {"type": "function", "id": a,
-                 "function": {"name": "web_search", "arguments": {"query": "x"}}},
-                {"type": "function", "id": b,
-                 "function": {"name": "render_html", "arguments": {"html": "<canvas>"}}},
+                {
+                    "type": "function",
+                    "id": a,
+                    "function": {"name": "web_search", "arguments": {"query": "x"}},
+                },
+                {
+                    "type": "function",
+                    "id": b,
+                    "function": {"name": "render_html", "arguments": {"html": "<canvas>"}},
+                },
             ],
         },
-        {"role": "tool", "name": "web_search",
-         **({"tool_call_id": a} if results_have_ids else {}), "content": "no text"},
-        {"role": "tool", "name": "render_html",
-         **({"tool_call_id": b} if results_have_ids else {}), "content": "ok"},
+        {
+            "role": "tool",
+            "name": "web_search",
+            **({"tool_call_id": a} if results_have_ids else {}),
+            "content": "no text",
+        },
+        {
+            "role": "tool",
+            "name": "render_html",
+            **({"tool_call_id": b} if results_have_ids else {}),
+            "content": "ok",
+        },
     ]
 
 
 class _SingleToolCallTokenizer:
     """Mimics the Llama 3.x template: rejects >1 call per message."""
 
-    def apply_chat_template(self, messages, *, tokenize = False,
-                            add_generation_prompt = True, **kw):
+    def apply_chat_template(
+        self,
+        messages,
+        *,
+        tokenize = False,
+        add_generation_prompt = True,
+        **kw,
+    ):
         for msg in messages:
             if len(msg.get("tool_calls") or ()) > 1:
                 raise ValueError("This model only supports single tool-calls at once!")
@@ -197,8 +222,11 @@ class _SingleToolCallTokenizer:
 def test_parallel_calls_split_into_sequential_single_call_turns():
     out = _split_parallel_tool_calls(_parallel_conv())
     assert [(m["role"], m.get("name")) for m in out] == [
-        ("user", None), ("assistant", None), ("tool", "web_search"),
-        ("assistant", None), ("tool", "render_html"),
+        ("user", None),
+        ("assistant", None),
+        ("tool", "web_search"),
+        ("assistant", None),
+        ("tool", "render_html"),
     ]
     assert [len(m["tool_calls"]) for m in out if m.get("tool_calls")] == [1, 1]
     assert out[1]["tool_calls"][0]["function"]["name"] == "web_search"
