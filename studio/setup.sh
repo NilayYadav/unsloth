@@ -1449,6 +1449,11 @@ else
         fi
         substep "close Unsloth or other llama.cpp users and retry"
         exit 3
+    elif [ "$_PREBUILT_STATUS" -eq 4 ]; then
+        step "llama.cpp" "not enough disk space to install llama.cpp" "$C_WARN"
+        print_llama_error_log "$_PREBUILT_LOG"
+        rm -f "$_PREBUILT_LOG"
+        substep "free up disk or move UNSLOTH_STUDIO_HOME/TMPDIR to a larger volume, then re-run"
     else
         step "llama.cpp" "prebuilt install failed (continuing)" "$C_WARN"
         print_llama_error_log "$_PREBUILT_LOG"

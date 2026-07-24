@@ -63,6 +63,7 @@ EXIT_SUCCESS = 0
 EXIT_FALLBACK = 2
 EXIT_ERROR = 1
 EXIT_BUSY = 3
+EXIT_NO_SPACE = 4
 
 # DiskPart-prompt suppression. RunAsInvoker does NOT stop amd-smi's runtime
 # elevation (its manifest is asInvoker), so this is just harmless belt-and-
@@ -6149,6 +6150,56 @@ def diffusion_visual_server_backfill_needed(
     return True
 
 
+def _causal_chain(exc: BaseException) -> Iterable[BaseException]:
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _environment_fatal_reason(exc: BaseException) -> str | None:
+    for cause in _causal_chain(exc):
+        if isinstance(cause, OSError) and cause.errno == errno.ENOSPC:
+            return "no space left on device"
+    return None
+
+
+def _log_disk_space_help() -> None:
+    log(
+        "free up space or point TMPDIR and UNSLOTH_STUDIO_HOME at a larger "
+        "volume (e.g. /workspace), then re-run"
+    )
+
+
+def _first_existing_ancestor(path: Path) -> Path:
+    current = path
+    while current != current.parent and not current.exists():
+        current = current.parent
+    return current
+
+
+def _disk_preflight(install_dir: Path, *, required_gb: float = 5.0) -> None:
+    required = int(required_gb * (1024 ** 3))
+    targets = {
+        "build/download scratch (TMPDIR)": Path(tempfile.gettempdir()),
+        "llama.cpp install dir": _first_existing_ancestor(install_dir),
+    }
+    for label, path in targets.items():
+        try:
+            free = shutil.disk_usage(path).free
+        except OSError:
+            continue
+        if free < required:
+            log(
+                f"insufficient disk space for llama.cpp: {label} at {path} has "
+                f"{free / (1024 ** 3):.1f} GB free, need ~{required_gb:.0f} GB"
+            )
+            _log_disk_space_help()
+            raise SystemExit(EXIT_NO_SPACE)
+
+
 def install_prebuilt(
     install_dir: Path,
     llama_tag: str,
@@ -6217,6 +6268,7 @@ def install_prebuilt(
                     # recorded so the updater re-asserts it (#7213).
                     sync_marker_force_cpu(install_dir, persist_force_cpu)
                     return
+            _disk_preflight(install_dir)
             with tempfile.TemporaryDirectory(prefix = "unsloth-llama-prebuilt-") as tmp:
                 work_dir = Path(tmp)
                 probe_path = work_dir / "stories260K.gguf"
@@ -6296,6 +6348,11 @@ def install_prebuilt(
         log(f"prebuilt busy reason: {exc}")
         raise SystemExit(EXIT_BUSY) from exc
     except PrebuiltFallback as exc:
+        fatal = _environment_fatal_reason(exc)
+        if fatal:
+            log(f"prebuilt install failed: {fatal}")
+            _log_disk_space_help()
+            raise SystemExit(EXIT_NO_SPACE) from exc
         log("prebuilt install path failed; falling back to source build")
         log(f"prebuilt fallback reason: {exc}")
         report = collect_system_report(host, choice, install_dir)
@@ -6595,6 +6652,10 @@ if __name__ == "__main__":
         # Expected when the published repo (e.g. ggml-org/llama.cpp) has no
         # prebuilt manifest.  Exit quietly with EXIT_FALLBACK so the caller
         # falls back to source build without a noisy "fatal helper error".
+        fatal = _environment_fatal_reason(exc)
+        if fatal:
+            log(f"prebuilt install failed: {fatal}")
+            raise SystemExit(EXIT_NO_SPACE)
         log(textwrap.shorten(str(exc), width = 400, placeholder = "..."))
         raise SystemExit(EXIT_FALLBACK)
     except Exception as exc:
