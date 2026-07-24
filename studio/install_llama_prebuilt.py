@@ -6181,7 +6181,7 @@ def _first_existing_ancestor(path: Path) -> Path:
 
 
 def _disk_preflight(install_dir: Path, *, required_gb: float = 5.0) -> None:
-    required = int(required_gb * (1024 ** 3))
+    required = int(required_gb * (1024**3))
     targets = {
         "build/download scratch (TMPDIR)": Path(tempfile.gettempdir()),
         "llama.cpp install dir": _first_existing_ancestor(install_dir),
