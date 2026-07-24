@@ -6669,11 +6669,13 @@ if __name__ == "__main__":
         # falls back to source build without a noisy "fatal helper error".
         fatal = _environment_fatal_reason(exc)
         if fatal:
-            log(f"prebuilt install failed: {fatal}")
-            raise SystemExit(EXIT_NO_SPACE)
+            _fail_no_space(f"prebuilt install failed: {fatal}")
         log(textwrap.shorten(str(exc), width = 400, placeholder = "..."))
         raise SystemExit(EXIT_FALLBACK)
     except Exception as exc:
+        fatal = _environment_fatal_reason(exc)
+        if fatal:
+            _fail_no_space(f"prebuilt install failed: {fatal}")
         message = textwrap.shorten(str(exc), width = 400, placeholder = "...")
         log(f"fatal helper error: {message}")
         raise SystemExit(EXIT_ERROR)
