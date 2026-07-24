@@ -4146,25 +4146,38 @@ def _read_capped_body(resp, max_bytes, timeout, deadline, cancel_event):
     return None, b"".join(chunks)
 
 
+_DOTTED_HOST_RE = re.compile(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
+
+
 def _normalize_url_scheme(url: str) -> str:
     """Prepend ``https://`` to bare hosts (``google.com``, ``example.com:8443``).
 
     ``urlparse`` reads the host of a ``host:port`` input as the scheme, so those
-    are recognised by a dotted host-like scheme, an empty netloc and an in-range
-    port. Anything else -- real schemes (``file:``, ``javascript:``, ``mailto:``,
-    including ``file:80``) and out-of-range ports -- is returned untouched so the
-    caller rejects it."""
+    are recognised by a dotted host-like scheme with an empty netloc. Only a
+    dotted host with an in-range port is rewritten; real schemes (``file:``,
+    ``javascript:``, including ``file:80``), root-relative paths (``/login``)
+    and bad ports are returned untouched so the caller rejects them."""
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
-    if not parsed.scheme:
-        return "https://" + url.lstrip("/")
-    if parsed.netloc or not re.fullmatch(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+", parsed.scheme):
+    if parsed.scheme:
+        if parsed.netloc or not _DOTTED_HOST_RE.fullmatch(parsed.scheme):
+            return url
+        rest = url
+    elif url.startswith("//"):
+        rest = url[2:]
+    elif url.startswith("/"):
         return url
-    port_match = re.fullmatch(r"(\d+)(/.*)?", parsed.path or "")
-    if port_match and 1 <= int(port_match.group(1)) <= 65535:
-        return "https://" + url
-    return url
+    else:
+        rest = url
+
+    authority = re.split(r"[/?#]", rest, maxsplit = 1)[0]
+    host, _, port = authority.partition(":")
+    if not _DOTTED_HOST_RE.fullmatch(host):
+        return url
+    if port and not (port.isdigit() and len(port) <= 5 and 1 <= int(port) <= 65535):
+        return url
+    return "https://" + rest
 
 
 def _fetch_url_raw(

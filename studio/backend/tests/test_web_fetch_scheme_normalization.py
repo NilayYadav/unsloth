@@ -64,10 +64,18 @@ def test_schemeless_urls_are_fetched_as_https(resolved, url, hostname, port):
         # out-of-range ports are not host:port either
         "example.com:99999",
         "example.com:0",
+        # root-relative paths have no host to fetch
+        "/login",
+        "/github.com/owner/repo",
     ],
 )
 def test_non_http_schemes_still_blocked(url):
     err, _, _ = tools._fetch_url_raw(url)
+    assert err and "only http/https" in err
+
+
+def test_absurdly_long_port_does_not_raise():
+    err, _, _ = tools._fetch_url_raw("example.com:" + "9" * 4400)
     assert err and "only http/https" in err
 
 
@@ -81,7 +89,7 @@ def test_blocked_message_shows_the_url_not_the_scheme():
     assert "ftp://x.com" in err
 
 
-@pytest.mark.parametrize("url", ["localhost", "127.0.0.1", "169.254.169.254", "10.0.0.1"])
+@pytest.mark.parametrize("url", ["127.0.0.1", "169.254.169.254", "10.0.0.1", "192.168.1.1"])
 def test_normalization_does_not_bypass_ssrf_guard(url):
     err, _, _ = tools._fetch_url_raw(url, timeout = 3)
     assert err and "non-public address" in err
