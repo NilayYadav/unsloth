@@ -38,6 +38,8 @@ def resolved(monkeypatch):
         ("//google.com", "google.com", 443),
         ("https://google.com", "google.com", 443),
         ("http://google.com", "google.com", 80),
+        ("example.com:8443/path", "example.com", 8443),
+        ("example.com:8443", "example.com", 8443),
     ],
 )
 def test_schemeless_urls_are_fetched_as_https(resolved, url, hostname, port):
@@ -47,7 +49,10 @@ def test_schemeless_urls_are_fetched_as_https(resolved, url, hostname, port):
     assert "only http/https" not in (err or "")
 
 
-@pytest.mark.parametrize("url", ["ftp://x.com", "file:///etc/passwd", "javascript:alert(1)"])
+@pytest.mark.parametrize(
+    "url",
+    ["ftp://x.com", "file:///etc/passwd", "javascript:alert(1)", "mailto:a@b.c"],
+)
 def test_non_http_schemes_still_blocked(url):
     err, _, _ = tools._fetch_url_raw(url)
     assert err and "only http/https" in err
@@ -56,3 +61,18 @@ def test_non_http_schemes_still_blocked(url):
 def test_blocked_message_shows_the_url_not_the_scheme():
     err, _, _ = tools._fetch_url_raw("ftp://x.com")
     assert "ftp://x.com" in err
+
+
+@pytest.mark.parametrize("url", ["localhost", "127.0.0.1", "169.254.169.254", "localhost:8080"])
+def test_normalization_does_not_bypass_ssrf_guard(url):
+    err, _, _ = tools._fetch_url_raw(url, timeout = 3)
+    assert err and "non-public address" in err
+
+
+def test_schemeless_github_repo_still_routes_to_readme_api():
+    # Normalization must run before _github_repo_readme_api_url, else a bare
+    # github.com/owner/repo scrapes the HTML page instead of the README.
+    normalized = tools._normalize_url_scheme("github.com/unslothai/unsloth")
+    assert tools._github_repo_readme_api_url(normalized) == (
+        "https://api.github.com/repos/unslothai/unsloth/readme"
+    )

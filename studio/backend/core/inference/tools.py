@@ -4146,6 +4146,22 @@ def _read_capped_body(resp, max_bytes, timeout, deadline, cancel_event):
     return None, b"".join(chunks)
 
 
+def _normalize_url_scheme(url: str) -> str:
+    """Prepend ``https://`` to bare hosts (``google.com``, ``example.com:8443``).
+
+    ``urlparse`` reads the host of a ``host:port`` input as the scheme, so those
+    are detected by an empty netloc plus a port-shaped path. Real non-http
+    schemes (``ftp:``, ``file:``, ``javascript:``) are left alone to be rejected."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if not parsed.scheme:
+        return "https://" + url.lstrip("/")
+    if not parsed.netloc and re.fullmatch(r"\d+(/.*)?", parsed.path or ""):
+        return "https://" + url
+    return url
+
+
 def _fetch_url_raw(
     url: str,
     timeout: int = 30,
@@ -4165,10 +4181,8 @@ def _fetch_url_raw(
     """
     from urllib.parse import urlparse
 
+    url = _normalize_url_scheme(url)
     parsed = urlparse(url)
-    if not parsed.scheme:
-        url = "https://" + url.lstrip("/")
-        parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return f"Blocked: only http/https URLs are allowed (got {url!r}).", "", ""
     if not parsed.hostname:
@@ -4445,6 +4459,7 @@ def _fetch_page_text(
     # HTML fallback both draw from it, so a slow/failed API call cannot hand the
     # fallback a fresh full timeout and double the worst case.
     deadline = None if timeout is None else time.monotonic() + timeout
+    url = _normalize_url_scheme(url)
     readme_api_url = _github_repo_readme_api_url(url)
     if readme_api_url:
         err, body, _ctype = _fetch_url_raw(
