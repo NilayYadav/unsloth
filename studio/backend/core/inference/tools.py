@@ -4166,8 +4166,11 @@ def _fetch_url_raw(
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
+    if not parsed.scheme:
+        url = "https://" + url.lstrip("/")
+        parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        return f"Blocked: only http/https URLs are allowed (got {parsed.scheme!r}).", "", ""
+        return f"Blocked: only http/https URLs are allowed (got {url!r}).", "", ""
     if not parsed.hostname:
         return "Blocked: URL is missing a hostname.", "", ""
 
