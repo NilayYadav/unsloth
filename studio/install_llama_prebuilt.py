@@ -6268,7 +6268,6 @@ def install_prebuilt(
                     # recorded so the updater re-asserts it (#7213).
                     sync_marker_force_cpu(install_dir, persist_force_cpu)
                     return
-            _disk_preflight(install_dir)
             with tempfile.TemporaryDirectory(prefix = "unsloth-llama-prebuilt-") as tmp:
                 work_dir = Path(tmp)
                 probe_path = work_dir / "stories260K.gguf"
@@ -6290,6 +6289,7 @@ def install_prebuilt(
                             )
                             sync_marker_force_cpu(install_dir, persist_force_cpu)
                             return
+                    _disk_preflight(install_dir)
                     log(
                         "selected "
                         f"{choice.name} ({choice.source_label}) from published release "
@@ -6315,6 +6315,8 @@ def install_prebuilt(
                     except ExistingInstallSatisfied:
                         return
                     except PrebuiltFallback as exc:
+                        if _environment_fatal_reason(exc):
+                            raise
                         if release_index == release_count - 1:
                             raise
                         log(

@@ -1454,6 +1454,7 @@ else
         print_llama_error_log "$_PREBUILT_LOG"
         rm -f "$_PREBUILT_LOG"
         substep "free up disk or move UNSLOTH_STUDIO_HOME/TMPDIR to a larger volume, then re-run"
+        _LLAMA_CPP_DEGRADED=true
     else
         step "llama.cpp" "prebuilt install failed (continuing)" "$C_WARN"
         print_llama_error_log "$_PREBUILT_LOG"
