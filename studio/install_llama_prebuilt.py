@@ -6001,6 +6001,16 @@ def validate_prebuilt_attempts(
             )
             raise ExistingInstallSatisfied(attempt, tried_fallback)
 
+        # Gate only the paths that actually consume disk; the reuse skips above
+        # need none. Too little space for this candidate still lets a later one
+        # match the existing install, so keep looking instead of failing here.
+        shortfall = _insufficient_disk_reason(install_dir)
+        if shortfall is not None:
+            if index == len(attempt_list) - 1:
+                _fail_no_space(shortfall)
+            log(f"{shortfall}; checking the next candidate for a reusable install")
+            continue
+
         staging_dir = create_install_staging_dir(install_dir)
         quantized_path = work_dir / f"stories260K-q4-{index}.gguf"
         if quantized_path.exists():
@@ -6029,7 +6039,7 @@ def validate_prebuilt_attempts(
                 attempt_error = PrebuiltFallback(
                     f"candidate attempt failed before activation for {attempt.name}: {exc}"
                 )
-            if index == len(attempt_list) - 1:
+            if _environment_fatal_reason(exc) or index == len(attempt_list) - 1:
                 raise attempt_error from exc
             log(
                 "selected CUDA bundle failed before activation; trying next prebuilt fallback "
@@ -6180,7 +6190,7 @@ def _first_existing_ancestor(path: Path) -> Path:
     return current
 
 
-def _disk_preflight(install_dir: Path, *, required_gb: float = 5.0) -> None:
+def _insufficient_disk_reason(install_dir: Path, *, required_gb: float = 5.0) -> str | None:
     required = int(required_gb * (1024**3))
     targets = {
         "build/download scratch (TMPDIR)": Path(tempfile.gettempdir()),
@@ -6192,12 +6202,17 @@ def _disk_preflight(install_dir: Path, *, required_gb: float = 5.0) -> None:
         except OSError:
             continue
         if free < required:
-            log(
+            return (
                 f"insufficient disk space for llama.cpp: {label} at {path} has "
-                f"{free / (1024 ** 3):.1f} GB free, need ~{required_gb:.0f} GB"
+                f"{free / (1024**3):.1f} GB free, need ~{required_gb:.0f} GB"
             )
-            _log_disk_space_help()
-            raise SystemExit(EXIT_NO_SPACE)
+    return None
+
+
+def _fail_no_space(reason: str) -> None:
+    log(reason)
+    _log_disk_space_help()
+    raise SystemExit(EXIT_NO_SPACE)
 
 
 def install_prebuilt(
@@ -6289,7 +6304,6 @@ def install_prebuilt(
                             )
                             sync_marker_force_cpu(install_dir, persist_force_cpu)
                             return
-                    _disk_preflight(install_dir)
                     log(
                         "selected "
                         f"{choice.name} ({choice.source_label}) from published release "

@@ -3757,6 +3757,13 @@ if ($LocalLlamaCppLinked) {
             }
             substep "Close Unsloth or other llama.cpp users and retry" "Yellow"
             exit 3
+        } elseif ($prebuiltExit -eq 4) {
+            step "llama.cpp" "not enough disk space to install llama.cpp" "Yellow"
+            Write-LlamaFailureLog -Output $prebuiltOutput
+            substep "Free up disk or move UNSLOTH_STUDIO_HOME/TEMP to a larger volume, then re-run" "Yellow"
+            if (-not (Test-Path -LiteralPath (Join-Path $LlamaCppDir "build\bin\Release\llama-server.exe"))) {
+                $script:LlamaCppDegraded = $true
+            }
         } else {
             step "llama.cpp" "prebuilt install failed (continuing)" "Yellow"
             Write-LlamaFailureLog -Output $prebuiltOutput
