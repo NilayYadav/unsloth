@@ -150,6 +150,7 @@ export const SETTINGS_SEARCH_INDEX: Record<SettingsTab, TranslationKey[]> = {
   system: [
     "systemPill.settings.title",
     "systemPill.settings.enable",
+    "systemPill.settings.permission",
     "systemPill.settings.defaultModel",
   ],
   about: [

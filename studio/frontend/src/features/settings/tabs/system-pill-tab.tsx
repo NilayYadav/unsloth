@@ -2,6 +2,7 @@
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { useEffect, useState, type ReactElement } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -18,7 +19,7 @@ import {
   type PillModelOption,
   type PillSettings,
 } from "@/features/system-pill";
-import { pillStatus } from "@/lib/pill-native";
+import { pillRequestPermission, pillStatus } from "@/lib/pill-native";
 import { useT } from "@/i18n";
 import { toast } from "@/lib/toast";
 import { SettingsRow } from "../components/settings-row";
@@ -29,6 +30,7 @@ const DEFAULT_MODEL_VALUE = "__none__";
 export function SystemPillTab(): ReactElement {
   const t = useT();
   const [settings, setSettings] = useState<PillSettings | null>(null);
+  const [trusted, setTrusted] = useState(false);
   const [hotkey, setHotkey] = useState("");
   const [models, setModels] = useState<PillModelOption[]>([]);
 
@@ -37,6 +39,7 @@ export function SystemPillTab(): ReactElement {
     void Promise.all([pillStatus(), fetchPillSettings(), fetchPillModelOptions()])
       .then(([status, loaded, loadedModels]) => {
         if (cancelled) return;
+        setTrusted(status.axTrusted);
         setHotkey(status.hotkey);
         setSettings(loaded);
         setModels(loadedModels);
@@ -68,7 +71,7 @@ export function SystemPillTab(): ReactElement {
         <SettingsRow
           label={t("systemPill.settings.enable")}
           description={t("systemPill.settings.enableDescription", {
-            hotkey: hotkey || "⌥Space",
+            hotkey: hotkey || "⌃⌘U",
           })}
         >
           <Switch
@@ -77,6 +80,26 @@ export function SystemPillTab(): ReactElement {
           />
         </SettingsRow>
 
+        <SettingsRow label={t("systemPill.settings.permission")}>
+          {trusted ? (
+            <span className="text-xs text-muted-foreground">
+              {t("systemPill.settings.permissionGranted")}
+            </span>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                {t("systemPill.settings.permissionMissing")}
+              </span>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => void pillRequestPermission().then(setTrusted)}
+              >
+                {t("systemPill.settings.permissionRequest")}
+              </Button>
+            </div>
+          )}
+        </SettingsRow>
 
         <SettingsRow
           label={t("systemPill.settings.defaultModel")}

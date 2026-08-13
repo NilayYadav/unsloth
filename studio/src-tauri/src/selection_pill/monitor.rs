@@ -1,7 +1,7 @@
 // Global NSEvent mouse monitors are TCC-free and never see our own panel's
 // events, so no hit-testing is needed.
 
-use super::{ASK_WINDOW_LABEL, EVENT_ASK_HIDE};
+use super::{PillState, ASK_WINDOW_LABEL, EVENT_ASK_HIDE, EVENT_HIDE, PILL_WINDOW_LABEL};
 use block2::RcBlock;
 use objc2_app_kit::{NSEvent, NSEventMask, NSWorkspace};
 use objc2_foundation::NSNotification;
@@ -9,6 +9,15 @@ use std::ptr::NonNull;
 use tauri::{AppHandle, Emitter, Manager};
 
 fn dismiss(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(PILL_WINDOW_LABEL) {
+        if super::panel::is_panel_visible(&window) {
+            if let Some(state) = app.try_state::<PillState>() {
+                state.session.lock().unwrap().take();
+            }
+            super::panel::hide_panel(&window);
+            let _ = app.emit_to(PILL_WINDOW_LABEL, EVENT_HIDE, ());
+        }
+    }
     if let Some(window) = app.get_webview_window(ASK_WINDOW_LABEL) {
         if super::panel::is_panel_visible(&window) {
             hide_ask(app, &window);

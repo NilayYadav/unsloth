@@ -6,9 +6,20 @@ import {
   getCachedSettings,
   requestModelLoad,
 } from "./api";
+import { usePillStore } from "./pill-state";
+import { streamCompletion, type ChatMessage } from "./stream";
+import type { PillVerb } from "./verbs";
 
 const STATUS_POLL_MS = 3_000;
 const MODEL_LOAD_TIMEOUT_MS = 5 * 60_000;
+const FIRST_TOKEN_TIMEOUT_MS = 60_000;
+
+let activeAbort: AbortController | null = null;
+
+export function cancelActiveRun(): void {
+  activeAbort?.abort();
+  activeAbort = null;
+}
 
 function modelMatchesLoaded(
   model: string,
@@ -25,7 +36,8 @@ export async function ensureModelLoaded(
   model: string,
   ggufVariant: string | null,
   signal: AbortSignal,
-  onLoading: (model: string) => void,
+  onLoading: (model: string) => void = (loading) =>
+    usePillStore.getState().setLoadingLabel("loading-model", loading),
 ): Promise<void> {
   let status = await fetchInferenceStatus();
   if (modelMatchesLoaded(model, status)) return;
@@ -61,6 +73,78 @@ export class PillRunError extends Error {
     super(errorKey);
     this.errorKey = errorKey;
     this.model = model;
+  }
+}
+
+export async function runVerb(verb: PillVerb, selectionText: string): Promise<void> {
+  cancelActiveRun();
+  const abort = new AbortController();
+  activeAbort = abort;
+  const store = usePillStore.getState();
+  store.startStreaming();
+
+  try {
+    const settings = getCachedSettings();
+    const model = settings?.defaultModel ?? null;
+    const ggufVariant = settings?.defaultGgufVariant ?? null;
+
+    const status = await fetchInferenceStatus().catch((error: unknown) => {
+      throw new PillRunError(classifyFetchError(error));
+    });
+
+    if (model && !modelMatchesLoaded(model, status)) {
+      await ensureModelLoaded(model, ggufVariant, abort.signal);
+    } else if (!model && !status.active_model) {
+      throw new PillRunError("modelMissing");
+    }
+
+    usePillStore.getState().setLoadingLabel("thinking");
+
+    const messages: ChatMessage[] = [
+      {
+        role: "user",
+        content: verb.prompt.replaceAll("{selection}", selectionText),
+      },
+    ];
+
+    const firstTokenTimer = setTimeout(() => abort.abort(), FIRST_TOKEN_TIMEOUT_MS);
+    let sawToken = false;
+    try {
+      for await (const delta of streamCompletion(
+        {
+          model: model ?? status.active_model ?? "default",
+          messages,
+          stream: true,
+        },
+        abort.signal,
+      )) {
+        if (!sawToken) {
+          sawToken = true;
+          clearTimeout(firstTokenTimer);
+        }
+        usePillStore.getState().appendResult(delta);
+      }
+    } finally {
+      clearTimeout(firstTokenTimer);
+    }
+
+    if (!sawToken) {
+      throw new PillRunError("stalled");
+    }
+    usePillStore.getState().finishStreaming();
+  } catch (error) {
+    if (abort.signal.aborted && usePillStore.getState().resultText === "") {
+      usePillStore.getState().fail("stalled");
+    } else if (abort.signal.aborted) {
+      // User cancelled mid-stream: keep the partial result usable.
+      usePillStore.getState().finishStreaming();
+    } else if (error instanceof PillRunError) {
+      usePillStore.getState().fail(error.errorKey, error.model);
+    } else {
+      usePillStore.getState().fail(classifyFetchError(error));
+    }
+  } finally {
+    if (activeAbort === abort) activeAbort = null;
   }
 }
 

@@ -1,10 +1,30 @@
-// The ask bar must accept typing without activating the app: a
-// NonactivatingPanel that can become key, via an Objective-C class swap.
+// A plain NSWindow would activate the app on click, deactivating the target
+// app and collapsing its selection — hence the NSPanel class swap.
 
 use objc2::{define_class, msg_send, ClassType};
 use objc2_app_kit::{NSPanel, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask};
 use tauri::{Runtime, WebviewWindow};
 
+define_class!(
+    #[unsafe(super(NSPanel))]
+    #[name = "UnslothPillPanel"]
+    pub struct PillPanel;
+
+    impl PillPanel {
+        #[unsafe(method(canBecomeKeyWindow))]
+        fn can_become_key_window(&self) -> bool {
+            false
+        }
+
+        #[unsafe(method(canBecomeMainWindow))]
+        fn can_become_main_window(&self) -> bool {
+            false
+        }
+    }
+);
+
+// The ask bar must accept typing without activating the app: a
+// NonactivatingPanel that CAN become key, unlike the pill.
 define_class!(
     #[unsafe(super(NSPanel))]
     #[name = "UnslothAskPanel"]
@@ -24,6 +44,11 @@ define_class!(
 );
 
 const NS_POPUP_MENU_WINDOW_LEVEL: isize = 101;
+
+/// Must run on the main thread.
+pub fn convert_to_panel<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
+    convert_with_class(window, PillPanel::class())
+}
 
 /// Must run on the main thread.
 pub fn convert_to_key_panel<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
@@ -59,6 +84,18 @@ fn convert_with_class<R: Runtime>(
         let _: () = msg_send![panel, setFloatingPanel: true];
     }
     Ok(())
+}
+
+pub fn show_panel<R: Runtime>(window: &WebviewWindow<R>) {
+    let window = window.clone();
+    let _ = window.clone().run_on_main_thread(move || {
+        if let Ok(ns_window) = window.ns_window() {
+            let panel = ns_window as *mut NSPanel;
+            if !panel.is_null() {
+                unsafe { (*panel).orderFrontRegardless() };
+            }
+        }
+    });
 }
 
 /// Show and take keyboard focus without activating the app.

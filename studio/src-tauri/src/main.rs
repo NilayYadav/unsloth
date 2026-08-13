@@ -1510,7 +1510,10 @@ fn main() {
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
                 .skip_initial_state("main")
-                .with_denylist(&[selection_pill::ASK_WINDOW_LABEL])
+                .with_denylist(&[
+                    selection_pill::PILL_WINDOW_LABEL,
+                    selection_pill::ASK_WINDOW_LABEL,
+                ])
                 .build(),
         )
         .manage(diagnostics::new_diagnostics_state())
@@ -1569,7 +1572,15 @@ fn main() {
             native_intents::open_path_token,
             selection_pill::commands::pill_status,
             selection_pill::commands::pill_set_config,
+            selection_pill::commands::pill_request_permission,
+            selection_pill::commands::pill_open_privacy_settings,
+            selection_pill::commands::pill_get_capture,
+            selection_pill::commands::pill_replace_selection,
+            selection_pill::commands::pill_insert_below,
+            selection_pill::commands::pill_dismiss,
+            selection_pill::commands::pill_resize,
             selection_pill::commands::pill_server_port,
+            selection_pill::commands::pill_open_ask,
             selection_pill::commands::ask_hide,
             selection_pill::commands::ask_resize,
             has_saved_window_state,

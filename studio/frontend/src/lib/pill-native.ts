@@ -3,9 +3,19 @@
 
 import { isTauri } from "@/lib/api-base";
 
+export type PillSelectionPayload = {
+  sessionId: number;
+  text: string;
+  appName: string;
+  bundleId: string;
+  editable: boolean;
+  error: string | null;
+};
+
 export type PillNativeStatus = {
   supported: boolean;
   enabled: boolean;
+  axTrusted: boolean;
   hotkey: string;
   excludedApps: string[];
 };
@@ -35,8 +45,40 @@ export async function pillSetConfig(config: PillNativeConfig): Promise<PillNativ
   return invokeNative<PillNativeStatus>("pill_set_config", { config });
 }
 
+export async function pillRequestPermission(): Promise<boolean> {
+  return invokeNative<boolean>("pill_request_permission");
+}
+
+export async function pillOpenPrivacySettings(): Promise<void> {
+  return invokeNative<void>("pill_open_privacy_settings");
+}
+
+export async function pillGetCapture(): Promise<PillSelectionPayload | null> {
+  return invokeNative<PillSelectionPayload | null>("pill_get_capture");
+}
+
+export async function pillReplaceSelection(sessionId: number, text: string): Promise<void> {
+  return invokeNative<void>("pill_replace_selection", { sessionId, text });
+}
+
+export async function pillInsertBelow(sessionId: number, text: string): Promise<void> {
+  return invokeNative<void>("pill_insert_below", { sessionId, text });
+}
+
+export async function pillDismiss(): Promise<void> {
+  return invokeNative<void>("pill_dismiss");
+}
+
+export async function pillResize(width: number, height: number): Promise<void> {
+  return invokeNative<void>("pill_resize", { width, height });
+}
+
 export async function pillServerPort(): Promise<number | null> {
   return invokeNative<number | null>("pill_server_port");
+}
+
+export async function pillOpenAsk(text: string): Promise<void> {
+  return invokeNative<void>("pill_open_ask", { text });
 }
 
 export async function askHide(): Promise<void> {
