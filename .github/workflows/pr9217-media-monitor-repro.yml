@@ -1,0 +1,44 @@
+name: "PR 9217 media API monitor repro"
+
+on:
+  push:
+    branches:
+      - "pr-9217-repro-20260822220132"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr9217-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  media-monitor:
+    name: "media routes (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install targeted deps
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest fastapi httpx python-multipart structlog \
+            pydantic pyjwt passlib aiofiles psutil requests pyyaml pillow numpy \
+            cryptography huggingface_hub tiktoken jinja2
+      - name: Run the PR's media API route tests
+        shell: bash
+        working-directory: studio/backend
+        run: |
+          python -m pytest -v -p no:cacheprovider \
+            tests/test_openai_audio_transcriptions_route.py \
+            tests/test_openai_audio_speech_route.py \
+            tests/test_openai_images_generations_route.py \
+            tests/test_openai_audio_upload_bound.py \
+            tests/test_audio_sampling_fill.py
