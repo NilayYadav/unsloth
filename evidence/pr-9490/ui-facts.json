@@ -1,0 +1,24 @@
+{
+  "before": {
+    "side_reported": "before",
+    "image_cards": 0,
+    "loaded_img_elements": 0,
+    "raw_tokens_visible": 0,
+    "page_errors": [],
+    "text_len": 434
+  },
+  "after": {
+    "side_reported": "after",
+    "image_cards": 3,
+    "loaded_img_elements": 3,
+    "raw_tokens_visible": 0,
+    "page_errors": [],
+    "text_len": 530,
+    "first_img_box": {
+      "x": 135,
+      "y": 133,
+      "width": 240.375,
+      "height": 160
+    }
+  }
+}
