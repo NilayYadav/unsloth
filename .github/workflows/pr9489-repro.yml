@@ -1,0 +1,91 @@
+name: "PR 9489 - issue 9484 A/B repro"
+
+on:
+  push:
+    branches:
+      - 'pr9489-repro-20260822192753'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr9489-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # unslothai/unsloth main at branch time: the tree WITHOUT this PR.
+  BASE_SHA: 38e4e11a1c02ae9e6300d6164dd102509b7859cc
+  ADAPTER: studio/frontend/src/features/chat/api/chat-adapter.ts
+
+jobs:
+  before:
+    name: "without the PR (must reproduce #9484)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install probe dependencies
+        run: python -m pip install --quiet jinja2 pytest
+
+      - name: Revert ONLY the implementation under test to upstream main
+        run: |
+          git checkout "$BASE_SHA" -- "$ADAPTER"
+          git --no-pager diff --stat HEAD -- "$ADAPTER"
+
+      - name: The wire a cancelled prompt produces (expect FAIL)
+        run: |
+          set +e
+          python3 ci/pr9489_wire_probe.py
+          rc=$?
+          set -e
+          echo "probe exit: $rc"
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::negative branch did not reproduce #9484 (exit $rc, wanted 1)"
+            exit 1
+          fi
+          echo "reproduced: two consecutive user turns, strict template refuses to render"
+
+      - name: The PR's own regression test against the un-fixed adapter (expect FAIL)
+        run: |
+          set +e
+          python3 -m pytest tests/studio/test_cancelled_turn_history_prune.py -q --tb=line
+          rc=$?
+          set -e
+          echo "pytest exit: $rc"
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the regression test passes without the fix, so it does not guard it"
+            exit 1
+          fi
+
+  after:
+    name: "with the PR (must be fixed)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install probe dependencies
+        run: python -m pip install --quiet jinja2 pytest
+
+      - name: The wire a cancelled prompt produces (expect PASS)
+        run: python3 ci/pr9489_wire_probe.py
+
+      - name: The PR's own regression test (expect PASS)
+        run: python3 -m pytest tests/studio/test_cancelled_turn_history_prune.py -v --tb=short
+
+      - name: The shipped frontend and parity tests still pass
+        run: |
+          node --test --experimental-strip-types             studio/frontend/tests/cancelled-turn-history-prune.test.ts
+          python3 -m pytest tests/studio/test_token_count_prompt_parity.py -q --tb=short
