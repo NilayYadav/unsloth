@@ -1,0 +1,44 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 9433 focused repro"
+
+on:
+  push:
+    branches:
+      - "evidence-pr9433-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install the minimal studio backend imports"
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi pydantic structlog PyYAML PyJWT python-multipart httpx cryptography filelock sqlite_vec
+
+      - name: "Record the implementation under test"
+        shell: bash
+        run: |
+          git rev-parse HEAD
+          python -c "import pathlib,sys; p=pathlib.Path('studio/backend/routes/models.py').read_text(); print('_SPEECH_GGUF_ARCHS present:', '_SPEECH_GGUF_ARCHS' in p); q=pathlib.Path('studio/backend/core/inference/diffusion_compat.py').read_text(); print('speech_pick_refusal present:', 'def speech_pick_refusal' in q)"
+
+      - name: "PR 9433 repro probe"
+        shell: bash
+        run: |
+          python evidence/pr9433_probe.py
+
