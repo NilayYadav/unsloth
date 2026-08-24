@@ -1,0 +1,44 @@
+# Disposable A/B reproduction harness for unslothai/unsloth PR #9634.
+# Identical on both branches; only studio/backend/core/inference/orchestrator.py differs.
+#   *-head   : PR head            -> both tests PASS
+#   *-revert : PR head, fix undone -> the cancel test FAILS, the crash test still PASSES
+name: "PR 9634 cancelled-load A/B repro"
+
+on:
+  push:
+    branches:
+      - 'mimir-repro-pr9634-*'
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      # The two tests touch only the orchestrator's pure-Python cancel bookkeeping,
+      # so this needs no torch, no transformers and no unsloth: structlog for the
+      # logger import chain and huggingface_hub for the session-scoped conftest fixture.
+      - name: Install minimal deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'pytest>=8' structlog huggingface_hub
+
+      - name: Probe (real values, non-gating)
+        working-directory: studio/backend
+        run: python ../../.github/scripts/pr9634_probe.py
+
+      - name: Regression tests (A/B discriminator)
+        working-directory: studio/backend
+        run: |
+          python -m pytest tests/test_orchestrator_unload_cancel.py \
+            -k "worker_is_killed or really_crashes" \
+            -v --tb=short -p no:cacheprovider
