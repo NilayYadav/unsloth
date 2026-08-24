@@ -83,6 +83,39 @@ jobs:
           grep -q "RETURNED: 'Unknown tool: python'" before_probe.txt || { echo "::error::expected the Unknown tool swallow"; exit 1; }
           echo "PASS: pre-fix returns the misleading 'Unknown tool: python'"
 
+      - name: 'BEFORE: user-visible tool-card text'
+        working-directory: studio/backend
+        run: |
+          python - <<'PY' | tee before_card.txt
+          import os, sys, tempfile, logging, threading
+          os.environ["UNSLOTH_STUDIO_SANDBOX_HOME"] = tempfile.mkdtemp()
+          sys.path.insert(0, ".")
+          logging.disable(logging.CRITICAL)
+          from core.inference.tools import execute_tool
+          from core.inference.tool_stream_exec import stream_tool_execution
+
+          def card_text(tool_name, arguments):
+              cancel_event = threading.Event()
+              def _invoke(_on_output):
+                  return execute_tool(tool_name, arguments, session_id="__LOCALIDcard1")
+              gen = stream_tool_execution(_invoke, tool_name=tool_name,
+                                          tool_call_id="call_1", cancel_event=cancel_event)
+              # Exactly what studio_tool_loop.py does around the wrapper.
+              try:
+                  while True:
+                      try:
+                          next(gen)
+                      except StopIteration as stop:
+                          return stop.value if stop.value is not None else ""
+              except Exception as exc:  # noqa: BLE001 - reported back to the model
+                  return f"Error: tool raised an exception: {exc}"
+
+          for tool, args in [("python", {"code": 42}), ("terminal", {"command": 42})]:
+              print(f"{tool} CARD: {card_text(tool, args)!r}")
+          PY
+          grep -q "CARD: 'Unknown tool: python'" before_card.txt || { echo "::error::expected the misleading card"; exit 1; }
+          echo "PASS: pre-fix chat card reads 'Unknown tool: python'"
+
       # ---------------- POSITIVE LEG (PR fix) ----------------
       - name: 'AFTER: restore the PR fix'
         run: |
@@ -115,6 +148,40 @@ jobs:
           ! grep -q "Unknown tool" after_probe.txt || { echo "::error::still swallowing"; exit 1; }
           echo "PASS: fixed tree surfaces the real AttributeError"
 
+      - name: 'AFTER: user-visible tool-card text'
+        working-directory: studio/backend
+        run: |
+          python - <<'PY' | tee after_card.txt
+          import os, sys, tempfile, logging, threading
+          os.environ["UNSLOTH_STUDIO_SANDBOX_HOME"] = tempfile.mkdtemp()
+          sys.path.insert(0, ".")
+          logging.disable(logging.CRITICAL)
+          from core.inference.tools import execute_tool
+          from core.inference.tool_stream_exec import stream_tool_execution
+
+          def card_text(tool_name, arguments):
+              cancel_event = threading.Event()
+              def _invoke(_on_output):
+                  return execute_tool(tool_name, arguments, session_id="__LOCALIDcard1")
+              gen = stream_tool_execution(_invoke, tool_name=tool_name,
+                                          tool_call_id="call_1", cancel_event=cancel_event)
+              # Exactly what studio_tool_loop.py does around the wrapper.
+              try:
+                  while True:
+                      try:
+                          next(gen)
+                      except StopIteration as stop:
+                          return stop.value if stop.value is not None else ""
+              except Exception as exc:  # noqa: BLE001 - reported back to the model
+                  return f"Error: tool raised an exception: {exc}"
+
+          for tool, args in [("python", {"code": 42}), ("terminal", {"command": 42})]:
+              print(f"{tool} CARD: {card_text(tool, args)!r}")
+          PY
+          grep -q "Error: tool raised an exception" after_card.txt || { echo "::error::expected the real error on the card"; exit 1; }
+          ! grep -q "Unknown tool" after_card.txt || { echo "::error::card still misleading"; exit 1; }
+          echo "PASS: fixed chat card reports the real error"
+
       - name: Summary
         if: always()
         working-directory: studio/backend
@@ -122,8 +189,8 @@ jobs:
           {
             echo "## PR 9640 A/B reproduction"
             echo ""
-            echo "| leg | tools.py | tests | execute_tool('python', {'code': 42}) |"
-            echo "|---|---|---|---|"
-            echo "| BEFORE | $BASE_SHA (pre-fix) | FAIL (DID NOT RAISE) | \`$(grep -o "RETURNED: .*" before_probe.txt | head -1)\` |"
-            echo "| AFTER  | $HEAD_SHA (PR fix)  | PASS | \`$(grep -o "RAISED: .*" after_probe.txt | head -1)\` |"
+            echo "| leg | tools.py | tests | execute_tool('python', {'code': 42}) | chat tool-card text |"
+            echo "|---|---|---|---|---|"
+            echo "| BEFORE | $BASE_SHA (pre-fix) | FAIL (DID NOT RAISE) | \`$(grep -o "RETURNED: .*" before_probe.txt | head -1)\` | \`$(grep -o "CARD: .*" before_card.txt | head -1)\` |"
+            echo "| AFTER  | $HEAD_SHA (PR fix)  | PASS | \`$(grep -o "RAISED: .*" after_probe.txt | head -1)\` | \`$(grep -o "CARD: .*" after_card.txt | head -1)\` |"
           } >> $GITHUB_STEP_SUMMARY
