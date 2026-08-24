@@ -1,0 +1,19 @@
+FAIL  python: code.split on a number
+      args {"code":42} -> TypeError: code.split is not a function
+      this throw reaches the router boundary: Studio is replaced with "Something went wrong!"
+FAIL  terminal: command.slice on a number
+      args {"command":42} -> TypeError: command.slice is not a function
+      this throw reaches the router boundary: Studio is replaced with "Something went wrong!"
+PASS  knowledge base: query interpolated into the header
+      args {"query":42} -> "Searched documents for \"42\""
+PASS  web search: query.trim and url on numbers
+      args {"query":42,"url":7} -> "42|7"
+FAIL  code execution: truncateCommandLabel on a number
+      args {"command":42} -> TypeError: command.replace is not a function
+      this throw reaches the router boundary: Studio is replaced with "Something went wrong!"
+FAIL  image generation: prompt.trim on a number
+      args {"prompt":42} -> TypeError: prompt.trim is not a function
+      this throw reaches the router boundary: Studio is replaced with "Something went wrong!"
+
+2/6 tool cards survived a non-string argument
+CRASHED: 4

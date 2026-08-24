@@ -1,0 +1,14 @@
+PASS  python: code.split on a number
+      args {"code":42} -> "42"
+PASS  terminal: command.slice on a number
+      args {"command":42} -> "42"
+PASS  knowledge base: query interpolated into the header
+      args {"query":42} -> "Searched documents for \"42\""
+PASS  web search: query.trim and url on numbers
+      args {"query":42,"url":7} -> "42|7"
+PASS  code execution: truncateCommandLabel on a number
+      args {"command":42} -> "42"
+PASS  image generation: prompt.trim on a number
+      args {"prompt":42} -> "42"
+
+6/6 tool cards survived a non-string argument
