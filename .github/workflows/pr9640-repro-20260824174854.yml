@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Disposable A/B reproduction for unslothai/unsloth PR 9640.
+# Only studio/backend/core/inference/tools.py changes between the two legs.
+name: PR 9640 A/B repro
+
+on:
+  push:
+    branches: ['pr9640-repro-20260824174854']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr9640-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASE_SHA: 785a68dc4d193cc0a7f4706dcfe7b14a5e433e2f
+  HEAD_SHA: cffaffd0046bae32f1aee08200fa2b6a493437db
+  TESTS: "tests/test_sandbox_files_and_storage_roots.py -k 'swallow or unknown_tool'"
+
+jobs:
+  ab:
+    name: A/B - session guard swallows tool exceptions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.13'
+
+      - name: Install minimal deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio huggingface_hub structlog
+
+      - name: Confirm identical harness on both legs
+        run: |
+          echo "test file SHA:  $(git rev-parse $HEAD_SHA:studio/backend/tests/test_sandbox_files_and_storage_roots.py)"
+          echo "tools.py BEFORE: $(git rev-parse $BASE_SHA:studio/backend/core/inference/tools.py)"
+          echo "tools.py AFTER:  $(git rev-parse $HEAD_SHA:studio/backend/core/inference/tools.py)"
+
+      # ---------------- NEGATIVE LEG (pre-fix implementation) ----------------
+      - name: 'BEFORE: restore pre-fix tools.py only'
+        run: |
+          git checkout $BASE_SHA -- studio/backend/core/inference/tools.py
+          git --no-pager diff --stat $HEAD_SHA -- studio/backend/core/inference/tools.py
+
+      - name: 'BEFORE: tests MUST fail'
+        working-directory: studio/backend
+        run: |
+          set +e
+          python -m pytest $TESTS -q > before.txt 2>&1
+          rc=$?
+          set -e
+          cat before.txt
+          if [ $rc -eq 0 ]; then
+            echo "::error::NEGATIVE LEG DID NOT FAIL - repro invalid"
+            exit 1
+          fi
+          grep -q "DID NOT RAISE" before.txt || { echo "::error::failed for the wrong reason"; exit 1; }
+          echo "PASS: pre-fix tree fails at the intended assertion (DID NOT RAISE)"
+
+      - name: 'BEFORE: real return value'
+        working-directory: studio/backend
+        run: |
+          python - <<'PY' | tee before_probe.txt
+          import os, sys, tempfile, logging
+          os.environ["UNSLOTH_STUDIO_SANDBOX_HOME"] = tempfile.mkdtemp()
+          sys.path.insert(0, ".")
+          logging.disable(logging.CRITICAL)
+          from core.inference import tools
+          for name, args in [("python", {"code": 42}), ("terminal", {"command": 42})]:
+              try:
+                  print(f"{name} -> RETURNED: {tools.execute_tool(name, args, session_id='__LOCALID_p1')!r}")
+              except Exception as e:
+                  print(f"{name} -> RAISED: {type(e).__name__}: {e}")
+          PY
+          grep -q "RETURNED: 'Unknown tool: python'" before_probe.txt || { echo "::error::expected the Unknown tool swallow"; exit 1; }
+          echo "PASS: pre-fix returns the misleading 'Unknown tool: python'"
+
+      # ---------------- POSITIVE LEG (PR fix) ----------------
+      - name: 'AFTER: restore the PR fix'
+        run: |
+          git checkout $HEAD_SHA -- studio/backend/core/inference/tools.py
+          git --no-pager diff --stat $HEAD_SHA -- studio/backend/core/inference/tools.py
+          echo "tree now matches PR head"
+
+      - name: 'AFTER: tests MUST pass'
+        working-directory: studio/backend
+        run: |
+          python -m pytest $TESTS -q
+          echo "PASS: fixed tree passes the same tests"
+
+      - name: 'AFTER: real return value'
+        working-directory: studio/backend
+        run: |
+          python - <<'PY' | tee after_probe.txt
+          import os, sys, tempfile, logging
+          os.environ["UNSLOTH_STUDIO_SANDBOX_HOME"] = tempfile.mkdtemp()
+          sys.path.insert(0, ".")
+          logging.disable(logging.CRITICAL)
+          from core.inference import tools
+          for name, args in [("python", {"code": 42}), ("terminal", {"command": 42})]:
+              try:
+                  print(f"{name} -> RETURNED: {tools.execute_tool(name, args, session_id='__LOCALID_p1')!r}")
+              except Exception as e:
+                  print(f"{name} -> RAISED: {type(e).__name__}: {e}")
+          PY
+          grep -q "RAISED: AttributeError" after_probe.txt || { echo "::error::expected the real error to surface"; exit 1; }
+          ! grep -q "Unknown tool" after_probe.txt || { echo "::error::still swallowing"; exit 1; }
+          echo "PASS: fixed tree surfaces the real AttributeError"
+
+      - name: Summary
+        if: always()
+        working-directory: studio/backend
+        run: |
+          {
+            echo "## PR 9640 A/B reproduction"
+            echo ""
+            echo "| leg | tools.py | tests | execute_tool('python', {'code': 42}) |"
+            echo "|---|---|---|---|"
+            echo "| BEFORE | $BASE_SHA (pre-fix) | FAIL (DID NOT RAISE) | \`$(grep -o "RETURNED: .*" before_probe.txt | head -1)\` |"
+            echo "| AFTER  | $HEAD_SHA (PR fix)  | PASS | \`$(grep -o "RAISED: .*" after_probe.txt | head -1)\` |"
+          } >> $GITHUB_STEP_SUMMARY
