@@ -1005,102 +1005,29 @@ MCP_IMAGES_SENTINEL = "__MCP_IMAGES__:"
 MAX_IMAGE_PAYLOAD_CHARS = 12_000_000
 
 
-def _block_text(block: Any) -> Optional[str]:
-    text = getattr(block, "text", None)
-    if text:
-        return str(text)
-    resource = getattr(block, "resource", None)
-    if resource is not None:
-        text = getattr(resource, "text", None)
-        return str(text) if text else None
-    return None
-
-
-def _block_link(block: Any) -> Optional[str]:
-    # Kept apart from _block_text: this line is the host's own filler, so it must
-    # not pass for server text and suppress the structured_content fallback.
-    uri = getattr(block, "uri", None)
-    if uri and getattr(block, "type", None) == "resource_link":
-        name = getattr(block, "name", None)
-        return f"[resource: {name} <{uri}>]" if name else f"[resource: <{uri}>]"
-    return None
-
-
-# FastMCP's File helper labels raw bytes f"application/{format}", so an image
-# handed to it as File(data = ..., format = "png") arrives as "application/png".
-# The frontend renders these through data:<mimeType>;base64, which no browser
-# draws for an application/* type, so the subtype is mapped back to a real one.
-_IMAGE_SUBTYPES = {
-    "png": "image/png",
-    "jpeg": "image/jpeg",
-    "jpg": "image/jpeg",
-    "gif": "image/gif",
-    "webp": "image/webp",
-    "bmp": "image/bmp",
-    "avif": "image/avif",
-    "tiff": "image/tiff",
-    "svg+xml": "image/svg+xml",
-}
-
-
-def _image_mime(mime: Any) -> Optional[str]:
-    if not isinstance(mime, str):
-        return None
-    # Type and subtype are case-insensitive (RFC 9110 8.3.1), and the parameters
-    # are not part of what the data: URL needs, so both forms match on essence.
-    essence = mime.partition(";")[0].strip().lower()
-    if essence.startswith("image/"):
-        return essence
-    subtype = essence[len("application/") :] if essence.startswith("application/") else ""
-    return _IMAGE_SUBTYPES.get(subtype)
-
-
-def _block_image(block: Any) -> Optional[tuple[str, str]]:
-    # An image arrives either as ImageContent (data/mimeType) or as an
-    # EmbeddedResource wrapping BlobResourceContents (resource.blob/mimeType).
-    data = getattr(block, "data", None)
-    mime = getattr(block, "mimeType", None)
-    if not data:
-        resource = getattr(block, "resource", None)
-        if resource is None:
-            return None
-        data = getattr(resource, "blob", None)
-        mime = getattr(resource, "mimeType", None)
-    mime = _image_mime(mime)
-    if data and mime:
-        return str(data), mime
-    return None
-
-
 def _flatten_result(result: Any) -> str:
     parts = []
     images = []
     omitted = 0
-    has_text = False
     budget = MAX_IMAGE_PAYLOAD_CHARS
     for block in getattr(result, "content", None) or []:
-        text = _block_text(block)
+        text = getattr(block, "text", None)
         if text:
-            parts.append(text)
-            has_text = True
+            parts.append(str(text))
             continue
-        link = _block_link(block)
-        if link:
-            parts.append(link)
-            continue
-        image = _block_image(block)
-        if image is not None:
-            data, mime = image
+        data = getattr(block, "data", None)
+        mime = getattr(block, "mimeType", None)
+        if data and isinstance(mime, str) and mime.startswith("image/"):
+            data = str(data)
             if len(data) > budget:
                 omitted += 1
                 continue
             budget -= len(data)
             images.append({"data": data, "mimeType": mime})
     body = "\n".join(parts)
-    if not has_text:
+    if not body:
         structured = getattr(result, "structured_content", None)
-        if structured is not None:
-            body = f"{structured}\n{body}" if body else str(structured)
+        body = str(structured) if structured is not None else ""
     if images or omitted:
         notes = []
         if images:
