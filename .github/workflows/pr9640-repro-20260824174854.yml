@@ -17,7 +17,6 @@ concurrency:
 env:
   BASE_SHA: 785a68dc4d193cc0a7f4706dcfe7b14a5e433e2f
   HEAD_SHA: cffaffd0046bae32f1aee08200fa2b6a493437db
-  TESTS: "tests/test_sandbox_files_and_storage_roots.py -k 'swallow or unknown_tool'"
 
 jobs:
   ab:
@@ -55,7 +54,7 @@ jobs:
         working-directory: studio/backend
         run: |
           set +e
-          python -m pytest $TESTS -q > before.txt 2>&1
+          python -m pytest tests/test_sandbox_files_and_storage_roots.py -k 'swallow or unknown_tool' -q > before.txt 2>&1
           rc=$?
           set -e
           cat before.txt
@@ -94,7 +93,7 @@ jobs:
       - name: 'AFTER: tests MUST pass'
         working-directory: studio/backend
         run: |
-          python -m pytest $TESTS -q
+          python -m pytest tests/test_sandbox_files_and_storage_roots.py -k 'swallow or unknown_tool' -q
           echo "PASS: fixed tree passes the same tests"
 
       - name: 'AFTER: real return value'
