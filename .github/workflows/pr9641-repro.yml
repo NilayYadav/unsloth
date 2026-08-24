@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+
+# Disposable reproduction for unslothai/unsloth#9641.
+#
+# One workflow, one runner image, one install: only the tool-card sources change
+# between the three jobs, so the difference in outcome is the implementation and
+# nothing else.
+name: PR 9641 tool-arg crash repro
+
+on:
+  push:
+    branches:
+      - 'mimir-pr9641-repro2-*'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: 'A main before the PR (expect 5 crashes)'
+            sha: 785a68dc4d193cc0a7f4706dcfe7b14a5e433e2f
+            expect_crashed: '5'
+          - label: 'B PR 9641 as opened (expect 3 crashes)'
+            sha: 6b06eabd02d22eec10081718207127ef90574e41
+            expect_crashed: '3'
+          - label: 'C after the review fix (expect 1 crash)'
+            sha: bbf55029de3cc9e4db7480c59343d4588fe842ad
+            expect_crashed: '1'
+          - label: 'D after the Codex P1 fix (expect 0 crashes)'
+            sha: 2cde3d439ced7e3e47b830f105a08d4b2683d4dc
+            expect_crashed: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: studio/frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: studio/frontend
+        run: npm ci --no-audit --no-fund
+
+      # Only the six tool cards move. The probe, the runner and the install are
+      # identical in all three jobs.
+      - name: Put the tool cards at ${{ matrix.sha }}
+        run: |
+          set -euo pipefail
+          # checkout leaves a partial clone, so a commit that is in the branch's
+          # history can still have no tree locally. Fetch the object first.
+          git fetch --no-tags --quiet origin "${{ matrix.sha }}"
+          git checkout "${{ matrix.sha }}" -- studio/frontend/src/components/assistant-ui/
+          # The helper does not exist before this PR, and checking out a directory
+          # does not delete files the target revision lacks. Remove it so those
+          # revisions run the inline coercion they actually shipped.
+          HELPER=studio/frontend/src/components/assistant-ui/tool-arg-text.ts
+          if ! git cat-file -e "${{ matrix.sha }}:$HELPER" 2>/dev/null; then
+            rm -f "$HELPER"
+            echo "no helper at ${{ matrix.sha }}"
+          else
+            echo "helper present at ${{ matrix.sha }}"
+          fi
+          git --no-pager diff --stat HEAD -- studio/frontend/src/components/assistant-ui/ || true
+
+      # The probe exits non-zero when a card crashed, which is the expected
+      # outcome for two of the three revisions. The assertion below is the gate.
+      - name: Send every card an argument that is not a string
+        run: |
+          set +e
+          (cd studio/frontend && node --experimental-strip-types scripts/pr9641_tool_arg_probe.mjs) > probe.out 2>&1
+          echo "probe exit: $?"
+          cat probe.out
+
+      - name: Assert the crash count for this revision
+        run: |
+          set -euo pipefail
+          crashed="$(grep -c '^FAIL ' probe.out || true)"
+          echo "crashed=$crashed expected=${{ matrix.expect_crashed }}"
+          if [ "$crashed" != "${{ matrix.expect_crashed }}" ]; then
+            echo "::error::${{ matrix.label }}: ${crashed} cards crashed, expected ${{ matrix.expect_crashed }}"
+            exit 1
+          fi
+          echo "${{ matrix.label }}: reproduced exactly"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        if: always()
+        with:
+          name: pr9641-probe-${{ strategy.job-index }}
+          path: probe.out
