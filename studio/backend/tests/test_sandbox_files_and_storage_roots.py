@@ -6326,7 +6326,6 @@ def test_execute_tool_reports_a_bad_arg_instead_of_unknown_tool(tmp_path, monkey
     monkeypatch.setenv("UNSLOTH_STUDIO_SANDBOX_HOME", str(tmp_path / "sb"))
 
     from core.inference import tools
-
     with pytest.raises(AttributeError):
         tools.execute_tool("python", {"code": 42}, session_id = "__LOCALID_badarg1")
 
