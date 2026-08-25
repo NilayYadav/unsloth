@@ -24,8 +24,7 @@ from core.inference.mlx_bnb import mlx_bnb_base_repo, mlx_bnb_substitutions  # n
 
 def test_unsloth_bnb_repos_resolve_to_their_base():
     assert (
-        mlx_bnb_base_repo("unsloth/Qwen2-VL-2B-Instruct-bnb-4bit")
-        == "unsloth/Qwen2-VL-2B-Instruct"
+        mlx_bnb_base_repo("unsloth/Qwen2-VL-2B-Instruct-bnb-4bit") == "unsloth/Qwen2-VL-2B-Instruct"
     )
     assert mlx_bnb_base_repo("unsloth/gemma-3-4b-it-unsloth-bnb-4bit") == "unsloth/gemma-3-4b-it"
 
@@ -46,9 +45,7 @@ def test_a_local_directory_is_never_remapped(monkeypatch, tmp_path):
 
 
 def test_substitutions_cover_a_loras_base_and_skip_repos_already_watched():
-    swaps = mlx_bnb_substitutions(
-        ["me/my-lora", "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"]
-    )
+    swaps = mlx_bnb_substitutions(["me/my-lora", "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"])
     assert swaps == [
         ("unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit", "unsloth/Meta-Llama-3.1-8B-Instruct")
     ]
@@ -122,9 +119,7 @@ def test_validate_reports_the_repo_mlx_will_load(monkeypatch):
     pick = SimpleNamespace(identifier = "unsloth/Qwen2-VL-2B-Instruct-bnb-4bit", base_model = None)
     assert _mlx_base_for_config(pick) == "unsloth/Qwen2-VL-2B-Instruct"
 
-    adapter = SimpleNamespace(
-        identifier = "me/my-lora", base_model = "unsloth/gemma-3-4b-it-bnb-4bit"
-    )
+    adapter = SimpleNamespace(identifier = "me/my-lora", base_model = "unsloth/gemma-3-4b-it-bnb-4bit")
     assert _mlx_base_for_config(adapter) == "unsloth/gemma-3-4b-it"
 
     plain = SimpleNamespace(identifier = "unsloth/Qwen3-4B-Instruct-2507", base_model = None)
