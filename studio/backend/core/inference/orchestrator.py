@@ -1277,7 +1277,10 @@ class InferenceOrchestrator:
         Always spawns a fresh subprocess per load for a clean interpreter (no
         stale unsloth patches, torch.compile caches, or getsource failures).
         """
-        from utils.transformers_version import needs_transformers_5
+        from utils.transformers_version import (
+            TRANSFORMERS_DEFAULT_VERSION,
+            needs_transformers_5,
+        )
 
         # Same lazy-shim reason as _wait_response(); see the note there.
         from utils.hf_xet_fallback import DownloadStallError
@@ -1290,7 +1293,11 @@ class InferenceOrchestrator:
             return False
 
         try:
-            needed_major = "5" if needs_transformers_5(model_name) else "4"
+            needed_major = (
+                "5"
+                if needs_transformers_5(model_name)
+                else TRANSFORMERS_DEFAULT_VERSION.split(".")[0]
+            )
 
             # Build config dict for subprocess
             sub_config = {
@@ -1418,6 +1425,20 @@ class InferenceOrchestrator:
                         f"Download stalled for '{model_name}' even with "
                         f"HF_HUB_DISABLE_XET=1 -- check your network connection"
                     )
+                except RuntimeError:
+                    # cancel_load terminates the worker, which _wait_response can only
+                    # read as an unexpected death. The discarded marker is what tells
+                    # the two apart, so a Stop-loading is not reported as a crash.
+                    if model_name in self.loading_models:
+                        raise
+                    logger.info(
+                        "Load for '%s' was cancelled while waiting for 'loaded'; "
+                        "its worker was terminated by the cancel",
+                        model_name,
+                    )
+                    self.active_model_name = None
+                    self.models.clear()
+                    return False
 
                 if resp.get("success"):
                     # A cancel can land while we were parked in _wait_response above.

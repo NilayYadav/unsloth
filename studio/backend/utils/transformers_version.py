@@ -488,7 +488,9 @@ def activate_transformers_for_subprocess(model_name: str, hf_token: str | None =
         _pp = os.environ.get("PYTHONPATH", "")
         os.environ["PYTHONPATH"] = _VENV_T5_530_DIR + (os.pathsep + _pp if _pp else "")
     else:
-        logger.info("Using default transformers (4.57.x) for %s", model_name)
+        logger.info(
+            "Using default transformers (%s) for %s", TRANSFORMERS_DEFAULT_VERSION, model_name
+        )
 
 
 def latest_tier_active_for(model_name: str, hf_token: str | None = None) -> bool:
@@ -1812,7 +1814,8 @@ def get_transformers_tier(
                 if tier != "default":
                     return tier
             logger.info(
-                "Transformers tier default (4.57.x) selected for %s (local config.json no match)",
+                "Transformers tier default (%s) selected for %s (local config.json no match)",
+                TRANSFORMERS_DEFAULT_VERSION,
                 model_name,
             )
             return "default"
@@ -1892,7 +1895,11 @@ def get_transformers_tier(
         if tier != "default":
             return tier
 
-    logger.info("Transformers tier default (4.57.x) selected for %s (no match)", model_name)
+    logger.info(
+        "Transformers tier default (%s) selected for %s (no match)",
+        TRANSFORMERS_DEFAULT_VERSION,
+        model_name,
+    )
     return "default"
 
 

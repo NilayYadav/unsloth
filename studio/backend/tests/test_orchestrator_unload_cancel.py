@@ -2383,3 +2383,50 @@ def test_a_scoped_load_cancel_that_never_reports_back_releases_the_load():
         with inf._scoped_load_attempts_lock:
             inf._scoped_load_attempts.clear()
             inf._scoped_load_cancel_tombstones.clear()
+
+
+def _loadable_orchestrator(monkeypatch):
+    """A bare orchestrator with load_model's preflight (GPU pick, sidecar, spawn) stubbed out."""
+    from types import SimpleNamespace
+
+    import utils.transformers_version as tv
+
+    o = _bare_orchestrator()
+    o._proc = None
+    o.active_model_name = None
+    o.models = {}
+    monkeypatch.setattr(orch_mod, "get_device", lambda: SimpleNamespace(value = "mlx"))
+    monkeypatch.setattr(orch_mod, "prepare_gpu_selection", lambda *a, **k: ([], {}))
+    monkeypatch.setattr(tv, "needs_transformers_5", lambda name: False)
+    monkeypatch.setattr(tv, "sidecar_swap_kind", lambda: None)
+    monkeypatch.setattr(o, "_ensure_subprocess_alive", lambda: False)
+    monkeypatch.setattr(o, "_spawn_subprocess", lambda config: None)
+    monkeypatch.setattr(o, "_shutdown_subprocess", lambda timeout = 5.0: True)
+    return o, SimpleNamespace(identifier = "org/model")
+
+
+def _worker_died(o, cancelled):
+    def _wait(expected_type, timeout = 300.0):
+        if cancelled:
+            # What cancel_load does off the lifecycle gate before terminating the worker.
+            o.loading_models.discard("org/model")
+        raise RuntimeError("The inference worker stopped unexpectedly while loading the model.")
+
+    return _wait
+
+
+def test_stop_loading_is_not_reported_as_a_worker_crash(monkeypatch):
+    o, config = _loadable_orchestrator(monkeypatch)
+    monkeypatch.setattr(o, "_wait_response", _worker_died(o, cancelled = True))
+
+    assert o.load_model(config = config) is False
+    assert o.active_model_name is None
+    assert o.models == {}
+
+
+def test_a_worker_that_dies_on_its_own_still_fails_the_load(monkeypatch):
+    o, config = _loadable_orchestrator(monkeypatch)
+    monkeypatch.setattr(o, "_wait_response", _worker_died(o, cancelled = False))
+
+    with pytest.raises(RuntimeError, match = "stopped unexpectedly"):
+        o.load_model(config = config)

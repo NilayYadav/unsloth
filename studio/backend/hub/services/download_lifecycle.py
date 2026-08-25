@@ -1227,7 +1227,10 @@ def register_worker(
                 )
                 if swept:
                     logger.info(
-                        "%sswept %d unresumable partial blob(s) for %s", log_prefix, swept, repo_id
+                        "%s swept %d unresumable partial blob(s) for %s",
+                        log_prefix,
+                        swept,
+                        repo_id,
                     )
             except Exception:
                 logger.exception("abandoned-partial sweep failed for %s", key)

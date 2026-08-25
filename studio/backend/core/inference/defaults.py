@@ -4,6 +4,7 @@
 """Default model lists for inference, split by platform."""
 
 import utils.hardware.hardware as hw
+from core.inference.mlx_bnb import mlx_bnb_base_repo
 
 DEFAULT_MODELS_GGUF = [
     "unsloth/Qwen3.6-27B-MTP-GGUF",
@@ -51,7 +52,12 @@ DEFAULT_MODELS_STANDARD = [
 
 
 def get_default_models() -> list[str]:
-    hw.get_device()  # ensures detect_hardware() has run
+    device = hw.get_device()  # ensures detect_hardware() has run
     if hw.CHAT_ONLY:
         return list(DEFAULT_MODELS_GGUF)
+    if device == hw.DeviceType.MLX:
+        # Recommending a bnb repo here costs a download MLX then discards for the base.
+        return list(
+            dict.fromkeys(mlx_bnb_base_repo(model) or model for model in DEFAULT_MODELS_STANDARD)
+        )
     return list(DEFAULT_MODELS_STANDARD)
