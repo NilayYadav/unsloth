@@ -27,6 +27,22 @@ def mlx_bnb_base_repo(model_name: Optional[str]) -> Optional[str]:
     return None
 
 
+def mlx_host_bnb_base_repo(model_name: Optional[str]) -> Optional[str]:
+    """``mlx_bnb_base_repo`` for a repo this host really loads through the MLX loader.
+
+    Diffusion is the exception that matters: its bnb repos run on the diffusers/MPS
+    path, which reads bitsandbytes weights, so they are loaded exactly as named.
+    """
+    import utils.hardware.hardware as hw
+    from core.inference.diffusion_families import detect_family
+
+    if hw.get_device() != hw.DeviceType.MLX:
+        return None
+    if not isinstance(model_name, str) or detect_family(model_name) is not None:
+        return None
+    return mlx_bnb_base_repo(model_name)
+
+
 def mlx_bnb_substitutions(repos: Iterable[str]) -> list[tuple[str, str]]:
     """``(requested, base)`` for every repo in *repos* MLX will swap out."""
     requested = list(repos)

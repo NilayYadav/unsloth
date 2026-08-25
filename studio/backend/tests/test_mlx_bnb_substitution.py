@@ -89,3 +89,43 @@ def test_worker_watches_the_repo_mlx_downloads():
     source = (_BACKEND / "core" / "inference" / "worker.py").read_text(encoding = "utf-8")
     assert "mlx_bnb_substitutions(watch_repos)" in source
     assert "watch_repos.append(mlx_base)" in source
+
+
+def test_the_host_rule_only_fires_on_mlx(monkeypatch):
+    from core.inference.mlx_bnb import mlx_host_bnb_base_repo
+
+    monkeypatch.setattr(hw, "get_device", lambda: hw.DeviceType.CUDA)
+    assert mlx_host_bnb_base_repo("unsloth/Qwen2-VL-2B-Instruct-bnb-4bit") is None
+
+    monkeypatch.setattr(hw, "get_device", lambda: hw.DeviceType.MLX)
+    assert (
+        mlx_host_bnb_base_repo("unsloth/Qwen2-VL-2B-Instruct-bnb-4bit")
+        == "unsloth/Qwen2-VL-2B-Instruct"
+    )
+
+
+def test_diffusion_bnb_repos_are_loaded_as_named(monkeypatch):
+    """Diffusion runs on diffusers/MPS, which reads bnb weights; only the MLX loader cannot."""
+    from core.inference.mlx_bnb import mlx_host_bnb_base_repo
+
+    monkeypatch.setattr(hw, "get_device", lambda: hw.DeviceType.MLX)
+    assert mlx_host_bnb_base_repo("unsloth/Qwen-Image-2512-unsloth-bnb-4bit") is None
+    assert mlx_host_bnb_base_repo("unsloth/Z-Image-Turbo-unsloth-bnb-4bit") is None
+
+
+def test_validate_reports_the_repo_mlx_will_load(monkeypatch):
+    from types import SimpleNamespace
+
+    from routes.inference import _mlx_base_for_config
+
+    monkeypatch.setattr(hw, "get_device", lambda: hw.DeviceType.MLX)
+    pick = SimpleNamespace(identifier = "unsloth/Qwen2-VL-2B-Instruct-bnb-4bit", base_model = None)
+    assert _mlx_base_for_config(pick) == "unsloth/Qwen2-VL-2B-Instruct"
+
+    adapter = SimpleNamespace(
+        identifier = "me/my-lora", base_model = "unsloth/gemma-3-4b-it-bnb-4bit"
+    )
+    assert _mlx_base_for_config(adapter) == "unsloth/gemma-3-4b-it"
+
+    plain = SimpleNamespace(identifier = "unsloth/Qwen3-4B-Instruct-2507", base_model = None)
+    assert _mlx_base_for_config(plain) is None
