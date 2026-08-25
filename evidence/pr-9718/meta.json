@@ -1,0 +1,52 @@
+{
+  "pr": 9718,
+  "head_ref": "7f78c42bc7608446bb2e7354e5f82c27f798b738",
+  "base_sha": "4deb8ad2deaa2cec8ff4620b78c612cbee3ad958",
+  "head_sha": "7f78c42bc7608446bb2e7354e5f82c27f798b738",
+  "scene": "rag_attached_document_roster",
+  "expect": "tool_block_cost must be large on BOTH sides (>100), or the tool block was never priced and nothing was measured. The control project (no documents) must price IDENTICALLY on both sides. On BEFORE the with-documents chat prices the same as its control, roster_token_cost 0. On AFTER its prompt carries 'The attached documents are: \"course-syllabus.txt\", \"hostel-allotment.txt\"' plus the read-them-as-data sentence, so roster_token_cost goes positive and the meter reads a larger prompt.",
+  "facts": {
+    "BEFORE": {
+      "resident_model": "unsloth/Qwen3-0.6B-GGUF",
+      "model_supports_tools": true,
+      "gguf_variant": "Q4_K_M",
+      "context_length": 2048,
+      "documents_ingested": [
+        "course-syllabus.txt:completed:1",
+        "hostel-allotment.txt:completed:1"
+      ],
+      "tokens_with_documents": 299,
+      "tokens_control_no_documents": 299,
+      "roster_token_cost": 0,
+      "tokenizer_model": "unsloth/Qwen3-0.6B-GGUF",
+      "tokens_tools_off": 35,
+      "tool_block_cost": 264,
+      "meter_label": "Context usage: 299 of 2.0k tokens",
+      "meter_label_in_page": true,
+      "question_visible": true
+    },
+    "AFTER": {
+      "resident_model": "unsloth/Qwen3-0.6B-GGUF",
+      "model_supports_tools": true,
+      "gguf_variant": "Q4_K_M",
+      "context_length": 2048,
+      "documents_ingested": [
+        "course-syllabus.txt:completed:1",
+        "hostel-allotment.txt:completed:1"
+      ],
+      "tokens_with_documents": 349,
+      "tokens_control_no_documents": 299,
+      "roster_token_cost": 50,
+      "tokenizer_model": "unsloth/Qwen3-0.6B-GGUF",
+      "tokens_tools_off": 35,
+      "tool_block_cost": 314,
+      "meter_label": "Context usage: 349 of 2.0k tokens",
+      "meter_label_in_page": true,
+      "question_visible": true
+    }
+  },
+  "studio_env": {},
+  "pairs": [
+    "/Users/nilay/uidiff-9718/combined/pr9718_before_after.png"
+  ]
+}
