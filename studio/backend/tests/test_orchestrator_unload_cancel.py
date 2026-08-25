@@ -2405,12 +2405,20 @@ def _loadable_orchestrator(monkeypatch):
     return o, SimpleNamespace(identifier = "org/model")
 
 
-def _worker_died(o, cancelled):
+def _worker_died(
+    o,
+    cancelled,
+    exc = None,
+):
+    """What _wait_response does once cancel_load has terminated the worker under it."""
+
     def _wait(expected_type, timeout = 300.0):
         if cancelled:
             # What cancel_load does off the lifecycle gate before terminating the worker.
             o.loading_models.discard("org/model")
-        raise RuntimeError("The inference worker stopped unexpectedly while loading the model.")
+        raise exc or orch_mod.WorkerDied(
+            "The inference worker stopped unexpectedly while loading the model."
+        )
 
     return _wait
 
@@ -2429,4 +2437,20 @@ def test_a_worker_that_dies_on_its_own_still_fails_the_load(monkeypatch):
     monkeypatch.setattr(o, "_wait_response", _worker_died(o, cancelled = False))
 
     with pytest.raises(RuntimeError, match = "stopped unexpectedly"):
+        o.load_model(config = config)
+
+
+def test_a_timeout_that_races_a_cancel_is_still_a_failed_load(monkeypatch):
+    """Only the worker's death is read as the cancel.
+
+    _wait_response raises a plain RuntimeError for a timeout and for a worker-reported
+    error, and either one is a load that failed however the marker looks: the failure
+    path is what reaps the worker and reports it. Reading every RuntimeError as
+    "someone pressed Stop" swallowed both.
+    """
+    o, config = _loadable_orchestrator(monkeypatch)
+    timeout = RuntimeError("Timeout waiting for 'loaded' response (no activity for 300.0s)")
+    monkeypatch.setattr(o, "_wait_response", _worker_died(o, cancelled = True, exc = timeout))
+
+    with pytest.raises(RuntimeError, match = "Timeout waiting for 'loaded'"):
         o.load_model(config = config)
