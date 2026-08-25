@@ -3,6 +3,8 @@
 
 """Default model lists for inference, split by platform."""
 
+from typing import Iterable
+
 import utils.hardware.hardware as hw
 from core.inference.mlx_bnb import mlx_bnb_base_repo
 
@@ -51,13 +53,21 @@ DEFAULT_MODELS_STANDARD = [
 ]
 
 
+def suggestions_for_host(models: Iterable[str], device) -> list[str]:
+    """*models* named as *device* really loads them; order kept, duplicates dropped.
+
+    On MLX a bnb repo is a download the loader discards for the base, so suggesting one
+    costs a wasted fetch. Takes the device rather than reading it so the caller decides
+    whether it is cheap to ask (``hw.DEVICE`` off the event loop, ``get_device()`` when
+    detection may still be owed).
+    """
+    if device != hw.DeviceType.MLX:
+        return list(models)
+    return list(dict.fromkeys(mlx_bnb_base_repo(model) or model for model in models))
+
+
 def get_default_models() -> list[str]:
     device = hw.get_device()  # ensures detect_hardware() has run
     if hw.CHAT_ONLY:
         return list(DEFAULT_MODELS_GGUF)
-    if device == hw.DeviceType.MLX:
-        # Recommending a bnb repo here costs a download MLX then discards for the base.
-        return list(
-            dict.fromkeys(mlx_bnb_base_repo(model) or model for model in DEFAULT_MODELS_STANDARD)
-        )
-    return list(DEFAULT_MODELS_STANDARD)
+    return suggestions_for_host(DEFAULT_MODELS_STANDARD, device)

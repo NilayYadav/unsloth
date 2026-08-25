@@ -13,6 +13,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 _BACKEND = Path(__file__).resolve().parent.parent
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
@@ -119,8 +121,72 @@ def test_validate_reports_the_repo_mlx_will_load(monkeypatch):
     pick = SimpleNamespace(identifier = "unsloth/Qwen2-VL-2B-Instruct-bnb-4bit", base_model = None)
     assert _mlx_base_for_config(pick) == "unsloth/Qwen2-VL-2B-Instruct"
 
-    adapter = SimpleNamespace(identifier = "me/my-lora", base_model = "unsloth/gemma-3-4b-it-bnb-4bit")
+    adapter = SimpleNamespace(
+        identifier = "me/my-lora",
+        base_model = "unsloth/gemma-3-4b-it-bnb-4bit",
+    )
     assert _mlx_base_for_config(adapter) == "unsloth/gemma-3-4b-it"
 
     plain = SimpleNamespace(identifier = "unsloth/Qwen3-4B-Instruct-2507", base_model = None)
     assert _mlx_base_for_config(plain) is None
+
+
+def test_the_fetched_ranking_is_mapped_on_a_mac_too(monkeypatch):
+    """/api/models/list serves curated + the remote ranking, and that ranking is mostly
+    bnb repos, so leaving it alone keeps offering the download MLX discards."""
+    import core.inference.orchestrator as orch_mod
+
+    monkeypatch.setattr(orch_mod.InferenceOrchestrator, "_fetch_top_models", lambda self: None)
+    monkeypatch.setattr(defaults_mod, "get_default_models", lambda: ["unsloth/curated"])
+    monkeypatch.setattr(hw, "DETECTION_GENERATION", 1)
+    monkeypatch.setattr(hw, "CHAT_ONLY", False)
+    monkeypatch.setattr(hw, "DEVICE", hw.DeviceType.MLX)
+
+    orch = orch_mod.InferenceOrchestrator()
+    orch._top_gguf_cache = ["unsloth/Qwen3-4B-GGUF"]
+    orch._top_hub_cache = ["unsloth/Qwen3-8B-unsloth-bnb-4bit", "unsloth/Qwen3-4B-Instruct-2507"]
+
+    assert orch.default_models == [
+        "unsloth/curated",
+        "unsloth/Qwen3-4B-GGUF",
+        "unsloth/Qwen3-8B",
+        "unsloth/Qwen3-4B-Instruct-2507",
+    ]
+
+
+def test_the_fetched_ranking_is_untouched_off_mlx(monkeypatch):
+    import core.inference.orchestrator as orch_mod
+
+    monkeypatch.setattr(orch_mod.InferenceOrchestrator, "_fetch_top_models", lambda self: None)
+    monkeypatch.setattr(defaults_mod, "get_default_models", lambda: ["unsloth/curated"])
+    monkeypatch.setattr(hw, "DETECTION_GENERATION", 1)
+    monkeypatch.setattr(hw, "CHAT_ONLY", False)
+    monkeypatch.setattr(hw, "DEVICE", hw.DeviceType.CUDA)
+
+    orch = orch_mod.InferenceOrchestrator()
+    orch._top_hub_cache = ["unsloth/Qwen3-8B-unsloth-bnb-4bit"]
+
+    assert orch.default_models == ["unsloth/curated", "unsloth/Qwen3-8B-unsloth-bnb-4bit"]
+
+
+def test_the_mirror_still_matches_the_loader_it_mirrors():
+    """The rule lives in unsloth_zoo; this module only restates it, so pin the two together.
+
+    importorskip for the same reason test_mlx_inference_backend.py uses it on this exact
+    module: bare backend CI does not install Zoo, so skip rather than error there. Every
+    behaviour asserted above stands on its own; this only catches Zoo moving underneath it.
+    """
+    loader = pytest.importorskip("unsloth_zoo.mlx.loader")
+
+    for name in (
+        "unsloth/Qwen2-VL-2B-Instruct-bnb-4bit",
+        "unsloth/gemma-3-4b-it-unsloth-bnb-4bit",
+        "unsloth/Qwen3-4B-Instruct-2507",
+        "unsloth/Llama-3.2-1B-Instruct-GGUF",
+        "someone-else/model-bnb-4bit",
+    ):
+        remapped, _revision, swapped_from = loader._remap_unsloth_bnb_hub_id_for_mlx(
+            name, "some-revision"
+        )
+        expected = remapped if swapped_from is not None else None
+        assert mlx_bnb_base_repo(name) == expected, name
