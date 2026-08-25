@@ -140,6 +140,16 @@ class GenStreamError(str):
         return obj
 
 
+class WorkerDied(RuntimeError):
+    """``_wait_response`` found the worker gone rather than slow or failing.
+
+    A RuntimeError subclass, so every existing ``except RuntimeError`` and every
+    caller matching on the message keeps working. It exists so ``load_model`` can
+    tell the death ``cancel_load`` causes from a timeout or a worker-reported
+    error, which stay ordinary load failures however the marker looks.
+    """
+
+
 class GenStreamErrorRaised(RuntimeError):
     """Internal exception form of ``GenStreamError`` for generator boundaries."""
 
@@ -591,7 +601,7 @@ class InferenceOrchestrator:
             if resp is None:
                 # Check subprocess health
                 if not self._ensure_subprocess_alive():
-                    raise RuntimeError(self._subprocess_crash_message("wait"))
+                    raise WorkerDied(self._subprocess_crash_message("wait"))
                 continue
 
             rtype = resp.get("type", "")
@@ -1428,6 +1438,24 @@ class InferenceOrchestrator:
                         f"Download stalled for '{model_name}' even with "
                         f"HF_HUB_DISABLE_XET=1 -- check your network connection"
                     )
+                except WorkerDied:
+                    # cancel_load terminates the worker, which _wait_response can only
+                    # read as an unexpected death. The discarded marker is what tells
+                    # the two apart, so a Stop-loading is not reported as a crash.
+                    #
+                    # WorkerDied and not RuntimeError: a timeout or a worker-reported
+                    # error that happens to race a cancel is still a failed load, and
+                    # the failure path below is what reaps its worker and reports it.
+                    if model_name in self.loading_models:
+                        raise
+                    logger.info(
+                        "Load for '%s' was cancelled while waiting for 'loaded'; "
+                        "its worker was terminated by the cancel",
+                        model_name,
+                    )
+                    self.active_model_name = None
+                    self.models.clear()
+                    return False
 
                 if resp.get("success"):
                     # A cancel can land while we were parked in _wait_response above.
