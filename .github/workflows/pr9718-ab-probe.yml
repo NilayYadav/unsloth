@@ -1,0 +1,41 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 9718 RAG roster A/B probe (neg)"
+
+on:
+  push:
+    branches:
+      - "pr9718-ab-neg-20260825205441"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.13"
+
+      - name: "Install backend deps (CPU only)"
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r studio/backend/requirements/studio.txt
+          pip install python-multipart aiofiles sqlalchemy cryptography psutil pyyaml jinja2 mammoth unpdf requests 'numpy<3' pytest pytest-asyncio httpx
+          pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple 'torch>=2.4,<2.11'
+          pip install 'transformers>=4.51,<5.5' peft
+
+      - name: "A/B probe: does the RAG grounding nudge name the retrievable documents?"
+        shell: bash
+        run: |
+          cd studio/backend && python probe_ab.py
+
