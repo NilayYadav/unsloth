@@ -158,23 +158,6 @@
           background: #2d1716;
         }
       }
-      .think {
-        margin-bottom: 10px;
-        font-size: 14px;
-        color: var(--muted);
-      }
-      .think summary {
-        cursor: pointer;
-      }
-      .think div {
-        margin-top: 6px;
-        padding-left: 12px;
-        border-left: 2px solid var(--border);
-      }
-      .cutoff {
-        color: var(--muted);
-        font-style: italic;
-      }
       .dots {
         display: inline-flex;
         gap: 5px;
@@ -389,17 +372,8 @@
         msgs.push({ role: "user", content });
         add("user").textContent = content;
         const out = add("assistant");
-        const think = document.createElement("details");
-        think.className = "think";
-        think.hidden = true;
-        think.appendChild(document.createElement("summary")).textContent = "Thinking";
-        const thinkText = think.appendChild(document.createElement("div"));
-        const body = document.createElement("div");
-        body.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
-        out.append(think, body);
-        let acc = "",
-          reasoning = "",
-          truncated = false;
+        out.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
+        let acc = "";
         try {
           const r = await fetch(chatUrl, {
             method: "POST",
@@ -411,7 +385,7 @@
             }),
           });
           if (!r.ok) {
-            showError(body, r.status, await r.text());
+            showError(out, r.status, await r.text());
             msgs.pop();
             input.value = content; // restore the prompt so the user can retry
             autosize();
@@ -434,35 +408,24 @@
               if (data === "[DONE]") continue;
               try {
                 const j = JSON.parse(data);
-                const choice = j.choices && j.choices[0];
-                if (!choice) continue;
-                if (choice.finish_reason === "length") truncated = true;
-                const delta = choice.delta || {};
-                if (delta.reasoning_content) {
-                  reasoning += delta.reasoning_content;
-                  think.hidden = false;
-                  thinkText.textContent = reasoning;
-                  down();
-                }
-                if (delta.content) {
-                  acc += delta.content;
-                  body.textContent = acc;
+                const d =
+                  j.choices &&
+                  j.choices[0] &&
+                  j.choices[0].delta &&
+                  j.choices[0].delta.content;
+                if (d) {
+                  acc += d;
+                  out.textContent = acc;
                   down();
                 }
               } catch (_) {}
             }
           }
-          if (acc) {
-            msgs.push({ role: "assistant", content: acc });
-          } else if (truncated) {
-            body.className = "cutoff";
-            body.textContent = "Reply cut off at the preview length limit.";
-          } else {
-            body.textContent = "";
-          }
+          if (!acc) out.textContent = "";
+          msgs.push({ role: "assistant", content: acc });
         } catch (err) {
           // Keep any streamed text, flag the break, restore the prompt for retry.
-          body.textContent = acc ? acc + "\n\n[connection lost]" : "Network error, please retry.";
+          out.textContent = acc ? acc + "\n\n[connection lost]" : "Network error, please retry.";
           msgs.pop();
           input.value = content;
           autosize();
