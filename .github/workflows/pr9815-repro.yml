@@ -1,0 +1,60 @@
+name: PR 9815 preview reasoning repro
+
+on:
+  push:
+    branches:
+      - 'mimir-pr9815-**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  preview-reasoning:
+    name: preview page renders reasoning + cutoff
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install preview-route dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # The preview route imports without torch, so install only what the
+          # page + route layer need rather than the whole Studio stack.
+          pip install \
+            fastapi uvicorn 'pydantic>=2.9' \
+            'python-multipart' 'pyyaml' 'httpx' 'email-validator' \
+            'pyjwt' 'cryptography' 'structlog' 'psutil' 'numpy' \
+            'huggingface_hub' 'tqdm' 'rich' 'click' 'sqlite-vec' \
+            playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Show which preview_page.html is under test
+        run: |
+          echo "ref: ${{ github.ref_name }}  sha: ${{ github.sha }}"
+          sha256sum studio/backend/assets/preview_page.html
+          grep -c 'reasoning_content' studio/backend/assets/preview_page.html || true
+
+      - name: Run preview reasoning repro
+        run: |
+          python ci/pr9815/ci_evidence.py \
+            --backend studio/backend \
+            --outdir "$RUNNER_TEMP/pr9815" \
+            --label "${{ github.ref_name }}@${{ github.sha }}"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: pr9815-${{ github.ref_name }}
+          path: ${{ runner.temp }}/pr9815
+          if-no-files-found: warn
