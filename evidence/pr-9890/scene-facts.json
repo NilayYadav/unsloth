@@ -1,0 +1,98 @@
+{
+  "before:1-offer": {
+    "status": "available",
+    "preparationShell": null,
+    "preparationBackend": null,
+    "shellProgress": null,
+    "logLines": 0,
+    "pillPresent": false,
+    "pillText": null,
+    "pillLogPanelPresent": false,
+    "blockingScreen": false,
+    "overlayText": "New Unsloth version | v0.1.900 \u2192 v0.1.901 | A new app update is available | Show release notes | Remind me later | Update"
+  },
+  "before:2-downloading": {
+    "status": "updating-backend",
+    "preparationShell": null,
+    "preparationBackend": null,
+    "shellProgress": null,
+    "logLines": 6,
+    "pillPresent": false,
+    "pillText": null,
+    "pillLogPanelPresent": false,
+    "blockingScreen": true,
+    "overlayText": "unsloth | Updating backend... | This may take a few minutes. Do not close the app. | Show update details"
+  },
+  "before:3-preparing": {
+    "status": "updating-backend",
+    "preparationShell": null,
+    "preparationBackend": null,
+    "shellProgress": null,
+    "logLines": 9,
+    "pillPresent": false,
+    "pillText": null,
+    "pillLogPanelPresent": false,
+    "blockingScreen": true,
+    "overlayText": "unsloth | Updating backend... | This may take a few minutes. Do not close the app. | Show update details"
+  },
+  "before:4-settled": {
+    "status": "updating-backend",
+    "preparationShell": null,
+    "preparationBackend": null,
+    "shellProgress": null,
+    "logLines": 9,
+    "pillPresent": false,
+    "pillText": null,
+    "pillLogPanelPresent": false,
+    "blockingScreen": true,
+    "overlayText": "unsloth | Updating backend... | This may take a few minutes. Do not close the app. | Show update details"
+  },
+  "after:1-offer": {
+    "status": "available",
+    "preparationShell": "pending",
+    "preparationBackend": "pending",
+    "shellProgress": 0,
+    "logLines": 0,
+    "pillPresent": false,
+    "pillText": null,
+    "pillLogPanelPresent": false,
+    "blockingScreen": false,
+    "overlayText": "New Unsloth version | v0.1.900 \u2192 v0.1.901 | Prepares in the background. You keep working and restart when it is ready | Show release notes | Remind me later | Update"
+  },
+  "after:2-downloading": {
+    "status": "preparing",
+    "preparationShell": "downloading",
+    "preparationBackend": "staging",
+    "shellProgress": 30,
+    "logLines": 6,
+    "pillPresent": true,
+    "pillText": "Preparing update \u00b7 downloading 30%",
+    "pillLogPanelPresent": false,
+    "blockingScreen": false,
+    "overlayText": "Preparing update \u00b7 downloading 30%"
+  },
+  "after:3-preparing": {
+    "status": "ready",
+    "preparationShell": "done",
+    "preparationBackend": "ready",
+    "shellProgress": 100,
+    "logLines": 9,
+    "pillPresent": true,
+    "pillText": "Update ready \u00b7 v0.1.901 | Restart",
+    "pillLogPanelPresent": false,
+    "blockingScreen": false,
+    "overlayText": "Update ready \u00b7 v0.1.901 | Restart"
+  },
+  "after:4-settled": {
+    "status": "ready",
+    "preparationShell": "done",
+    "preparationBackend": "ready",
+    "shellProgress": 100,
+    "logLines": 9,
+    "pillPresent": true,
+    "pillText": "[TAURI:STEP] clone |   cloning unsloth_studio (copy-on-write) | [TAURI:STEP] update |   resolving unsloth==2026.9.2 |   installed 14 packages in 6.2s |   rebuilding llama.cpp bindings | [TAURI:STEP] verify |   staged CLI answered -h | Staged Unsloth Studio 2026.9.2 | Update ready \u00b7 v0.1.901 | Restart",
+    "pillLogPanelPresent": true,
+    "blockingScreen": false,
+    "overlayText": "[TAURI:STEP] clone |   cloning unsloth_studio (copy-on-write) | [TAURI:STEP] update |   resolving unsloth==2026.9.2 |   installed 14 packages in 6.2s |   rebuilding llama.cpp bindings | [TAURI:STEP] verify |   staged CLI answered -h | Staged Unsloth Studio 2026.9.2 | Update ready \u00b7 v0.1.901 | Restart"
+  }
+}
