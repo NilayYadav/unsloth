@@ -1,0 +1,59 @@
+{
+  "pr": 9894,
+  "head_ref": "acd820d4ee2b646c9ea943de493756f3ac1b0e4b",
+  "base_sha": "e745043b3d6dd3e8d4e69ff806480c555f511439",
+  "head_sha": "acd820d4ee2b646c9ea943de493756f3ac1b0e4b",
+  "scene": "canvas_network_blocked_alert",
+  "expect": "BEFORE (merge base) the canvas answers with a one-line strip along the BOTTOM naming the count and host and offering exactly one button, 'Allow for this canvas' -- nothing says a setting is responsible: uses_alert_component False, banner_at_top False, banner_title '', banner_button_count 1, has_open_settings_button False, has_dismiss_button False, mentions_the_setting_by_name False. AFTER the notice moves to the TOP as a titled alert: uses_alert_component False -> True, banner_at_top False -> True, banner_title '' -> 'Canvas network access is off', banner_button_count 1 -> 3, has_open_settings_button False -> True, has_dismiss_button False -> True, mentions_the_setting_by_name False -> True, and banner_char_count rises. Controls that must NOT move: blocked_host stays cdn.jsdelivr.net, banner_names_host stays True, has_allow_for_canvas_button stays True and network_setting_enabled stays False on both sides -- otherwise the shot proves the canvas broke, not that the message improved.",
+  "facts": {
+    "BEFORE": {
+      "seeded_message_id": "pr9894-canvas-network-message",
+      "stored_message_count": 1,
+      "blocked_host": "cdn.jsdelivr.net",
+      "network_setting_enabled": false,
+      "banner_present": true,
+      "banner_text": "Blocked 1 external resource from cdn.jsdelivr.net. Allow for this canvas",
+      "banner_char_count": 72,
+      "banner_names_host": true,
+      "uses_alert_component": false,
+      "banner_title": "",
+      "banner_centre_fraction": 0.95,
+      "banner_at_top": false,
+      "banner_buttons": [
+        "Allow for this canvas"
+      ],
+      "banner_button_count": 1,
+      "has_open_settings_button": false,
+      "has_dismiss_button": false,
+      "has_allow_for_canvas_button": true,
+      "mentions_the_setting_by_name": false
+    },
+    "AFTER": {
+      "seeded_message_id": "pr9894-canvas-network-message",
+      "stored_message_count": 1,
+      "blocked_host": "cdn.jsdelivr.net",
+      "network_setting_enabled": false,
+      "banner_present": true,
+      "banner_text": "Canvas network access is off Blocked 1 external resource from cdn.jsdelivr.net. Turn on \u201cAllow canvas network access\u201d in Settings \u2192 Chat to let canvases load external resources, or allow it just for this canvas. Allow for this canvas Open Settings",
+      "banner_char_count": 247,
+      "banner_names_host": true,
+      "uses_alert_component": true,
+      "banner_title": "Canvas network access is off",
+      "banner_centre_fraction": 0.182,
+      "banner_at_top": true,
+      "banner_buttons": [
+        "Dismiss",
+        "Allow for this canvas",
+        "Open Settings"
+      ],
+      "banner_button_count": 3,
+      "has_open_settings_button": true,
+      "has_dismiss_button": true,
+      "has_allow_for_canvas_button": true,
+      "mentions_the_setting_by_name": true
+    }
+  },
+  "studio_env": {
+    "UNSLOTH_DISABLE_MLX_AUTOREPAIR": "1"
+  }
+}
