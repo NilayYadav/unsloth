@@ -1,0 +1,200 @@
+name: PR 9890 red-check A/B
+
+# Same runner, same probe, same command in every pair. The only thing that changes
+# between the two halves of a job is the tree under test.
+on:
+  push:
+    branches: [ ci-evidence-pr9890 ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr9890-ab-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PRE: 3c10a7ae61712944df1e63137bfab6f91ea81fbd
+  POST: 9ed274308d79882c6974c6aaedbde9abb4cc706e
+  UPSTREAM_MAIN: e745043b3d6dd3e8d4e69ff806480c555f511439
+
+jobs:
+  i18n:
+    name: A/B locale parity (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { repository: NilayYadav/unsloth, ref: '${{ env.PRE }}', path: pre }
+      - uses: actions/checkout@v5
+        with: { repository: NilayYadav/unsloth, ref: '${{ env.POST }}', path: post }
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: BEFORE must fail on the four missing keys
+        working-directory: pre/studio/frontend
+        run: |
+          set +e
+          out=$(node --experimental-strip-types --no-warnings src/i18n/check-parity.ts --strict 2>&1)
+          rc=$?
+          set -e
+          echo "$out" | tail -40
+          [ "$rc" -ne 0 ] || { echo "::error::BEFORE unexpectedly passed"; exit 1; }
+          echo "$out" | grep -q 'settings.about.update.restartToUpdate' \
+            || { echo "::error::BEFORE failed for the wrong reason"; exit 1; }
+          echo "PASS: BEFORE fails on the missing update keys (rc=$rc)"
+      - name: AFTER must pass
+        working-directory: post/studio/frontend
+        run: |
+          node --experimental-strip-types --no-warnings src/i18n/check-parity.ts --strict
+          echo "PASS: AFTER passes locale parity"
+
+  setup-parity:
+    name: A/B setup parity (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with: { repository: NilayYadav/unsloth, ref: '${{ env.PRE }}', path: pre }
+      - uses: actions/checkout@v5
+        with: { repository: NilayYadav/unsloth, ref: '${{ env.POST }}', path: post }
+      - name: BEFORE must fail the two activation checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $out = & pwsh -NoProfile -File pre/tests/studio/test_amd_venv_repair_loop.ps1 2>&1 | Out-String
+          $rc = $LASTEXITCODE
+          Write-Host ($out -split "`n" | Select-String -Pattern 'FAIL|Results|check\(s\)' | Out-String)
+          if ($rc -eq 0) { Write-Host "::error::BEFORE unexpectedly passed"; exit 1 }
+          if ($out -notmatch 'FAIL  the activation block was found') {
+            Write-Host "::error::BEFORE failed for the wrong reason"; exit 1
+          }
+          if ($out -notmatch 'FAIL  the guard does not delete anything') {
+            Write-Host "::error::BEFORE failed for the wrong reason"; exit 1
+          }
+          Write-Host "PASS: BEFORE fails on the two activation checks (rc=$rc)"
+          exit 0
+      - name: AFTER must pass
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          & pwsh -NoProfile -File post/tests/studio/test_amd_venv_repair_loop.ps1
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::AFTER still fails"; exit 1 }
+          Write-Host "PASS: AFTER passes the whole parity suite"
+
+  staged-root-guard:
+    name: A/B staged-root guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { repository: NilayYadav/unsloth, ref: '${{ env.PRE }}', path: pre }
+      - uses: actions/checkout@v5
+        with: { repository: NilayYadav/unsloth, ref: '${{ env.POST }}', path: post }
+      - name: BEFORE must fail the two live-install guards
+        run: |
+          # The identical probe, run against the pre-fix setup scripts.
+          cp post/tests/sh/test_setup_staged_root.sh pre/tests/sh/
+          set +e
+          out=$(bash pre/tests/sh/test_setup_staged_root.sh 2>&1); rc=$?
+          set -e
+          echo "$out"
+          [ "$rc" -ne 0 ] || { echo "::error::BEFORE unexpectedly passed"; exit 1; }
+          echo "$out" | grep -q 'FAIL: setup.sh guards the legacy sidecar removal on STAGE_ROOT' \
+            || { echo "::error::BEFORE failed for the wrong reason"; exit 1; }
+          echo "$out" | grep -q 'FAIL: setup.ps1 guards the legacy sidecar removal on StageRoot' \
+            || { echo "::error::BEFORE failed for the wrong reason"; exit 1; }
+          echo "PASS: BEFORE deletes the live legacy sidecar during a staged run (rc=$rc)"
+      - name: AFTER must pass
+        run: |
+          bash post/tests/sh/test_setup_staged_root.sh
+          echo "PASS: AFTER keeps the live install untouched while staging"
+
+  staging-guards:
+    name: A/B staging failure guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { repository: NilayYadav/unsloth, ref: '${{ env.PRE }}', path: pre }
+      - uses: actions/checkout@v5
+        with: { repository: NilayYadav/unsloth, ref: '${{ env.POST }}', path: post }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: deps
+        run: python -m pip install pytest typer click pyyaml pydantic requests && python -c "import typer, click, yaml, pydantic; print('deps ok')"
+      - name: BEFORE must fail both new guards
+        run: |
+          # The identical test file, run against the pre-fix implementation.
+          cp post/unsloth_cli/tests/test_studio_update_stage.py pre/unsloth_cli/tests/
+          cd pre
+          set +e
+          out=$(python -m pytest -q unsloth_cli/tests/test_studio_update_stage.py 2>&1); rc=$?
+          set -e
+          echo "$out" | tail -25
+          [ "$rc" -ne 0 ] || { echo "::error::BEFORE unexpectedly passed"; exit 1; }
+          echo "$out" | grep -q 'test_stage_refuses_when_the_previous_stage_could_not_be_cleared' \
+            || { echo "::error::BEFORE failed for the wrong reason"; exit 1; }
+          echo "$out" | grep -q 'test_update_stage_reports_an_unexpected_failure_as_a_tauri_error' \
+            || { echo "::error::BEFORE failed for the wrong reason"; exit 1; }
+          echo "PASS: BEFORE stages into an uncleared tree and loses non-StageError failures"
+      - name: AFTER must pass
+        working-directory: post
+        run: |
+          python -m pytest -q unsloth_cli/tests/test_studio_update_stage.py
+          echo "PASS: AFTER passes all staging tests"
+      - name: AFTER frontend update-preparation tests
+        working-directory: post/studio/frontend
+        run: node --experimental-strip-types --test tests/update-preparation.test.ts
+
+  preexisting-on-main:
+    name: the three remaining reds, on upstream main alone
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { repository: unslothai/unsloth, ref: '${{ env.UPSTREAM_MAIN }}', path: main }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: deps
+        run: |
+          python -m pip install pytest pyyaml pytest-xdist playwright
+          python -m pip install -r main/studio/backend/requirements/studio.txt
+          python -m playwright install --with-deps chromium
+      - name: workflow-trigger lint guard already fails on main
+        working-directory: main
+        run: |
+          set +e
+          out=$(python -m pytest -q tests/studio/test_playwright_suites_run_in_ci.py 2>&1); rc=$?
+          set -e
+          echo "$out" | tail -12
+          [ "$rc" -ne 0 ] || { echo "::error::main is green here; the failure IS from the PR"; exit 1; }
+          echo "$out" | grep -q "playwright_tool_activity.py" \
+            || { echo "::error::main failed for a different reason"; exit 1; }
+          echo "PASS: main $UPSTREAM_MAIN already fails on playwright_tool_activity.py"
+      - name: Repo tests (CPU) backend guard already fails on main
+        working-directory: main/studio/backend
+        run: |
+          set +e
+          out=$(python -m pytest -q tests/test_gpu_init_crash_message.py 2>&1); rc=$?
+          set -e
+          echo "$out" | tail -8
+          [ "$rc" -ne 0 ] || { echo "::error::main is green here; the failure IS from the PR"; exit 1; }
+          echo "$out" | grep -q "not enough values to unpack" \
+            || { echo "::error::main failed for a different reason"; exit 1; }
+          echo "PASS: main $UPSTREAM_MAIN already fails test_gpu_init_crash_message.py"
+      - name: frontend ansi smoke already fails on main
+        working-directory: main
+        run: |
+          (cd studio/frontend && npm ci --no-fund --no-audit)
+          set +e
+          out=$(python tests/studio/playwright_strip_ansi_smoke.py 2>&1); rc=$?
+          set -e
+          echo "$out" | tail -12
+          [ "$rc" -ne 0 ] || { echo "::error::main is green here; the failure IS from the PR"; exit 1; }
+          echo "$out" | grep -q "CHAT_GPU_MEMORY_MODE_KEY" \
+            || { echo "::error::main failed for a different reason"; exit 1; }
+          echo "PASS: main $UPSTREAM_MAIN already fails playwright_strip_ansi_smoke.py"
