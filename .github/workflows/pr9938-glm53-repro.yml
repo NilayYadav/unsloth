@@ -55,7 +55,10 @@ jobs:
       - name: PR unit tests
         working-directory: studio/backend
         run: |
-          python3 -m pip install -q pytest
+          # The test module imports core.inference.llama_cpp; structlog/httpx come from
+          # its logger and client chain, huggingface_hub from the session-scoped conftest
+          # fixture. Everything else the backend suite needs is out of this file's path.
+          python3 -m pip install -q pytest structlog httpx huggingface_hub
           python3 -m pytest tests/test_chat_template_numeric_member_repair.py -v
 
       - uses: actions/upload-artifact@v4
