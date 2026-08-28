@@ -109,6 +109,13 @@ expect("whole numeric chain rewritten",
        repair_numeric_member_access("{{ matrix.0.1 }}"), "{{ matrix[0][1] }}")
 expect("spaced dot rewritten",
        repair_numeric_member_access("{{ messages[i] . 0.role }}"), "{{ messages[i][0].role }}")
+expect("printed Jinja example untouched",
+       repair_numeric_member_access('{{ "{{ example.0 }}" }}'), None)
+expect("a literal brace does not hide a later real site",
+       repair_numeric_member_access('{{ "a }} b" }}{{ m.content.0.type }}'),
+       '{{ "a }} b" }}{{ m.content[0].type }}')
+expect("comment not worth a relaunch",
+       repair_numeric_member_access("{# {{ a.0 }} #}"), None)
 
 print()
 for repo in ("unsloth/gpt-oss-120b-GGUF", "unsloth/Qwen3-Coder-480B-A35B-Instruct-GGUF",
