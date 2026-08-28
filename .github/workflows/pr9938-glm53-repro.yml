@@ -1,0 +1,65 @@
+name: "PR 9938 GLM-5.3 chat-template A/B"
+
+on:
+  push:
+    branches:
+      - "mimir-repro-pr9938-20260828215650"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr9938-glm53-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  caps-ab:
+    name: "llama.cpp capability A/B on the real GLM-5.3 template"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch the llama.cpp source Unsloth Studio ships
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 5 -o llama-src.tar.gz \
+            https://github.com/unslothai/llama.cpp/releases/download/b10639-mix-f6f92fe/llama.cpp-source-commit-2a36554fc89e1fdbbd0de8cb382afbc1677b1b65.tar.gz
+          sha256sum llama-src.tar.gz
+          mkdir -p llama-src
+          tar xzf llama-src.tar.gz -C llama-src --strip-components=1
+          ls llama-src/common/jinja
+
+      - name: Build llama.cpp's Jinja capability probe
+        run: |
+          set -euo pipefail
+          L=llama-src
+          cc -c -O2 -o ggml_abort_shim.o ci/pr9938/ggml_abort_shim.c
+          g++ -std=c++17 -O2 \
+            -I "$L/common" -I "$L/ggml/include" -I "$L/vendor" -I "$L/vendor/nlohmann" \
+            -o caps_probe ci/pr9938/caps_probe.cpp \
+            "$L/common/jinja/lexer.cpp" "$L/common/jinja/parser.cpp" \
+            "$L/common/jinja/runtime.cpp" "$L/common/jinja/caps.cpp" \
+            "$L/common/jinja/string.cpp" "$L/common/jinja/value.cpp" \
+            "$L/common/json.cpp" "$L/common/unicode.cpp" ggml_abort_shim.o
+          ./caps_probe || true
+
+      - name: "A/B: shipped GLM-5.3 template vs Studio's repaired copy"
+        run: python3 ci/pr9938/ab_check.py ./caps_probe ab-out
+
+      - name: PR unit tests
+        working-directory: studio/backend
+        run: |
+          python3 -m pip install -q pytest
+          python3 -m pytest tests/test_chat_template_numeric_member_repair.py -v
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr9938-glm53-templates
+          path: ab-out/
