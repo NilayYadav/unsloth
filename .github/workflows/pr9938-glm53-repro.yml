@@ -66,3 +66,41 @@ jobs:
         with:
           name: pr9938-glm53-templates
           path: ab-out/
+
+  server-e2e:
+    name: "llama-server before/after on a replayed tool call"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch the llama.cpp build Unsloth Studio ships
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 5 -o llama-bin.tar.gz \
+            https://github.com/unslothai/llama.cpp/releases/download/b10639-mix-f6f92fe/app-b10639-mix-f6f92fe-linux-x64-cpu.tar.gz
+          sha256sum llama-bin.tar.gz
+          mkdir -p llama-bin && tar xzf llama-bin.tar.gz -C llama-bin
+          ./llama-bin/llama-server --version 2>&1 | head -3 || true
+
+      - name: Fetch a tiny model to drive the server
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 5 -o stories260K.gguf \
+            https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
+          ls -l stories260K.gguf
+
+      - name: "A/B: the same tool turn, before and after the repair"
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/llama-bin
+        run: python3 ci/pr9938/server_ab.py ./llama-bin/llama-server ./stories260K.gguf server-ab
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr9938-llama-server-ab
+          path: server-ab/
