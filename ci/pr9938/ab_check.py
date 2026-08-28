@@ -107,6 +107,8 @@ expect("float literal untouched",
        repair_numeric_member_access("{% if t > 0.5 %}{{ 1.0 }}{% endif %}"), None)
 expect("whole numeric chain rewritten",
        repair_numeric_member_access("{{ matrix.0.1 }}"), "{{ matrix[0][1] }}")
+expect("spaced dot rewritten",
+       repair_numeric_member_access("{{ messages[i] . 0.role }}"), "{{ messages[i][0].role }}")
 
 print()
 for repo in ("unsloth/gpt-oss-120b-GGUF", "unsloth/Qwen3-Coder-480B-A35B-Instruct-GGUF",
