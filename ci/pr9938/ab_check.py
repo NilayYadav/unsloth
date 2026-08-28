@@ -93,6 +93,27 @@ for cap in GATED:
     expect(f"CONTROL {cap}", control_caps.get(cap), True)
 
 print()
+print("== FALSE-POSITIVE GUARD: templates the repair must not touch ==")
+expect("raw block emitted verbatim",
+       repair_numeric_member_access("{% raw %}{{ example.0 }}{% endraw %}"), None)
+expect("raw block, whitespace-control spelling",
+       repair_numeric_member_access("{%- raw -%}{{ example.0 }}{%- endraw -%}"), None)
+expect("a real site beside a raw block still repaired",
+       repair_numeric_member_access("{% raw %}{{ example.0 }}{% endraw %}{{ m.content.0.output }}"),
+       "{% raw %}{{ example.0 }}{% endraw %}{{ m.content[0].output }}")
+expect("quoted prompt text untouched",
+       repair_numeric_member_access('{{ "see step.0 below" }}'), None)
+expect("float literal untouched",
+       repair_numeric_member_access("{% if t > 0.5 %}{{ 1.0 }}{% endif %}"), None)
+expect("whole numeric chain rewritten",
+       repair_numeric_member_access("{{ matrix.0.1 }}"), "{{ matrix[0][1] }}")
+
+print()
+for repo in ("unsloth/gpt-oss-120b-GGUF", "unsloth/Qwen3-Coder-480B-A35B-Instruct-GGUF",
+             "unsloth/DeepSeek-V3.2-GGUF", "unsloth/gemma-4-31b-it-GGUF"):
+    expect(f"{repo} left alone", repair_numeric_member_access(embedded_template(repo)), None)
+
+print()
 if failures:
     print(f"FAILED {len(failures)} assertion(s): {failures}")
     sys.exit(1)
