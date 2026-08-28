@@ -116,6 +116,17 @@ expect("a literal brace does not hide a later real site",
        '{{ "a }} b" }}{{ m.content[0].type }}')
 expect("comment not worth a relaunch",
        repair_numeric_member_access("{# {{ a.0 }} #}"), None)
+expect("raw block emitted verbatim, real site beside it repaired",
+       repair_numeric_member_access("{% raw %}{{ e.0 }}{% endraw %}{{ m.content.0.output }}"),
+       "{% raw %}{{ e.0 }}{% endraw %}{{ m.content[0].output }}")
+expect("raw tags that are only comment text do not open a raw block",
+       repair_numeric_member_access("{# {% raw %} #}{{ m.content.0 }}{# {% endraw %} #}"),
+       "{# {% raw %} #}{{ m.content[0] }}{# {% endraw %} #}")
+expect("a raw body is literal all the way to its terminator",
+       repair_numeric_member_access("{% raw %}{# {% endraw %} #}{{ m.content.0 }}"),
+       "{% raw %}{# {% endraw %} #}{{ m.content[0] }}")
+expect("an unterminated raw block repairs nothing after it",
+       repair_numeric_member_access("{% raw %}{{ e.0 }}"), None)
 
 print()
 for repo in ("unsloth/gpt-oss-120b-GGUF", "unsloth/Qwen3-Coder-480B-A35B-Instruct-GGUF",
