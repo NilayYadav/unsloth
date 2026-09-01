@@ -30,8 +30,8 @@ jobs:
             sha: 3f83a9c153f67f3dd57957dcf00fa7bee11f1b95
             expect: 'both non-stream P1s fixed, but in-band SSE still flattens to An internal error occurred'
           - variant: head-fixed
-            sha: e18b32cedd462e7c1c5ff8f543a534a292612da3
-            expect: 'PR wording works, KV starvation excluded, in-band SSE routed through the same formatter'
+            sha: 1e4ff19d2c5b0e603687f1e2abec2c15910e2c4c
+            expect: 'final head: wording, starvation exclusion, in-band SSE and structured-count recovery'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -56,11 +56,14 @@ jobs:
 
       - name: Swap in the variant's inference.py (the only thing that differs)
         run: |
+          # Both production files this PR touches, so each variant is that commit's
+          # real behaviour and not a mix.
           git checkout ${{ matrix.sha }} -- studio/backend/routes/inference.py
+          git checkout ${{ matrix.sha }} -- studio/backend/core/inference/context_refusal.py
           echo "variant : ${{ matrix.variant }}"
           echo "sha     : ${{ matrix.sha }}"
           echo "expect  : ${{ matrix.expect }}"
-          git diff --stat HEAD -- studio/backend/routes/inference.py || true
+          git diff --stat HEAD -- studio/backend/routes/inference.py studio/backend/core/inference/context_refusal.py || true
 
       - name: Probe what the client is told
         run: python .github/repro/pr10090_probe.py

@@ -8,6 +8,7 @@ oversize = d["cases"]["oversize"]
 starvation = d["cases"]["starvation"]
 ib_nocount = d["in_band"]["oversize_no_counts"]
 ib_starv = d["in_band"]["starvation"]
+ib_struct = d["in_band"]["structured_only_counts"]
 fails = []
 
 
@@ -57,6 +58,8 @@ elif VARIANT == "head-inband-gap":
           ib_nocount["type"] == "invalid_request_error", ib_nocount["type"])
     check("GAP PRESENT: in-band starvation is an internal error too",
           "internal error" in ib_starv["message"].lower(), ib_starv["message"])
+    check("GAP PRESENT: structured counts are lost too",
+          "70494" not in ib_struct["message"], ib_struct["message"])
 
 elif VARIANT == "head-fixed":
     check("oversize is still reworded with both token counts",
@@ -81,6 +84,9 @@ elif VARIANT == "head-fixed":
           "shared pool of context" in ib_starv["message"], ib_starv["message"])
     check("in-band starvation is not a client error",
           ib_starv["type"] == "api_error", ib_starv["type"])
+    check("in-band recovers counts from the structured fields",
+          "Prompt is too long: 70494 tokens > 67584 maximum" in ib_struct["message"],
+          ib_struct["message"])
 else:
     raise SystemExit("unknown variant " + VARIANT)
 

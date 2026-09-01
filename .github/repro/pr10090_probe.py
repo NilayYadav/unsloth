@@ -32,8 +32,24 @@ if in_band_fn is None:
         return ri._anthropic_stream_error_event(RuntimeError(text), force=True)
 
 
-def in_band(text):
-    event = in_band_fn(text)
+STRUCTURED = {
+    "code": 400,
+    "message": "the request exceeds the available context size",
+    "type": "exceed_context_size_error",
+    "n_prompt_tokens": 70494,
+    "n_ctx": 67584,
+}
+
+
+def in_band(text, counts_source=None):
+    if counts_source is not None:
+        try:
+            event = in_band_fn(text, counts_source=counts_source)
+        except TypeError:
+            # Pre-fix checkouts take only the message.
+            event = in_band_fn(text)
+    else:
+        event = in_band_fn(text)
     payload = json.loads(event.split("data: ", 1)[1].strip().splitlines()[0])["error"]
     return {"message": payload["message"], "type": payload["type"]}
 
@@ -53,6 +69,10 @@ for name, body in (("oversize", OVERSIZE), ("starvation", STARVATION)):
 NOCOUNT = "the request exceeds the available context size. try increasing the context size"
 for name, body in (("oversize_no_counts", NOCOUNT), ("oversize", OVERSIZE), ("starvation", STARVATION)):
     out["in_band"][name] = dict(in_band(body), upstream_body=body)
+out["in_band"]["structured_only_counts"] = dict(
+    in_band(STRUCTURED["message"], counts_source=json.dumps(STRUCTURED)),
+    upstream_body=json.dumps(STRUCTURED),
+)
 
 print(json.dumps(out, indent=2))
 with open("probe_out.json", "w") as fh:
