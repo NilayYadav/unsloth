@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   repro:
-    name: MCP OAuth client_secret_basic regression test
+    name: MCP OAuth client_secret_basic A/B
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -23,27 +23,35 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Install the SDKs at the versions studio.txt pins
+      - name: Install the SDKs at the versions studio.txt / constraints.txt pin
         run: |
           python -m pip install --upgrade pip
-          pip install 'fastmcp>=3.0.2' 'mcp>=1.24,<2' pytest pytest-asyncio httpx
+          pip install 'fastmcp>=3.0.2' 'mcp>=1.24,<2' \
+                      pytest pytest-asyncio httpx structlog huggingface_hub
 
       - name: Record the exact SDK versions under test
         run: |
           python - <<'PY'
           import importlib.metadata as md
-          for name in ("fastmcp", "mcp", "httpx", "pytest"):
+          for name in ("fastmcp", "mcp", "httpx", "structlog", "huggingface_hub"):
               print(f"VERSION {name}=={md.version(name)}")
           PY
 
       - name: Show whether the production fix is present in this tree
         run: |
           if grep -q "_strip_client_id_under_basic_auth" studio/backend/core/inference/mcp_client.py; then
-            echo "TREE=with-fix (mcp_client.py contains _strip_client_id_under_basic_auth)"
+            echo "TREE=with-fix"
           else
-            echo "TREE=no-fix (mcp_client.py does NOT contain _strip_client_id_under_basic_auth)"
+            echo "TREE=no-fix (unmodified upstream main)"
           fi
 
-      - name: Run the OAuth regression test
+      # The real gate. This probe never references anything the PR added: it drives
+      # core.inference.mcp_client._client(url, headers, use_oauth=True), which is
+      # identical on both branches, and inspects the token request the SDK builds.
+      - name: 'A/B gate: token request must not carry client_id under Basic auth'
+        run: python probe_oauth_ab.py
+
+      - name: Run the PR's regression test
+        if: always()
         working-directory: studio/backend
         run: pytest tests/test_mcp_oauth_basic_auth.py -v -p no:cacheprovider
