@@ -26,9 +26,12 @@ jobs:
           - variant: head-before-fix
             sha: 0eec0f2220aa07569e1f1949ffb7100858396f35
             expect: 'PR wording works, but KV starvation is swept into it (Codex P1)'
+          - variant: head-inband-gap
+            sha: 3f83a9c153f67f3dd57957dcf00fa7bee11f1b95
+            expect: 'both non-stream P1s fixed, but in-band SSE still flattens to An internal error occurred'
           - variant: head-fixed
-            sha: 3d1b3f82c78fb814700963528ee30780285f5195
-            expect: 'PR wording works and KV starvation is excluded'
+            sha: e18b32cedd462e7c1c5ff8f543a534a292612da3
+            expect: 'PR wording works, KV starvation excluded, in-band SSE routed through the same formatter'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

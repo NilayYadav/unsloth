@@ -6,6 +6,8 @@ VARIANT = sys.argv[1]
 d = json.load(open("probe_out.json"))
 oversize = d["cases"]["oversize"]
 starvation = d["cases"]["starvation"]
+ib_nocount = d["in_band"]["oversize_no_counts"]
+ib_starv = d["in_band"]["starvation"]
 fails = []
 
 
@@ -15,7 +17,8 @@ def check(label, cond, got):
         fails.append(label)
 
 
-print("variant=%s rendered_by=%s" % (VARIANT, d["rendered_by"]))
+print("variant=%s rendered_by=%s in_band_by=%s"
+      % (VARIANT, d["rendered_by"], d["in_band_by"]))
 
 if VARIANT == "base-before-pr":
     # The defect PR 10090 exists to fix: the client saw a raw llama-server string.
@@ -23,6 +26,8 @@ if VARIANT == "base-before-pr":
           oversize["message"].startswith("llama-server error:"), oversize["message"])
     check("oversize never says the prompt is too long",
           "too long" not in oversize["message"].lower(), oversize["message"])
+    check("in-band count-less oversize is an internal error",
+          "internal error" in ib_nocount["message"].lower(), ib_nocount["message"])
 
 elif VARIANT == "head-before-fix":
     # The PR's feature works...
@@ -37,6 +42,21 @@ elif VARIANT == "head-before-fix":
     check("REGRESSION PRESENT: starvation is sent to the client as 400",
           starvation["status_under_pr_formula"] == 400,
           starvation["status_under_pr_formula"])
+
+elif VARIANT == "head-inband-gap":
+    # Both non-streaming P1s are fixed here...
+    check("non-stream oversize is reworded",
+          "Prompt is too long: 214331 tokens > 131072 maximum" in oversize["message"],
+          oversize["message"])
+    check("non-stream starvation is excluded",
+          starvation["classify"] is None, starvation["classify"])
+    # ...but the in-band SSE surface still flattens the count-less wording.
+    check("GAP PRESENT: in-band count-less oversize is an internal error",
+          "internal error" in ib_nocount["message"].lower(), ib_nocount["message"])
+    check("GAP PRESENT: and it is still sent as invalid_request_error",
+          ib_nocount["type"] == "invalid_request_error", ib_nocount["type"])
+    check("GAP PRESENT: in-band starvation is an internal error too",
+          "internal error" in ib_starv["message"].lower(), ib_starv["message"])
 
 elif VARIANT == "head-fixed":
     check("oversize is still reworded with both token counts",
@@ -53,6 +73,14 @@ elif VARIANT == "head-fixed":
     check("starvation no longer becomes a 400",
           starvation["status_under_pr_formula"] == 500,
           starvation["status_under_pr_formula"])
+    check("in-band count-less oversize is now readable",
+          ib_nocount["message"].startswith("Prompt is too long"), ib_nocount["message"])
+    check("in-band count-less oversize is still a client error",
+          ib_nocount["type"] == "invalid_request_error", ib_nocount["type"])
+    check("in-band starvation keeps the shared-cache explanation",
+          "shared pool of context" in ib_starv["message"], ib_starv["message"])
+    check("in-band starvation is not a client error",
+          ib_starv["type"] == "api_error", ib_starv["type"])
 else:
     raise SystemExit("unknown variant " + VARIANT)
 
