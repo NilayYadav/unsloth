@@ -34,7 +34,7 @@ jobs:
       - name: Install the backend imports studio_db needs
         run: |
           python -m pip install --upgrade pip
-          python -m pip install structlog fastapi httpx pydantic pyyaml psutil \
+          python -m pip install pytest structlog fastapi httpx pydantic pyyaml psutil \
             requests pyjwt huggingface_hub cryptography pillow numpy
 
       - name: Capture the PUT body the edit pencil sends
