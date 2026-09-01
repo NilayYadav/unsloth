@@ -1,0 +1,42 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10088 MCP image probe"
+
+on:
+  push:
+    branches:
+      - "pr10088-mcpimg-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install the Studio backend requirements"
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip >/dev/null; pip install -r studio/backend/requirements/studio.txt 2>&1 | tail -5
+
+      - name: "Record the tree under test"
+        shell: bash
+        run: |
+          echo "HEAD=$(git rev-parse HEAD)"; echo "mcp_images module present: $(test -f studio/backend/core/inference/mcp_images.py && echo yes || echo no)"
+
+      - name: "PR 10088 probe -- does an MCP tool image reach the model?"
+        shell: bash
+        run: |
+          python probe_mcp_images.py
+
