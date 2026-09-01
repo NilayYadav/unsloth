@@ -1,0 +1,55 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10097 dsh permission-mode + reasoning-effort repro"
+
+on:
+  push:
+    branches:
+      - "pr10097-repro-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install the CLI test deps"
+        shell: bash
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet pytest typer click pydantic pyyaml
+          python -c "import typer, click, yaml, pydantic; print('deps ok')"
+
+      - name: "Show which dsh implementation is under test"
+        shell: bash
+        run: |
+          echo '--- unsloth start dsh: env the recipe builds ---'
+          grep -n 'DSH_PERMISSION_MODE' unsloth_cli/commands/start.py || echo 'DSH_PERMISSION_MODE: not set by start.py (pre-fix behaviour)'
+          echo '--- reasoning-effort wired into ServerOptions? ---'
+          awk '/^def dsh\(/,/^    _run\(base/' unsloth_cli/commands/start.py | grep -n 'reasoning_effort' || echo 'reasoning_effort: absent from the dsh subcommand (pre-fix behaviour)'
+
+      - name: "A/B assertion: a danger-full-access exported in the parent shell must not survive"
+        shell: bash
+        run: |
+          export DSH_PERMISSION_MODE=danger-full-access
+          echo "parent shell exports DSH_PERMISSION_MODE=$DSH_PERMISSION_MODE"
+          python -m pytest unsloth_cli/tests/test_start.py -v -p no:randomly \
+            -k 'dsh_permission_mode_overrides or dsh_without_yolo_pins or start_dsh_forwards_reasoning_effort'
+
+      - name: "Full dsh suite"
+        shell: bash
+        run: |
+          python -m pytest unsloth_cli/tests/test_start.py -q -k dsh
+
