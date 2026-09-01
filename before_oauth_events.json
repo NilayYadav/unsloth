@@ -1,0 +1,60 @@
+[
+  {
+    "event": "mcp_unauthenticated"
+  },
+  {
+    "event": "register",
+    "assigned_auth_method": "client_secret_basic"
+  },
+  {
+    "event": "token_request",
+    "grant_type": "authorization_code",
+    "had_authorization_header": true,
+    "auth_scheme": "Basic",
+    "had_body_client_id": true,
+    "had_body_client_secret": false,
+    "form_keys": [
+      "client_id",
+      "code",
+      "code_verifier",
+      "grant_type",
+      "redirect_uri",
+      "resource"
+    ]
+  },
+  {
+    "event": "token_response",
+    "status": 400,
+    "body": {
+      "error": "invalid_request",
+      "error_description": "Client must not use multiple authentication methods"
+    }
+  },
+  {
+    "event": "mcp_unauthenticated"
+  },
+  {
+    "event": "token_request",
+    "grant_type": "authorization_code",
+    "had_authorization_header": true,
+    "auth_scheme": "Basic",
+    "had_body_client_id": true,
+    "had_body_client_secret": false,
+    "form_keys": [
+      "client_id",
+      "code",
+      "code_verifier",
+      "grant_type",
+      "redirect_uri",
+      "resource"
+    ]
+  },
+  {
+    "event": "token_response",
+    "status": 400,
+    "body": {
+      "error": "invalid_request",
+      "error_description": "Client must not use multiple authentication methods"
+    }
+  }
+]

@@ -1,0 +1,49 @@
+[
+  {
+    "event": "mcp_unauthenticated"
+  },
+  {
+    "event": "register",
+    "assigned_auth_method": "client_secret_basic"
+  },
+  {
+    "event": "token_request",
+    "grant_type": "authorization_code",
+    "had_authorization_header": true,
+    "auth_scheme": "Basic",
+    "had_body_client_id": false,
+    "had_body_client_secret": false,
+    "form_keys": [
+      "code",
+      "code_verifier",
+      "grant_type",
+      "redirect_uri",
+      "resource"
+    ]
+  },
+  {
+    "event": "token_response",
+    "status": 200,
+    "body": {
+      "access_token": "<issued>"
+    }
+  },
+  {
+    "event": "mcp_authenticated"
+  },
+  {
+    "event": "mcp_authenticated"
+  },
+  {
+    "event": "mcp_authenticated"
+  },
+  {
+    "event": "mcp_authenticated"
+  },
+  {
+    "event": "mcp_authenticated"
+  },
+  {
+    "event": "mcp_authenticated"
+  }
+]
