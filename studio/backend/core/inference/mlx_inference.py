@@ -2126,6 +2126,7 @@ class MLXInferenceBackend:
         messages,
         system_prompt = "",
         image = None,
+        images = None,
         temperature = 0.7,
         top_p = 0.9,
         top_k = 40,
@@ -2154,7 +2155,9 @@ class MLXInferenceBackend:
 
         full_messages = self._with_system_prompt(messages, system_prompt)
 
-        # Inject image into the last user message for VLM
+        # A conversation that already carries its own markers (an MCP tool's
+        # pictures) counts them itself; only a bare attachment needs one.
+        attached = list(images or []) + ([image] if image is not None else [])
         if self._is_vlm and image is not None:
             for msg in reversed(full_messages):
                 if msg.get("role") == "user":
@@ -2173,7 +2176,7 @@ class MLXInferenceBackend:
         if self._is_vlm:
             stream = self._generate_vlm(
                 full_messages,
-                image,
+                attached,
                 temperature,
                 top_p,
                 top_k,
@@ -2558,7 +2561,7 @@ class MLXInferenceBackend:
     def _generate_vlm(
         self,
         messages,
-        image,
+        attached_list,
         temperature,
         top_p,
         top_k,
@@ -2581,7 +2584,7 @@ class MLXInferenceBackend:
     ):
         from mlx_vlm import stream_generate as vlm_stream
 
-        images = [image] if image is not None else None
+        images = list(attached_list) or None
         prompt, chat_target = self._render_vlm_prompt(
             messages,
             images,
@@ -2601,9 +2604,9 @@ class MLXInferenceBackend:
         sequences = _mlx_stop_sequences(stop)
         stopped = False
         logger.info(
-            "VLM generating: prompt_len=%d, has_image=%s",
+            "VLM generating: prompt_len=%d, images=%d",
             len(prompt),
-            image is not None,
+            len(images or []),
         )
         # stream_generate forwards **kwargs into generate_step (builds the
         # sampler + logits_processors internally). GOTCHA: generate_step expects
