@@ -169,9 +169,7 @@ export async function updateThreadMessage(args: {
   if (remoteId && !isIncognito && editedMessage) {
     try {
       await saveChatMessage(
-        withoutServerOwnership(
-          exportedItemToRecord(remoteId, originalParentId, editedMessage),
-        ),
+        exportedItemToRecord(remoteId, originalParentId, editedMessage),
         { allowGenerationEdit: true },
       );
     } catch (e) {
