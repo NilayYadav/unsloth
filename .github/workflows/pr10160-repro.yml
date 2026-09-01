@@ -1,0 +1,78 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10160 forget-override A/B"
+
+on:
+  push:
+    branches:
+      - "mimir-pr10160-ab-20260901222810"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+
+      - name: "Install frontend deps"
+        shell: bash
+        run: |
+          cd studio/frontend && npm ci --no-audit --no-fund
+
+      - name: "A (negative) -- revert only the two fixes under test"
+        shell: bash
+        run: |
+          python3 .mimir/pr10160_negative_patch.py
+
+      - name: "A (negative) -- the PR tests must fail at their own assertions"
+        shell: bash
+        run: |
+          cd studio/frontend
+          set +e
+          node --experimental-strip-types --test tests/per-model-config-delete-aliases.test.ts tests/api-monitor-forget-model-override.test.ts > /tmp/negative.tap 2>&1
+          code=$?
+          set -e
+          cat /tmp/negative.tap
+          if [ "$code" -eq 0 ]; then echo 'FAIL: negative run passed; the tests do not pin the fix'; exit 1; fi
+          grep -q '^# fail 3' /tmp/negative.tap || { echo 'FAIL: expected exactly 3 failures'; exit 1; }
+          grep -q 'not ok .* - forgetting the snapshot-path row also drops the repo-id record' /tmp/negative.tap || { echo 'FAIL: alias assertion did not fail'; exit 1; }
+          grep -q 'not ok .* - forgetting the repo-id row also drops a record still keyed by the path' /tmp/negative.tap || { echo 'FAIL: reverse alias assertion did not fail'; exit 1; }
+          grep -q 'not ok .* - a browser copy that could not be deleted is reported, not swallowed' /tmp/negative.tap || { echo 'FAIL: local-failure assertion did not fail'; exit 1; }
+          echo 'NEGATIVE OK: 3 intended assertions failed on the pre-fix implementation'
+
+      - name: "Restore the real head implementation"
+        shell: bash
+        run: |
+          git checkout -- studio/frontend/src && git diff --quiet && echo 'tree restored to head'
+
+      - name: "B (positive) -- the same tests must pass"
+        shell: bash
+        run: |
+          cd studio/frontend
+          node --experimental-strip-types --test tests/per-model-config-delete-aliases.test.ts tests/api-monitor-forget-model-override.test.ts > /tmp/positive.tap 2>&1
+          cat /tmp/positive.tap
+          grep -q '^# fail 0' /tmp/positive.tap || { echo 'FAIL: positive run had failures'; exit 1; }
+          grep -q '^# pass 10' /tmp/positive.tap || { echo 'FAIL: expected 10 passing tests'; exit 1; }
+          echo 'POSITIVE OK: 10/10 pass on the head implementation'
+
+      - name: "Whole frontend suite on head"
+        shell: bash
+        run: |
+          cd studio/frontend && npm test 2>&1 | tail -12
+
+      - name: "Typecheck on head"
+        shell: bash
+        run: |
+          cd studio/frontend && npm run typecheck
+
