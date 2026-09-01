@@ -6,11 +6,23 @@ type ThreadImportExport = {
   import: (data: ExportedMessageRepository) => void;
 };
 
-type ContentPart = { type: "text" | "reasoning" | "tool"; text: string };
+type ContentPart = { type: "text" | "reasoning" | "tool"; text: string; slot?: number };
+
+export function isEditablePart(part: any): boolean {
+  return part?.type === 'text' || part?.type === 'reasoning';
+}
+
+function toolLabel(part: any): string {
+  const name = typeof part?.toolName === 'string' && part.toolName ? part.toolName : part?.type;
+  // The marker is one line delimited by angle brackets, so a label carrying
+  // either would not survive the round trip.
+  const label = typeof name === 'string' ? name.replace(/[<>\n]+/g, ' ').trim() : "";
+  return label || "tool";
+}
 
 /**
- * Extracts only the editable text and reasoning from a message,
- * ignoring structured parts like tool calls that cannot be edited as plain text.
+ * Extracts the editable text and reasoning from a message, with a numbered placeholder
+ * marker recording where each non-editable part sat among the prose.
  */
 export function extractTaggedText(content: any): string {
   if (typeof content === 'string') return content;
@@ -18,27 +30,27 @@ export function extractTaggedText(content: any): string {
 
   const open = "\u003C"; // <
   const close = "\u003E"; // >
+  let slot = 0;
 
   return content
     .map((part: any) => {
       if (typeof part === 'string') return part;
       if (!part) return "";
 
-      // Only extract text from 'text' or 'reasoning' parts.
-      // Tool calls/responses are ignored here so they aren't accidentally
-      // deleted or corrupted by the user in the textarea.
+      if (!isEditablePart(part)) {
+        slot += 1;
+        return `${open}TOOL ${slot}: ${toolLabel(part)}${close}`;
+      }
+
       const text = part.text || part.content || "";
       if (!text) return "";
 
-      switch (part.type) {
-        case 'reasoning':
-          // Trim the text first so we don't accumulate newlines
-          // around the tags on every save.
-          return `${open}THINK${close}\n${text.trim()}\n${open}/THINK${close}`;
-        case 'text':
-        default:
-          return text;
+      // Trim the text first so we don't accumulate newlines
+      // around the tags on every save.
+      if (part.type === 'reasoning') {
+        return `${open}THINK${close}\n${text.trim()}\n${open}/THINK${close}`;
       }
+      return text;
     })
     .filter(Boolean)
     .join('\n\n');
@@ -46,14 +58,16 @@ export function extractTaggedText(content: any): string {
 
 function parseTaggedTextToContent(text: string): ContentPart[] {
   const parts: ContentPart[] = [];
-  const tagRegex = /(<\/?(THINK|TOOL)>)/g;
+  // A tool marker is one whole token carrying its slot number. Requiring the number
+  // keeps a reply that merely writes <TOOL>name</TOOL> in its prose, and a marker the
+  // user half-deleted, from being read as a marker.
+  const tagRegex = /<\/?THINK>|<TOOL (\d+): ([^<>\n]*)>/g;
   let lastIndex = 0;
   let match;
   let currentType: ContentPart["type"] = "text";
 
   while ((match = tagRegex.exec(text)) !== null) {
     const fullTag = match[0];
-    const tagName = match[2];
     const index = match.index;
 
     if (index > lastIndex) {
@@ -62,9 +76,13 @@ function parseTaggedTextToContent(text: string): ContentPart[] {
       const content = text.substring(lastIndex, index).trim();
       if (content) parts.push({ type: currentType, text: content });
     }
-
-    currentType = fullTag.startsWith("</") ? "text" : (tagName === "THINK" ? "reasoning" : "tool");
     lastIndex = index + fullTag.length;
+
+    if (match[1] !== undefined) {
+      parts.push({ type: "tool", text: fullTag, slot: Number(match[1]) });
+      continue;
+    }
+    currentType = fullTag.startsWith("</") ? "text" : "reasoning";
   }
 
   if (lastIndex < text.length) {
@@ -98,27 +116,50 @@ export async function updateThreadMessage(args: {
     if (m.message.id !== messageId) return m;
 
     const originalContent = m.message.content;
-    let finalContent: any[] = [];
+    const finalContent: any[] = [];
+
+    // Text the editor produced, appended to the run before it rather than opening a
+    // second text part, so a save never multiplies the parts of a reply.
+    const pushText = (text: string) => {
+      const last = finalContent[finalContent.length - 1];
+      if (last && last.type === 'text') {
+        last.text = `${last.text}\n\n${text}`;
+        return;
+      }
+      finalContent.push({ type: 'text', text });
+    };
 
     if (Array.isArray(originalContent)) {
-      const firstEditableIndex = originalContent.findIndex((part: any) =>
-        part.type === 'text' || part.type === 'reasoning'
+      const nonEditableParts = originalContent.filter(
+        (part: any) => !isEditablePart(part)
       );
+      const restored = new Set<number>();
 
-      if (firstEditableIndex === -1) {
-        const nonEditableParts = originalContent.filter((part: any) =>
-          part.type !== 'text' && part.type !== 'reasoning'
-        );
-        finalContent = [...parsedEditableContent, ...nonEditableParts];
-      } else {
-        const before = originalContent.slice(0, firstEditableIndex);
-        const after = originalContent.slice(firstEditableIndex + 1).filter((part: any) =>
-          part.type !== 'text' && part.type !== 'reasoning'
-        );
-        finalContent = [...before, ...parsedEditableContent, ...after];
+      for (const part of parsedEditableContent) {
+        if (part.type !== 'tool') {
+          if (part.type === 'text') pushText(part.text);
+          else finalContent.push(part);
+          continue;
+        }
+        const slot = (part.slot ?? 0) - 1;
+        if (nonEditableParts[slot] && !restored.has(slot)) {
+          restored.add(slot);
+          finalContent.push(nonEditableParts[slot]);
+        } else {
+          // No part of this reply answers to that marker, so it is prose: keep it.
+          pushText(part.text);
+        }
       }
+
+      // A card whose marker the user deleted still belongs to the reply.
+      nonEditableParts.forEach((part, i) => {
+        if (!restored.has(i)) finalContent.push(part);
+      });
     } else {
-      finalContent = parsedEditableContent;
+      for (const part of parsedEditableContent) {
+        if (part.type === 'text' || part.type === 'tool') pushText(part.text);
+        else finalContent.push(part);
+      }
     }
 
     return {
