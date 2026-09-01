@@ -1,0 +1,67 @@
+name: PR 10161 edit-a-generated-reply repro
+
+on:
+  push:
+    branches:
+      - "mimir-pr10161-repro-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr10161-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repro:
+    name: Edit a settled generated reply, end to end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install frontend dependencies
+        working-directory: studio/frontend
+        run: npm ci --no-audit --no-fund
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the backend imports studio_db needs
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install structlog fastapi httpx pydantic pyyaml psutil \
+            requests pyjwt huggingface_hub cryptography pillow numpy
+
+      - name: Capture the PUT body the edit pencil sends
+        working-directory: studio/frontend
+        env:
+          PROBE_CREATED_AT: "1700000000000"
+        run: node --experimental-strip-types ci-probe/capture-edit-payload.ts "$GITHUB_WORKSPACE/edit-payload.json"
+
+      - name: Replay that body against the real studio_db
+        env:
+          PROBE_CREATED_AT: "1700000000000"
+        run: python ci-probe/apply_edit_payload.py "$GITHUB_WORKSPACE/edit-payload.json"
+
+      - name: Frontend unit tests for the edit path
+        if: always()
+        working-directory: studio/frontend
+        run: node --experimental-strip-types --test tests/edit-message-keeps-metadata.test.ts
+
+      - name: Backend contract test for an explicit generation edit
+        if: always()
+        working-directory: studio/backend
+        run: python -m pytest tests/test_chat_generation_runs.py -q -p no:cacheprovider
+
+      - name: Upload the captured payload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edit-payload-${{ github.ref_name }}
+          path: edit-payload.json
+          if-no-files-found: warn
