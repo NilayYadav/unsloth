@@ -1,0 +1,92 @@
+# Disposable: PR 10164 reproduction. Not part of the pull request.
+name: "PR 10164 repro -- document budget on a hosted turn"
+
+on:
+  push:
+    branches: ["pr-10164-repro-20260901222056"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr10164-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  budget:
+    name: "What each revision sends, and what the document gets"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install the one backend import the budget function needs
+        run: pip install 'structlog>=24.1.0'   # studio/backend/requirements/studio.txt
+      - name: Run the real expression at each revision, then the real backend budget
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/repro
+          for sha in 5c8c238e63eac8904b04af3cd21d45e762c8ceff \
+                     a98ad6ba36ba2c0e2da1196cc6a38c7b7ecb57f2 \
+                     d8b22f1e069cff5254113c05a85d8c265a8b6930; do
+            short="${sha:0:9}"
+            git show "${sha}:studio/frontend/src/features/chat/api/chat-adapter.ts" \
+              > "/tmp/repro/adapter-$short.ts"
+            git show "${sha}:studio/frontend/src/features/chat/api/rag-context-length.ts" \
+              > "/tmp/repro/helper-$short.ts" 2>/dev/null \
+              || rm -f "/tmp/repro/helper-$short.ts"
+            node --experimental-strip-types .ci/pr10164/probe.mjs \
+              "/tmp/repro/adapter-$short.ts" "/tmp/repro/helper-$short.ts" \
+              .ci/pr10164/scenarios.json > "/tmp/repro/probe-$short.json"
+            python3 .ci/pr10164/budget.py "$short" "/tmp/repro/probe-$short.json" \
+              "/tmp/repro/budget-$short.json"
+          done
+          python3 .ci/pr10164/assert.py \
+            /tmp/repro/budget-5c8c238e6.json \
+            /tmp/repro/budget-a98ad6ba3.json \
+            /tmp/repro/budget-d8b22f1e0.json
+
+  regression-tests:
+    name: "The PR's own tests, against the pinned source and against the fix"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: "22"
+      - name: Negative -- head's tests against the first commit's source
+        working-directory: studio/frontend
+        run: |
+          set -uo pipefail
+          git checkout a98ad6ba36ba2c0e2da1196cc6a38c7b7ecb57f2 -- \
+            src/features/chat/api/chat-adapter.ts \
+            src/features/chat/api/rag-context-length.ts
+          set +e
+          node --experimental-strip-types --test \
+            tests/rag-scope-context-length.test.ts > /tmp/negative.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/negative.log
+          if [ "$status" -eq 0 ]; then
+            echo "FAIL: the regression tests passed against the unfixed source"
+            exit 1
+          fi
+          grep -q "not ok 5 - the served window is budgeted" /tmp/negative.log
+          grep -q "not ok 6 - every runtime field the budget reads survives" /tmp/negative.log
+          echo "PASS: both regression tests fail on the unfixed source, at their own assertions"
+      - name: Positive -- the same tests against the fix
+        working-directory: studio/frontend
+        run: |
+          set -euo pipefail
+          git checkout HEAD -- src/features/chat/api/
+          node --experimental-strip-types --test tests/rag-scope-context-length.test.ts
+          echo "PASS: the same tests pass against the fix"

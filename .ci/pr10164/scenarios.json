@@ -1,0 +1,20 @@
+[
+  {
+    "name": "hosted turn, a 4K GGUF still resident",
+    "isExternalRequest": true,
+    "runtime": { "loadedContextLength": 4096, "loadedCustomContextLength": null },
+    "params": { "maxSeqLength": 4096 }
+  },
+  {
+    "name": "local turn, load asked 8192, llama-server serves 4096",
+    "isExternalRequest": false,
+    "runtime": { "loadedContextLength": 4096, "loadedCustomContextLength": 8192 },
+    "params": { "maxSeqLength": 8192 }
+  },
+  {
+    "name": "local turn, unreduced 4096 GGUF",
+    "isExternalRequest": false,
+    "runtime": { "loadedContextLength": 4096, "loadedCustomContextLength": null },
+    "params": { "maxSeqLength": 4096 }
+  }
+]
