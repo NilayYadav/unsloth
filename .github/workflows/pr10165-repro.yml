@@ -1,0 +1,46 @@
+# PR 10165 reproduction. One runner per OS runs the SAME tree twice and swaps only
+# studio/backend/core/inference/checkpoint.py between the two passes, so every
+# difference in the printed values comes from that one file.
+#
+# The gate is deliberately not "everything is green". This suite carries failures that
+# depend on the environment rather than on the change (the /proc reachability probe off
+# Linux, the archive embedder probes without one). The gate is that the carry tests move
+# from red to green and that no test that was green before the fix is red after it.
+name: PR 10165 repro (compaction drops the text typed with an image)
+
+on:
+  push:
+    branches:
+      - 'pr10165-repro-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ab:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install the deps the compaction tests import
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r studio/backend/requirements/studio.txt
+          pip install pytest pytest-asyncio
+
+      - name: Both sides on one runner, swapping only checkpoint.py
+        shell: bash
+        run: python .github/repro/pr10165_ab.py ${{ github.sha }}
