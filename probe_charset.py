@@ -56,6 +56,8 @@ CASES = [
     ("E control: charset=utf-8",       HTML, "text/html; charset=utf-8"),
     ("F control: charset=iso-8859-1",  HTML, "text/html; charset=iso-8859-1"),
     ("G non-text codec 'base64'",      HTML, "text/html; charset=base64"),
+    ("H always-failing 'undefined'",   HTML, "text/html; charset=undefined"),
+    ("I 'idna' rejects errors=replace", HTML, "text/html; charset=idna"),
 ]
 
 print(f"python {sys.version.split()[0]}")
