@@ -1,0 +1,118 @@
+# Disposable reproduction harness for unslothai/unsloth#10219.
+# Runs the real Studio llama.cpp backend against a real llama-server and
+# checks what the final-answer continuation puts on the wire.
+# Two branches, one file: pr10219-repro-before-* is merge-base main,
+# pr10219-repro-after-* is the same main with the PR merged in.
+
+name: PR 10219 final-continuation repro
+
+on:
+  push:
+    branches:
+      - 'pr10219-repro-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr10219-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  continuation:
+    name: Final-answer continuation against a real llama-server
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      HF_HOME: ${{ github.workspace }}/hf-cache
+      LLAMA_PORT: '49001'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Linux deps for the llama.cpp prebuilt
+        timeout-minutes: 15
+        env:
+          RETRY_ATTEMPTS: '2'
+          RETRY_ATTEMPT_TIMEOUT: '360'
+        run: |
+          bash .github/scripts/retry-with-apt-lock.sh sudo sh -c \
+            'apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev jq || { apt-get update && apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev jq; }'
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      # For llama-server itself: install.sh puts the llama.cpp prebuilt in
+      # ~/.unsloth/llama.cpp, which is the same binary Studio launches.
+      - name: Install Unsloth (--local, --no-torch)
+        id: install
+        timeout-minutes: 25
+        uses: ./.github/actions/install-unsloth-local
+        with:
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+          hf-token: ''
+
+      - name: Download gemma-3-270m-it Q4_K_M
+        timeout-minutes: 15
+        run: |
+          python -m pip install --upgrade huggingface_hub
+          mkdir -p hf-cache
+          bash .github/scripts/hf-download-with-retry.sh \
+            unsloth/gemma-3-270m-it-GGUF gemma-3-270m-it-Q4_K_M.gguf
+
+      # 8192 over 8 slots gives each request a 1024-token slot, which is what
+      # makes the model run out of room mid-answer -- the condition the
+      # continuation exists for. --no-context-shift and --jinja are the flags
+      # Studio launches llama-server with.
+      - name: Boot llama-server
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          MODEL=$(find hf-cache -name 'gemma-3-270m-it-Q4_K_M.gguf' | head -1)
+          echo "model: $MODEL"
+          mkdir -p logs
+          "$HOME/.unsloth/llama.cpp/llama-server" \
+            --model "$MODEL" -c 8192 --parallel 8 --no-context-shift --jinja \
+            --no-webui --host 127.0.0.1 --port "$LLAMA_PORT" > logs/llama-server.log 2>&1 &
+          echo "LLAMA_PID=$!" >> "$GITHUB_ENV"
+          for _ in $(seq 1 120); do
+            if curl -sf "http://127.0.0.1:$LLAMA_PORT/health" > /dev/null; then
+              echo "llama-server healthy"
+              grep -o 'n_ctx_slot = [0-9]*' logs/llama-server.log | head -1
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "llama-server never became healthy"; tail -50 logs/llama-server.log; exit 1
+
+      # Everything the backend module needs to import and make its own HTTP
+      # calls; the rest of its imports are in-repo.
+      - name: Probe dependencies
+        run: python -m pip install httpx structlog
+
+      - name: Continue a cut-off answer
+        timeout-minutes: 20
+        run: |
+          python .github/pr10219/pr10219_probe.py \
+            --backend-dir "$PWD/studio/backend" \
+            --port "$LLAMA_PORT" --ctx 1024 --history 2 \
+            --out "$PWD/logs/pr10219-report.json"
+
+      - name: Stop llama-server
+        if: always()
+        run: kill "${LLAMA_PID:-0}" 2>/dev/null || true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        if: always()
+        with:
+          name: pr10219-${{ github.ref_name }}
+          path: logs/
+          if-no-files-found: warn
