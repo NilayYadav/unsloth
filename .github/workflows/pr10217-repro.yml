@@ -128,10 +128,15 @@ jobs:
 
           # (repo, file, expected verdict). Only the first 32 MiB is fetched: the GGUF
           # metadata block that carries tokenizer.ggml.tokens sits at the head of the file.
+          # The verdict each model's vocabulary should draw, matching what
+          # LlamaCppBackend._detect_audio_type_strict would report after the load.
           CASES = [
               ("unsloth/orpheus-3b-0.1-ft-GGUF", "orpheus-3b-0.1-ft-Q2_K.gguf", "snac"),
               ("mradermacher/Spark-TTS-0.5B-GGUF", "Spark-TTS-0.5B.Q2_K.gguf", "bicodec"),
-              ("OuteAI/OuteTTS-0.2-500M-GGUF", "OuteTTS-0.2-500M-Q2_K.gguf", "dac"),
+              ("OuteAI/Llama-OuteTTS-1.0-1B-GGUF", "Llama-OuteTTS-1.0-1B-Q2_K.gguf", "dac"),
+              # 0.2 ships DAC's four delimiters but neither codebook token, so llama.cpp
+              # will not serve it as audio. Accepting it here would evict for nothing.
+              ("OuteAI/OuteTTS-0.2-500M-GGUF", "OuteTTS-0.2-500M-Q2_K.gguf", None),
               ("unsloth/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q2_K.gguf", None),
               ("unsloth/Llama-3.2-1B-Instruct-GGUF", "Llama-3.2-1B-Instruct-Q2_K.gguf", None),
           ]
@@ -158,5 +163,5 @@ jobs:
               print("FAIL:", bad)
               sys.exit(1)
           print()
-          print("PASS: all three shipped GGUF TTS codecs are recognised and both chat models are refused.")
+          print("PASS: every verdict matches what llama.cpp would report after loading the model.")
           PY
