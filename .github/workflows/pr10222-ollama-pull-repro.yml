@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# PR 10222 A/B repro. Disposable: lives only on pr10222-repro-* branches of a fork.
+#
+# Pulls a real model with a real `ollama pull`, then asks Studio's own
+# scan_ollama_dir whether that model appears in the On Device inventory.
+#   branch pr10222-repro-a-main -> upstream main, expected to FAIL (0 rows)
+#   branch pr10222-repro-b-fix  -> main + PR 10222, expected to PASS (1 row)
+# The workflow, probe, runner and model are identical on both branches.
+
+name: PR 10222 ollama pull repro
+
+on:
+  push:
+    branches:
+      - 'pr10222-repro-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ollama-pull-visibility:
+    name: ollama pull -> Studio On Device listing
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OLLAMA_MODELS: ${{ github.workspace }}/ollama-store
+      PROBE_MODEL: qwen2.5:0.5b
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.13'
+
+      - name: Record what is under test
+        run: |
+          echo "branch : ${GITHUB_REF_NAME}"
+          echo "sha    : ${GITHUB_SHA}"
+          echo "--- the admitted-layer decision on this tree ---"
+          sed -n '/_OLLAMA_LOADABLE_LAYER_MEDIA_TYPES = frozenset/,/^)/p' \
+            studio/backend/hub/services/models/ollama.py
+          sed -n '/_OLLAMA_METADATA_LAYER_MEDIA_TYPES = frozenset/,/^)/p' \
+            studio/backend/hub/services/models/ollama.py || true
+
+      - name: Install the Studio backend imports the probe needs
+        run: python -m pip install --upgrade pip pydantic structlog pyyaml
+
+      - name: Install ollama
+        env:
+          OLLAMA_VERSION: v0.33.2
+        run: |
+          set -euxo pipefail
+          sudo apt-get install -y zstd < /dev/null > /dev/null 2>&1 || which zstd
+          mkdir -p "$HOME/ollama"
+          curl -fsSL --retry 3 \
+            "https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst" \
+            | zstd -d | tar -xf - -C "$HOME/ollama"
+          find "$HOME/ollama" -maxdepth 2 -type d
+          test -x "$HOME/ollama/bin/ollama"
+          echo "$HOME/ollama/bin" >> "$GITHUB_PATH"
+
+      - name: ollama pull qwen2.5:0.5b
+        run: |
+          set -euxo pipefail
+          mkdir -p "$OLLAMA_MODELS"
+          ollama serve > /tmp/ollama-serve.log 2>&1 &
+          for _ in $(seq 1 30); do
+            ollama list > /dev/null 2>&1 && break
+            sleep 2
+          done
+          ollama --version
+          ollama pull "$PROBE_MODEL"
+          echo "--- ollama's own view ---"
+          ollama list
+          echo "--- bytes on disk ---"
+          du -sh "$OLLAMA_MODELS"
+
+      - name: Studio inventory probe
+        working-directory: studio/backend
+        env:
+          PYTHONPATH: .
+        run: python "${GITHUB_WORKSPACE}/.github/scripts/pr10222_ollama_pull_probe.py"
