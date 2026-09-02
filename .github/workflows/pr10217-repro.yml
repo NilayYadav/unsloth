@@ -66,6 +66,9 @@ jobs:
         working-directory: studio/backend
         run: |
           set +e
+          # pipefail matters: without it rc captures tee's status, not pytest's,
+          # and the A/B validation below reads a green negative run that never happened.
+          set -o pipefail
           python -m pytest tests/test_pr10217_probe.py -q -s --timeout=300 2>&1 | tee ../../negative.txt
           rc=$?
           set -e
