@@ -142,21 +142,23 @@ jobs:
           ]
           MIB = 32 * 1024 * 1024
           bad = []
-          print(f"{'model':<46} {'markers':>8} {'verdict':>10} {'expected':>10} {'ms':>7}  result")
+          print(f"{'model':<46} {'markers':>8} {'snac?':>6} {'verdict':>10} {'expected':>10} {'ms':>7}  result")
           for repo, fname, expected in CASES:
               url = f"https://huggingface.co/{repo}/resolve/main/{fname}"
               req = urllib.request.Request(url, headers={"Range": f"bytes=0-{MIB - 1}"})
               with urllib.request.urlopen(req, timeout=300) as r, open(fname, "wb") as f:
                   f.write(r.read())
-              markers = _parse_gguf_marker_tokens(fname)
+              parsed = _parse_gguf_marker_tokens(fname)
               t = time.perf_counter()
               got = read_gguf_tts_audio_type(fname)
               ms = (time.perf_counter() - t) * 1000
               ok = got == expected
               if not ok:
                   bad.append((repo, got, expected))
-              n = len(markers) if markers is not None else -1
-              print(f"{repo:<46} {n:>8} {str(got):>10} {str(expected):>10} {ms:>7.1f}  {'PASS' if ok else 'FAIL'}")
+              # (marker tokens, whether the ids the SNAC probe reads are codec codes)
+              n = len(parsed[0]) if parsed is not None else -1
+              snac = "yes" if parsed is not None and parsed[1] else "no"
+              print(f"{repo:<46} {n:>8} {snac:>6} {str(got):>10} {str(expected):>10} {ms:>7.1f}  {'PASS' if ok else 'FAIL'}")
               import os
               os.remove(fname)
           if bad:
