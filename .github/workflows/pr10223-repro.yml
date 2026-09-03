@@ -1,0 +1,85 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10223 link-definition repro"
+
+on:
+  push:
+    branches:
+      - "pr10223-repro-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install frontend deps"
+        shell: bash
+        run: |
+          set -e
+          npm install -g npm@^11 --no-fund --no-audit
+          cd studio/frontend
+          npm ci --strict-allow-scripts --no-fund --no-audit
+          node -v; npm -v
+
+      - name: "ASSERTION 1 (unit): streaming-render-schedule scope tests"
+        shell: bash
+        run: |
+          set +e
+          cd studio/frontend
+          npm test 2>&1 | tee /tmp/unit.log
+          CODE=${PIPESTATUS[0]}
+          echo "UNIT_EXIT=$CODE" >> "$GITHUB_ENV"
+          echo "::notice::unit exit $CODE"
+          grep -E '^(# (pass|fail)|not ok|ok [0-9]+ - (code that|a css|a definition|the document))' /tmp/unit.log | head -40
+          exit 0
+
+      - name: "Install Playwright + Chromium"
+        shell: bash
+        run: |
+          set -e
+          python3 -m pip install --quiet 'playwright>=1.45,<2'
+          bash .github/scripts/retry-with-apt-lock.sh python3 -m playwright install --with-deps chromium
+
+      - name: "ASSERTION 2 (browser): code-block controls survive code that looks like a link definition"
+        shell: bash
+        run: |
+          set +e
+          python3 tests/studio/playwright_link_definition_probe.py 2>&1 | tee /tmp/probe.log
+          CODE=${PIPESTATUS[0]}
+          echo "PROBE_EXIT=$CODE" >> "$GITHUB_ENV"
+          echo "::notice::probe exit $CODE"
+          exit 0
+
+      - name: "VERDICT"
+        shell: bash
+        run: |
+          echo '================ MEASURED VALUES ================'
+          sed -n '/^{/,/^}/p' /tmp/probe.log | tail -40
+          echo '================================================='
+          echo "unit exit  = ${UNIT_EXIT}"
+          echo "probe exit = ${PROBE_EXIT}"
+          if [ "${UNIT_EXIT}" = "0" ] && [ "${PROBE_EXIT}" = "0" ]; then
+            echo 'RESULT: PASS - code blocks keep their Copy code / Download file controls'
+            exit 0
+          fi
+          echo 'RESULT: FAIL - the defect reproduces at the intended assertion'
+          grep -E 'FAIL:' /tmp/probe.log || true
+          exit 1
+
