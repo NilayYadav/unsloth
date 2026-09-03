@@ -48,7 +48,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python -m pip install --quiet 'pytest==8.3.3'
+          python -m pip install --quiet 'pytest==8.3.3' 'huggingface_hub==0.35.3'  # studio/backend/tests/conftest.py imports it
           if [ -f studio/backend/tests/test_export_wait_inactivity_timeout.py ]; then
             python -m pytest studio/backend/tests/test_export_wait_inactivity_timeout.py -v 2>&1 | tee pytest.log
             echo "PYTEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
