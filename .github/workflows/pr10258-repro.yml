@@ -5,7 +5,7 @@ name: "PR 10258 export wait: busy export vs the limit"
 on:
   push:
     branches:
-      - "pr10258-repro-b-20260903205956"
+      - "pr10258-repro-a-20260903205956"
   workflow_dispatch:
 
 permissions:
