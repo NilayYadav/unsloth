@@ -1,0 +1,117 @@
+# Disposable repro workflow for unslothai/unsloth#10255. Delete after validation.
+# One probe, one dependency set, one runner image. The only thing that differs
+# between the matrix legs is the unsloth tree the probe imports.
+
+name: "PR 10255 repro - input_audio content part"
+
+on:
+  push:
+    branches:
+      - "pr10255-repro-20260903205910"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "${{ matrix.leg }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: "A1 merge-base (b319ba383) - expect broken"
+            ref: "b319ba383c1c5cb88ddd95e295c4aaac73f0953f"
+            merge_head: ""
+            mode: "expect-broken"
+          - leg: "A2 upstream main (8e26d2c2b) - expect broken"
+            ref: "8e26d2c2bacfddff53bf3e353213bc898f8c86e4"
+            merge_head: ""
+            mode: "expect-broken"
+          - leg: "B1 PR head (8690d62f4) - expect fixed"
+            ref: "8690d62f43d43ebb3b79994f8b3718dda5d35ac3"
+            merge_head: ""
+            mode: "expect-fixed"
+          - leg: "B2 main + PR merged - expect fixed"
+            ref: "8e26d2c2bacfddff53bf3e353213bc898f8c86e4"
+            merge_head: "8690d62f43d43ebb3b79994f8b3718dda5d35ac3"
+            mode: "expect-fixed"
+    steps:
+      - name: "Checkout the probe (this branch)"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+          path: harness
+
+      - name: "Checkout the unsloth tree under test"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: unslothai/unsloth
+          ref: "${{ matrix.ref }}"
+          fetch-depth: 0
+          persist-credentials: false
+          path: tree
+
+      - name: "Merge the PR head onto it"
+        if: matrix.merge_head != ''
+        working-directory: tree
+        run: |
+          set -euo pipefail
+          git config user.email ci@example.com
+          git config user.name ci
+          git fetch --no-tags origin refs/pull/10255/head
+          got="$(git rev-parse FETCH_HEAD)"
+          echo "PR 10255 head fetched: $got"
+          test "$got" = "${{ matrix.merge_head }}"
+          git merge --no-edit FETCH_HEAD
+          echo "merged tree HEAD: $(git rev-parse HEAD)"
+
+      - name: "Record the tree under test"
+        working-directory: tree
+        run: |
+          set -euo pipefail
+          echo "HEAD          = $(git rev-parse HEAD)"
+          echo "content parts on this tree:"
+          grep -n "Annotated\[.*ContentPart, Tag(" studio/backend/models/inference.py || true
+          echo "_normalise_chat_content_parts present:"
+          grep -c "_normalise_chat_content_parts" studio/backend/routes/inference.py || echo 0
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install the probe's dependency set (identical on every leg)"
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install \
+            fastapi pydantic structlog pyyaml pyjwt huggingface_hub \
+            httpx python-multipart cryptography
+          python -m pip freeze | sort > "$GITHUB_WORKSPACE/pip-freeze-${{ strategy.job-index }}.txt"
+
+      - name: "Run the probe (${{ matrix.mode }})"
+        working-directory: tree/studio/backend
+        env:
+          PYTHONPATH: .
+          UNSLOTH_ALLOW_CPU: "1"
+          UNSLOTH_IS_PRESENT: "1"
+          PROBE_JSON: "${{ github.workspace }}/probe-result.json"
+        run: |
+          set -euo pipefail
+          python "$GITHUB_WORKSPACE/harness/repro/probe_input_audio.py" "${{ matrix.mode }}"
+
+      - name: "Probe result JSON"
+        if: always()
+        run: cat "$GITHUB_WORKSPACE/probe-result.json" || echo "no result file"
+
+      - name: "Upload probe result"
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: "probe-${{ strategy.job-index }}"
+          path: |
+            probe-result.json
+            pip-freeze-*.txt
+          if-no-files-found: warn
