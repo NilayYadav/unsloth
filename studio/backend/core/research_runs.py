@@ -402,6 +402,12 @@ def _resolve_max_tokens(
         requested = min(int(inference.get("maxTokens") or 4096), 8192)
     else:
         requested = int(max_tokens)
+    if inference.get("providerType"):
+        # A saved connection generates on the provider's own hardware. Whichever local model
+        # happens to be resident bounds nothing about it, and the synthesis prompt is already
+        # fitted to the local window, so clamping here would spend the report's whole budget
+        # down to the leftover reserve and undo the ceiling this run just resolved.
+        return requested
     return _clamp_max_tokens_for_context(requested, messages)
 
 
@@ -415,18 +421,13 @@ def _synthesis_max_tokens(inference: dict[str, Any]) -> int:
     """
     if not inference.get("providerType"):
         return _SYNTHESIS_MAX_TOKENS
+    saved = _saved_connection_cap(inference.get("providerId"))
     resolved = _positive_int_or_none(inference.get("maxOutputTokens"))
     if resolved:
-        return resolved
-    provider_id = inference.get("providerId")
-    if not isinstance(provider_id, str):
-        return _SYNTHESIS_MAX_TOKENS
-    try:
-        provider = providers_db.get_provider(provider_id) or {}
-    except Exception:
-        logger.debug("research.provider_cap_probe_failed", exc_info = True)
-        provider = {}
-    saved = _positive_int_or_none(provider.get("max_output_tokens"))
+        # The client resolved this against the run's own model, but the run is durable: the
+        # connection's cap can have been lowered since it was created, and the saved row is
+        # the current truth about what the user allows this connection to spend.
+        return min(resolved, saved) if saved else resolved
     # A run created before the client sent its resolved ceiling falls back to here. The saved
     # cap belongs to the connection, not to this run's model -- one connection fronts many
     # models, and the client bounds it by that model's documented ceiling before sending it,
@@ -434,6 +435,18 @@ def _synthesis_max_tokens(inference: dict[str, Any]) -> int:
     # for a model nothing documents, so a cap set for a 256k-output model cannot become this
     # run's budget.
     return min(saved, _EXTERNAL_MAX_OUTPUT_TOKENS) if saved else _SYNTHESIS_MAX_TOKENS
+
+
+def _saved_connection_cap(provider_id: object) -> int | None:
+    """The connection's currently saved Max Output Tokens, or None if it has none."""
+    if not isinstance(provider_id, str):
+        return None
+    try:
+        provider = providers_db.get_provider(provider_id) or {}
+    except Exception:
+        logger.debug("research.provider_cap_probe_failed", exc_info = True)
+        return None
+    return _positive_int_or_none(provider.get("max_output_tokens"))
 
 
 def _normalize_completion_usage(raw: Any) -> dict[str, int] | None:
