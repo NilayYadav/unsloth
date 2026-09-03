@@ -1,0 +1,46 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10256 restore-settings preset repro"
+
+on:
+  push:
+    branches:
+      - "mimir-pr10256-base-20260903205904"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Tree under test"
+        shell: bash
+        run: |
+          git log --oneline -1 && echo '--- restore path in this tree ---' && sed -n '/const restoreSettings = useCallback/,/setBatchSize(/p' studio/frontend/src/features/images/images-page.tsx
+
+      - name: "Install the settings router's deps (no torch)"
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip -q && pip install -q -r studio/backend/requirements/studio.txt
+
+      - name: "A/B assertion: every recorded size must restore to a savable recipe"
+        shell: bash
+        run: |
+          python pr10256-repro/pr10256_probe.py
+
