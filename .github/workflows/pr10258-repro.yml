@@ -44,18 +44,15 @@ jobs:
           echo "PROBE_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
           exit 0
 
-      - name: "The PR's own unit tests"
+      - name: "The PR's own unit tests (standalone; the full suite runs in upstream Backend CI)"
         shell: bash
         run: |
           set +e
-          python -m pip install --quiet 'pytest==8.3.3' 'huggingface_hub==0.35.3'  # studio/backend/tests/conftest.py imports it
-          if [ -f studio/backend/tests/test_export_wait_inactivity_timeout.py ]; then
-            python -m pytest studio/backend/tests/test_export_wait_inactivity_timeout.py -v 2>&1 | tee pytest.log
-            echo "PYTEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
-          else
-            echo 'test file absent on this branch'
-            echo 'PYTEST_EXIT=absent' >> $GITHUB_ENV
-          fi
+          python -m pip install --quiet 'pytest==8.3.3'
+          # --noconftest: the repo conftest pulls the whole backend env (httpx, huggingface_hub, ...).
+          # The file stubs its own deps, and upstream Backend CI runs it inside the full env.
+          python -m pytest studio/backend/tests/test_export_wait_inactivity_timeout.py --noconftest -v 2>&1 | tee pytest.log
+          echo "PYTEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
           exit 0
 
       - name: "Verdict"
