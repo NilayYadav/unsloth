@@ -1,0 +1,71 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10258 export wait: busy export vs the limit"
+
+on:
+  push:
+    branches:
+      - "pr10258-repro-b-20260903205956"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "What is under test"
+        shell: bash
+        run: |
+          echo "commit: $(git rev-parse HEAD)"
+          F=studio/backend/core/export/orchestrator.py
+          echo "orchestrator.py sha256: $(sha256sum $F | cut -c1-16)"
+          echo '--- every place the wait deadline is set ---'
+          grep -n 'deadline = time.monotonic' $F
+          echo '--- the wait, as it stands on this branch ---'
+          sed -n '/def _wait_response/,/_drain_queue/p' $F | head -60
+
+      - name: "Real-clock repro probe (real worker process, real queue, real clock)"
+        shell: bash
+        run: |
+          set +e
+          python3 pr10258_repro_probe.py 2>&1 | tee probe.log
+          echo "PROBE_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          exit 0
+
+      - name: "The PR's own unit tests"
+        shell: bash
+        run: |
+          set +e
+          python -m pip install --quiet 'pytest==8.3.3'
+          if [ -f studio/backend/tests/test_export_wait_inactivity_timeout.py ]; then
+            python -m pytest studio/backend/tests/test_export_wait_inactivity_timeout.py -v 2>&1 | tee pytest.log
+            echo "PYTEST_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          else
+            echo 'test file absent on this branch'
+            echo 'PYTEST_EXIT=absent' >> $GITHUB_ENV
+          fi
+          exit 0
+
+      - name: "Verdict"
+        shell: bash
+        run: |
+          echo "probe exit:  $PROBE_EXIT"
+          echo "pytest exit: $PYTEST_EXIT"
+          if [ "$PROBE_EXIT" != "0" ] || [ "$PYTEST_EXIT" != "0" ]; then
+            echo '::error::busy exports are stopped while still working on this implementation'
+            exit 1
+          fi
+          echo 'a busy export survives; a silent one is still given up on'
+
