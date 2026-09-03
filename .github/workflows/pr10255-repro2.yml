@@ -1,0 +1,121 @@
+# Disposable repro workflow for unslothai/unsloth#10255. Delete after validation.
+# One probe pair, one dependency set, one runner image. Only the unsloth tree differs.
+
+name: "PR 10255 repro - input_audio part + count_tokens guard"
+
+on:
+  push:
+    branches:
+      - "pr10255-repro2-20260903211006"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "${{ matrix.leg }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: "A  upstream main 8e26d2c2b (no fix)"
+            ref: "8e26d2c2bacfddff53bf3e353213bc898f8c86e4"
+            merge_head: ""
+            mode_audio: "expect-broken"
+            mode_count: "expect-rejected"
+          - leg: "B  PR head 8690d62f4 (fix, before review)"
+            ref: "8690d62f43d43ebb3b79994f8b3718dda5d35ac3"
+            merge_head: ""
+            mode_audio: "expect-fixed"
+            mode_count: "expect-bypassed"
+          - leg: "C  PR head f29101eed (fix + review fix)"
+            ref: "f29101eed6d0c2c3a0870a9918d7580c52e61428"
+            merge_head: ""
+            mode_audio: "expect-fixed"
+            mode_count: "expect-guarded"
+          - leg: "D  main + f29101eed merged"
+            ref: "8e26d2c2bacfddff53bf3e353213bc898f8c86e4"
+            merge_head: "f29101eed6d0c2c3a0870a9918d7580c52e61428"
+            mode_audio: "expect-fixed"
+            mode_count: "expect-guarded"
+    steps:
+      - name: "Checkout the probes (this branch)"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+          path: harness
+
+      - name: "Checkout the unsloth tree under test"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: unslothai/unsloth
+          ref: "${{ matrix.ref }}"
+          fetch-depth: 0
+          persist-credentials: false
+          path: tree
+
+      - name: "Merge the PR head onto it"
+        if: matrix.merge_head != ''
+        working-directory: tree
+        run: |
+          set -euo pipefail
+          git config user.email ci@example.com
+          git config user.name ci
+          git fetch --no-tags origin refs/pull/10255/head
+          got="$(git rev-parse FETCH_HEAD)"
+          echo "PR 10255 head fetched: $got"
+          test "$got" = "${{ matrix.merge_head }}"
+          git merge --no-edit FETCH_HEAD
+          echo "merged tree HEAD: $(git rev-parse HEAD)"
+
+      - name: "Record the tree under test"
+        working-directory: tree
+        run: |
+          set -euo pipefail
+          echo "HEAD = $(git rev-parse HEAD)"
+          echo "-- accepted content-part tags:"
+          grep -n "Annotated\[.*ContentPart, Tag(" studio/backend/models/inference.py || true
+          echo "-- _normalise_chat_content_parts call sites:"
+          grep -n "_normalise_chat_content_parts(payload)" studio/backend/routes/inference.py || echo "  none"
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install the probe dependency set (identical on every leg)"
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install \
+            fastapi pydantic structlog pyyaml pyjwt huggingface_hub \
+            httpx python-multipart cryptography
+
+      - name: "Probe 1: /v1/chat/completions takes the input_audio part (${{ matrix.mode_audio }})"
+        working-directory: tree/studio/backend
+        env:
+          PYTHONPATH: .
+          UNSLOTH_ALLOW_CPU: "1"
+          UNSLOTH_IS_PRESENT: "1"
+          PROBE_JSON: "${{ github.workspace }}/probe-completions.json"
+        run: python "$GITHUB_WORKSPACE/harness/repro/probe_input_audio.py" "${{ matrix.mode_audio }}"
+
+      - name: "Probe 2: /chat/count_tokens still refuses audio (${{ matrix.mode_count }})"
+        if: always()
+        working-directory: tree/studio/backend
+        env:
+          PYTHONPATH: .
+          UNSLOTH_ALLOW_CPU: "1"
+          UNSLOTH_IS_PRESENT: "1"
+          PROBE_JSON_COUNT: "${{ github.workspace }}/probe-count.json"
+        run: python "$GITHUB_WORKSPACE/harness/repro/probe_count_route.py" "${{ matrix.mode_count }}"
+
+      - name: "Upload probe results"
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: "probe-${{ strategy.job-index }}"
+          path: "probe-*.json"
+          if-no-files-found: warn
