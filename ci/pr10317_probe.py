@@ -22,10 +22,29 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1] / "studio" / "backend"
 sys.path.insert(0, str(BACKEND))
 
-# Settle the real utils.paths package before the test stubs shadow "utils": the stub
-# installer execs utils/paths/storage_roots.py under its own module name, and a
-# not-yet-imported utils.paths would then re-enter that half-built module.
-import utils.paths  # noqa: E402,F401
+
+def _preseed_utils_packages() -> None:
+    """Register utils and utils.paths by path, without running their __init__.
+
+    The repo's stub installer execs utils/paths/storage_roots.py under its own
+    module name. If utils.paths has not been imported yet, that exec re-enters
+    utils/paths/__init__.py, which imports the still-half-built storage_roots
+    back and raises ImportError. Registering the two packages with a real
+    __path__ lets storage_roots resolve utils.paths.path_utils directly and
+    never runs the __init__, so the runner needs nothing beyond pytest.
+    """
+    import types
+
+    for name, relative in (("utils", "utils"), ("utils.paths", "utils/paths")):
+        if name in sys.modules:
+            continue
+        module = types.ModuleType(name)
+        module.__path__ = [str(BACKEND / relative)]
+        module.__package__ = name
+        sys.modules[name] = module
+
+
+_preseed_utils_packages()
 
 _SPEC = importlib.util.spec_from_file_location(
     "pr10317_helpers", BACKEND / "tests" / "test_export_absolute_paths.py"
