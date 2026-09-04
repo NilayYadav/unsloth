@@ -1,10 +1,10 @@
 """PR 10317 repro probe: how many times does a GGUF Hub export convert the model?
 
 Drives the REAL studio/backend/core/export/export.py:ExportBackend.export_gguf.
-Only the model conversion leg and the Hub network leg are doubles; the double for
-push_to_hub_gguf mirrors unsloth/save.py:unsloth_push_to_hub_gguf, which does
-tempfile.mkdtemp(prefix="unsloth_gguf_") and re-runs unsloth_save_pretrained_gguf
-before uploading from that temp directory.
+Only the model conversion and the Hub network calls are doubles. The
+push_to_hub_gguf double mirrors unsloth/save.py::unsloth_push_to_hub_gguf, which
+does tempfile.mkdtemp(prefix="unsloth_gguf_"), re-runs the whole conversion, and
+uploads the gguf, the Modelfile and config.json from that directory.
 
 Prints PROBE_JSON with measured values, then asserts the intended post-fix shape.
 """
@@ -54,7 +54,7 @@ _H = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_H)
 
 # Size of one "quantized" artifact. Real bytes, really written, so the disk and
-# wall-clock numbers below are measured rather than described. A real Q4_K_M of a
+# wall-clock numbers below are measured rather than described. A real Q4_K_M of an
 # 8B model is ~4.9GB; this is scaled down to keep the runner honest about time.
 ARTIFACT_BYTES = 64 * 1024 * 1024
 CHUNK = b"GGUF" + os.urandom(1020)
@@ -64,36 +64,38 @@ PRESEEDED: set = set()
 STATE = {
     "conversions": [],
     "hub_uploads": [],
-    "model_card": None,
+    "hub_files": set(),
     "token_seen": None,
     "repo_created": None,
+    "model_card": None,
 }
 
 
-def _convert(dest_dir: Path, label: str) -> Path:
-    """Stand-in for merge + convert_hf_to_gguf + llama-quantize."""
+def _convert(gguf_dir: Path, label: str, merged_dir: Path) -> Path:
+    """Stand-in for merge + convert_hf_to_gguf + llama-quantize.
+
+    Faithful to the real layout: the merged model and its config.json land in
+    merged_dir, the converted GGUF and the Modelfile in <merged_dir>_gguf.
+    """
     started = time.time()
-    dest_dir.mkdir(parents = True, exist_ok = True)
-    gguf = dest_dir / "model.Q4_K_M.gguf"
+    merged_dir.mkdir(parents = True, exist_ok = True)
+    (merged_dir / "config.json").write_text('{"model_type": "llama"}')
+    gguf_dir.mkdir(parents = True, exist_ok = True)
+    gguf = gguf_dir / "model.Q4_K_M.gguf"
     written = 0
     with open(gguf, "wb") as handle:
         while written < ARTIFACT_BYTES:
             handle.write(CHUNK)
             written += len(CHUNK)
-    (dest_dir / "Modelfile").write_text("FROM ./model.Q4_K_M.gguf\n")
-    (dest_dir / "config.json").write_text('{"model_type": "llama"}\n')
+    (gguf_dir / "Modelfile").write_text("FROM ./model.Q4_K_M.gguf")
+    temp_root = str(Path(tempfile.gettempdir()).resolve())
     STATE["conversions"].append(
         {
             "label": label,
-            "output_dir": str(dest_dir),
+            "output_dir": str(gguf_dir),
             "bytes": written,
             "seconds": round(time.time() - started, 3),
-            "under_system_temp": str(dest_dir).startswith(
-                str(Path(tempfile.gettempdir()).resolve())
-            )
-            or str(Path(dest_dir).resolve()).startswith(
-                str(Path(tempfile.gettempdir()).resolve())
-            ),
+            "under_system_temp": str(Path(gguf_dir).resolve()).startswith(temp_root),
         }
     )
     return gguf
@@ -101,18 +103,20 @@ def _convert(dest_dir: Path, label: str) -> Path:
 
 class Model:
     def save_pretrained_gguf(self, model_save_path, tokenizer, quantization_method, **kwargs):
-        out = Path(f"{model_save_path}_gguf")
-        gguf = _convert(out, "save_pretrained_gguf (local export)")
-        return {"gguf_files": [str(gguf)], "modelfile_location": str(out / "Modelfile")}
+        merged = Path(model_save_path)
+        gguf = _convert(Path(f"{model_save_path}_gguf"), "save_pretrained_gguf (local export)", merged)
+        return {
+            "gguf_files": [str(gguf)],
+            "modelfile_location": str(gguf.parent / "Modelfile"),
+            "save_directory": str(merged),
+        }
 
     def push_to_hub_gguf(self, repo_id, tokenizer = None, **kwargs):
-        # Mirrors unsloth_push_to_hub_gguf: a fresh system-temp dir, a full re-convert,
-        # then the upload reads from THAT directory.
         temp_dir = Path(tempfile.mkdtemp(prefix = "unsloth_gguf_"))
-        gguf = _convert(Path(f"{temp_dir}_gguf"), "push_to_hub_gguf (re-convert)")
-        STATE["hub_uploads"].append(
-            {"source_dir": str(gguf.parent), "files": sorted(p.name for p in gguf.parent.iterdir())}
-        )
+        gguf = _convert(Path(f"{temp_dir}_gguf"), "push_to_hub_gguf (re-convert)", temp_dir)
+        published = sorted({p.name for p in gguf.parent.iterdir()} | {"config.json"})
+        STATE["hub_files"].update(published)
+        STATE["hub_uploads"].append({"source_dir": str(gguf.parent), "files": published})
 
 
 class _RepoUrl(str):
@@ -143,7 +147,19 @@ class HfApi:
             paths = [f for f in paths if any(fnmatch(f, a) for a in allow_patterns)]
         for pattern in ignore_patterns or ():
             paths = [f for f in paths if not fnmatch(f, pattern)]
+        STATE["hub_files"].update(paths)
         STATE["hub_uploads"].append({"source_dir": str(folder_path), "files": sorted(paths)})
+
+    def upload_file(
+        self,
+        path_or_fileobj,
+        path_in_repo,
+        repo_id,
+        repo_type = None,
+        commit_message = None,
+        **kwargs,
+    ):
+        STATE["hub_files"].add(path_in_repo)
 
 
 class ModelCard:
@@ -183,8 +199,13 @@ def main() -> int:
         leftover.mkdir(parents = True)
         (leftover / "model-00001-of-00002.safetensors").write_bytes(b"W" * 4096)
         PRESEEDED.update(
-            {"notes.txt", "dataset.jsonl", "_tmp_model_earlier/model/model-00001-of-00002.safetensors"}
+            {
+                "notes.txt",
+                "dataset.jsonl",
+                "_tmp_model_earlier/model/model-00001-of-00002.safetensors",
+            }
         )
+
         mp.setattr(export_mod, "resolve_export_write_dir", lambda _v: save_dir)
         mp.setattr(export_mod, "HfApi", HfApi, raising = False)
         mp.setattr(export_mod, "ModelCard", ModelCard, raising = False)
@@ -207,9 +228,9 @@ def main() -> int:
     finally:
         mp.undo()
 
-    uploads = STATE["hub_uploads"]
     conversions = STATE["conversions"]
-    on_hub = uploads[-1]["files"] if uploads else []
+    uploads = STATE["hub_uploads"]
+    on_hub = sorted(STATE["hub_files"])
     hub_source = uploads[-1]["source_dir"] if uploads else None
     local_files = sorted(p.name for p in Path(output_path).iterdir()) if output_path else []
 
@@ -258,6 +279,8 @@ def main() -> int:
         )
     if "model.Q4_K_M.gguf" not in on_hub:
         failures.append(f"expected model.Q4_K_M.gguf on the Hub, got {on_hub}")
+    if "config.json" not in on_hub:
+        failures.append(f"expected config.json on the Hub, got {on_hub}")
     published = sorted(set(on_hub) & PRESEEDED)
     if published:
         failures.append(
