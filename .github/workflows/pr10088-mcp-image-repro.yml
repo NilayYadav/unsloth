@@ -1,0 +1,48 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10088 #10057 repro"
+
+on:
+  push:
+    branches:
+      - "pr10088-mcpimg-20260904145615-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.13"
+
+      - name: "Install the probe's dependencies"
+        shell: bash
+        run: |
+          python -m pip install -q --upgrade pip
+          pip install -q pydantic structlog pyyaml fastapi pyjwt python-multipart cryptography sqlite_vec huggingface_hub pillow
+
+      - name: "Probe: does an MCP tool's image reach the model?"
+        shell: bash
+        run: |
+          set +e
+          python probe_10057.py
+          code=$?
+          set -e
+          echo "probe exit code: $code"
+          echo "PROBE_EXIT=$code" >> "$GITHUB_ENV"
+
+      - name: "Report"
+        shell: bash
+        run: |
+          if [ "$PROBE_EXIT" = "0" ]; then echo "RESULT: the model receives the picture (fixed)"; else echo "RESULT: the model receives no picture (#10057 reproduced)"; fi
+
