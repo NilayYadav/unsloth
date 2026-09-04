@@ -17,6 +17,7 @@ import os
 import sys
 import tempfile
 import time
+from fnmatch import fnmatch
 from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1] / "studio" / "backend"
@@ -57,6 +58,8 @@ _SPEC.loader.exec_module(_H)
 # 8B model is ~4.9GB; this is scaled down to keep the runner honest about time.
 ARTIFACT_BYTES = 64 * 1024 * 1024
 CHUNK = b"GGUF" + os.urandom(1020)
+
+PRESEEDED: set = set()
 
 STATE = {
     "conversions": [],
@@ -124,16 +127,23 @@ class HfApi:
         STATE["repo_created"] = {"repo_id": repo_id, "private": private, "exist_ok": exist_ok}
         return _RepoUrl("https://huggingface.co/unsloth-ci/pr10317-gguf")
 
-    def upload_folder(self, folder_path, repo_id, repo_type, ignore_patterns = None, **kwargs):
-        ignored = set(ignore_patterns or ())
-        STATE["hub_uploads"].append(
-            {
-                "source_dir": str(folder_path),
-                "files": sorted(
-                    p.name for p in Path(folder_path).iterdir() if p.name not in ignored
-                ),
-            }
-        )
+    def upload_folder(
+        self,
+        folder_path,
+        repo_id,
+        repo_type,
+        allow_patterns = None,
+        ignore_patterns = None,
+        **kwargs,
+    ):
+        # Mirror huggingface_hub: fnmatch over repo-relative paths across the whole tree.
+        root = Path(folder_path)
+        paths = [str(f.relative_to(root)) for f in root.rglob("*") if f.is_file()]
+        if allow_patterns is not None:
+            paths = [f for f in paths if any(fnmatch(f, a) for a in allow_patterns)]
+        for pattern in ignore_patterns or ():
+            paths = [f for f in paths if not fnmatch(f, pattern)]
+        STATE["hub_uploads"].append({"source_dir": str(folder_path), "files": sorted(paths)})
 
 
 class ModelCard:
@@ -162,6 +172,19 @@ def main() -> int:
             _shutil.rmtree(root)
         root.mkdir(parents = True)
         save_dir = root / "export"
+
+        # The export panel has a folder browser and accepts absolute paths, so the
+        # chosen folder can already hold the user's own files, and a failed earlier
+        # export deliberately leaves its merged _tmp_model_* behind.
+        save_dir.mkdir(parents = True)
+        (save_dir / "notes.txt").write_text("unrelated")
+        (save_dir / "dataset.jsonl").write_text('{"a": 1}')
+        leftover = save_dir / "_tmp_model_earlier" / "model"
+        leftover.mkdir(parents = True)
+        (leftover / "model-00001-of-00002.safetensors").write_bytes(b"W" * 4096)
+        PRESEEDED.update(
+            {"notes.txt", "dataset.jsonl", "_tmp_model_earlier/model/model-00001-of-00002.safetensors"}
+        )
         mp.setattr(export_mod, "resolve_export_write_dir", lambda _v: save_dir)
         mp.setattr(export_mod, "HfApi", HfApi, raising = False)
         mp.setattr(export_mod, "ModelCard", ModelCard, raising = False)
@@ -215,6 +238,8 @@ def main() -> int:
         "extra_bytes_outside_the_requested_folder": sum(
             c["bytes"] for c in conversions if c["under_system_temp"]
         ),
+        "preseeded_user_files_in_the_folder": sorted(PRESEEDED),
+        "unrelated_user_files_published": sorted(set(on_hub) & PRESEEDED),
     }
     print("PROBE_JSON " + json.dumps(report, indent = 2))
 
@@ -233,6 +258,12 @@ def main() -> int:
         )
     if "model.Q4_K_M.gguf" not in on_hub:
         failures.append(f"expected model.Q4_K_M.gguf on the Hub, got {on_hub}")
+    published = sorted(set(on_hub) & PRESEEDED)
+    if published:
+        failures.append(
+            "the export published files it did not create, from the user's chosen "
+            f"folder: {published}"
+        )
 
     for line in failures:
         print(f"ASSERT_FAIL {line}")
