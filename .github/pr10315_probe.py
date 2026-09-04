@@ -53,7 +53,7 @@ print("=" * 70, flush=True)
 
 # ---- auth: bootstrap login, then rotate for a durable bearer -------------
 pw = (AUTH_DIR / ".bootstrap_password").read_text(encoding="utf-8").strip()
-code, body = http("POST", "/api/auth/login", {"password": pw})
+code, body = http("POST", "/api/auth/login", {"username": "unsloth", "password": pw})
 assert code == 200 and isinstance(body, dict) and body.get("access_token"), f"bootstrap login -> {code}: {shape(body)}"
 tok = body["access_token"]
 NEW = "Pr10315-Probe-Pw!x9"
@@ -61,7 +61,7 @@ code, body = http("POST", "/api/auth/change-password",
                   {"current_password": pw, "new_password": NEW},
                   {"Authorization": f"Bearer {tok}"})
 if code == 200:
-    code, body = http("POST", "/api/auth/login", {"password": NEW})
+    code, body = http("POST", "/api/auth/login", {"username": "unsloth", "password": NEW})
     assert code == 200 and body.get("access_token"), f"login after rotate -> {code}"
     tok = body["access_token"]
 AUTH = {"Authorization": f"Bearer {tok}"}
