@@ -14,14 +14,25 @@ concurrency:
 
 jobs:
   repro:
-    name: "fetch with an unroutable first address (${{ matrix.side }})"
+    name: "${{ matrix.side }} / first address ${{ matrix.mode }}s the SYN"
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        side: [ before, after ]
+        side: [ main, pr-as-submitted, pr-with-review-fix ]
+        mode: [ reject, drop ]
+        include:
+          - { side: main,               mode: reject, expect: fail }
+          - { side: main,               mode: drop,   expect: fail }
+          - { side: pr-as-submitted,    mode: reject, expect: pass }
+          - { side: pr-as-submitted,    mode: drop,   expect: fail }
+          - { side: pr-with-review-fix, mode: reject, expect: pass }
+          - { side: pr-with-review-fix, mode: drop,   expect: pass }
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -30,18 +41,33 @@ jobs:
       - name: Install the one dependency the module needs
         run: python -m pip install --quiet structlog
 
-      - name: "SIDE=before: restore main's implementation (only the implementation)"
-        if: matrix.side == 'before'
+      - name: "Select the implementation under test (only the implementation)"
+        env:
+          SIDE: ${{ matrix.side }}
         run: |
           set -eux
-          git fetch --no-tags --depth=1 https://github.com/unslothai/unsloth.git main
-          git checkout FETCH_HEAD -- \
-            studio/backend/core/inference/tools.py \
-            studio/backend/core/inference/external_provider.py
-          echo "--- implementation now under test: ---"
-          git diff --stat HEAD -- studio/backend/core/inference/
+          git fetch --no-tags https://github.com/unslothai/unsloth.git main
+          UPSTREAM_MAIN=$(git rev-parse FETCH_HEAD)
+          case "$SIDE" in
+            main)               REF="$UPSTREAM_MAIN" ;;
+            pr-as-submitted)    REF="49b3b047a002ddae8dc79b9596e4d2238f384567" ;;
+            pr-with-review-fix) REF="" ;;
+          esac
+          if [ -n "$REF" ]; then
+            git fetch --no-tags https://github.com/NilayYadav/unsloth.git \
+              +refs/heads/fix-web-fetch-address-fallback:refs/remotes/prbranch || true
+            git checkout "$REF" -- \
+              studio/backend/core/inference/tools.py \
+              studio/backend/core/inference/external_provider.py
+          fi
+          echo "--- implementation under test: $SIDE (ref=${REF:-working tree}) ---"
+          git log -1 --format='%H %s' -- studio/backend/core/inference/tools.py || true
+          grep -n "def _fetch_hop_timeout" studio/backend/core/inference/tools.py
+          grep -c "_open_first_reachable" studio/backend/core/inference/tools.py || true
 
-      - name: Arrange a configured-but-blackholed IPv6 route
+      - name: "Arrange a configured-but-${{ matrix.mode }}ed IPv6 route"
+        env:
+          MODE: ${{ matrix.mode }}
         run: |
           set -eux
           sudo modprobe dummy || true
@@ -52,13 +78,20 @@ jobs:
           sudo sysctl -w net.ipv6.conf.ublackhole0.disable_ipv6=0
           sudo ip -6 addr add 2001:db8:1319::1/64 dev ublackhole0 nodad
           sudo ip -6 route add default dev ublackhole0 metric 1
-          sudo ip6tables -I OUTPUT -p tcp -j REJECT --reject-with icmp6-adm-prohibited
-          echo "--- addresses ---"; ip -6 addr show ublackhole0
-          echo "--- routes ---";    ip -6 route show
-          echo "--- getent (resolver order) ---"; getent ahosts example.com || true
+          if [ "$MODE" = "reject" ]; then
+            sudo ip6tables -I OUTPUT -p tcp -j REJECT --reject-with icmp6-adm-prohibited
+          else
+            sudo ip6tables -I OUTPUT -p tcp -j DROP
+          fi
+          echo "--- ip6tables OUTPUT ---"; sudo ip6tables -S OUTPUT
+          echo "--- routes ---"; ip -6 route show
+          echo "--- resolver order ---"; getent ahosts example.com || true
 
       - name: Run the probe
         env:
           SIDE: ${{ matrix.side }}
+          MODE: ${{ matrix.mode }}
+          EXPECT: ${{ matrix.expect }}
           PROBE_HOST: example.com
+          PROBE_TIMEOUT: "20"
         run: python .github/scripts/pr10319_addr_fallback_probe.py

@@ -3,9 +3,12 @@
 # Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 """PR 10319 repro: a host whose first resolved address is unroutable.
 
-Runs the real studio web-fetch path against the real network. No monkeypatching:
-the only thing arranged is the network condition (a configured but blackholed
-IPv6 route), which is what a broken-IPv6 VPN looks like to getaddrinfo.
+Drives the real model-facing page fetch against the real network. Nothing is
+monkeypatched; the only thing arranged is the network condition, which is what a
+broken-IPv6 VPN looks like to getaddrinfo. Two shapes of unroutable are tested:
+
+  reject  the address answers with ICMP admin-prohibited, so connect() fails at once
+  drop    the address swallows the SYN, so connect() fails only by timing out
 """
 
 import os
@@ -18,12 +21,14 @@ sys.path.insert(0, os.path.join(os.getcwd(), "studio", "backend"))
 HOST = os.environ.get("PROBE_HOST", "example.com")
 URL = "https://" + HOST + "/"
 SIDE = os.environ["SIDE"]
+MODE = os.environ["MODE"]
+BUDGET = float(os.environ.get("PROBE_TIMEOUT", "20"))
 
 
 def banner(text):
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 72)
     print(text)
-    print("=" * 70, flush = True)
+    print("=" * 72, flush = True)
 
 
 banner("1. What the resolver actually returns for " + HOST)
@@ -34,65 +39,61 @@ for n, (fam, _t, _p, _c, sa) in enumerate(infos):
 if not order:
     print("HARNESS FAIL: no addresses resolved")
     sys.exit(2)
-first_is_v6 = ":" in order[0]
-print("  first address is IPv6:", first_is_v6)
+print("  first address is IPv6:", ":" in order[0])
 
 banner("2. Raw reachability of each address (proves the arranged condition)")
 reach = {}
 for addr in order:
     fam = socket.AF_INET6 if ":" in addr else socket.AF_INET
     s = socket.socket(fam, socket.SOCK_STREAM)
-    s.settimeout(8)
+    s.settimeout(6)
     t0 = time.time()
     try:
         s.connect((addr, 443))
         reach[addr] = "REACHABLE"
     except OSError as e:
-        reach[addr] = "UNREACHABLE (%s)" % e
+        reach[addr] = "UNREACHABLE (%s)" % (e or type(e).__name__)
     finally:
         s.close()
-    print("  %-42s %-40s %.2fs" % (addr, reach[addr], time.time() - t0))
+    print("  %-42s %-38s %.2fs" % (addr, reach[addr], time.time() - t0))
 
-if not first_is_v6 or not reach[order[0]].startswith("UNREACHABLE"):
+if ":" not in order[0] or not reach[order[0]].startswith("UNREACHABLE"):
     print("\nHARNESS FAIL: the first resolved address is not an unroutable one.")
-    print("The condition under test was not established; this run proves nothing.")
     sys.exit(2)
 if not any(v == "REACHABLE" for v in reach.values()):
     print("\nHARNESS FAIL: no address is reachable at all; nothing to fall back to.")
     sys.exit(2)
 
-banner("3. The studio SSRF validator (which addresses does it hand the fetcher?)")
-from core.inference.tools import _fetch_url_raw, _validate_and_resolve_host
+banner("3. The studio SSRF validator: which addresses does it hand the fetcher?")
+from core.inference.tools import _fetch_page_text, _validate_and_resolve_host
 
 ok, reason, pinned = _validate_and_resolve_host(HOST, 443)
-print("  ok      =", ok)
-print("  reason  =", repr(reason))
-print("  pinned  =", repr(pinned))
-print("  type    =", type(pinned).__name__)
+print("  ok     =", ok)
+print("  reason =", repr(reason))
+print("  pinned =", repr(pinned))
+print("  type   =", type(pinned).__name__)
 
-banner("4. The real fetch: _fetch_url_raw(%r)" % URL)
+banner("4. The real model-facing fetch: _fetch_page_text(%r, timeout=%g)" % (URL, BUDGET))
+print("   (this is the path that sets a wall-clock deadline for the whole fetch)")
 t0 = time.time()
-err, body, ctype = _fetch_url_raw(URL, timeout = 30)
+out = _fetch_page_text(URL, timeout = BUDGET)
 elapsed = time.time() - t0
-print("  error        =", repr(err))
-print("  content_type =", repr(ctype))
-print("  body bytes   =", len(body))
-print("  elapsed      = %.2fs" % elapsed)
-if body:
-    print("  body head    =", repr(body[:160]))
+failed = out.startswith("Failed to fetch URL") or out.startswith("Blocked:")
+print("  elapsed = %.2fs" % elapsed)
+print("  failed  =", failed)
+print("  result  =", repr(out[:200]))
 
-banner("5. Verdict for SIDE=" + SIDE)
-if SIDE == "before":
-    if err is None and body:
-        print("UNEXPECTED PASS: main fetched the page; the bug did not reproduce.")
-        sys.exit(1)
-    print("REPRO CONFIRMED: on main the fetch fails outright.")
-    print("  user-facing error: " + str(err))
+banner("5. Verdict for SIDE=%s MODE=%s" % (SIDE, MODE))
+expect_fail = os.environ["EXPECT"] == "fail"
+if failed == expect_fail:
+    if failed:
+        print("AS EXPECTED - the fetch FAILS here.")
+        print("  user-facing error: " + out[:160])
+    else:
+        print("AS EXPECTED - the fetch SUCCEEDS here.")
+        print("  walked past the unroutable %s and read %d chars in %.2fs"
+              % (order[0], len(out), elapsed))
     sys.exit(0)
-else:
-    if err is not None or not body:
-        print("FIX FAILED: with the PR applied the fetch still fails: " + str(err))
-        sys.exit(1)
-    print("FIX CONFIRMED: the PR walked past the unroutable %s" % order[0])
-    print("  and fetched %d bytes of %s from %s" % (len(body), ctype, order[-1]))
-    sys.exit(0)
+print("MISMATCH: expected the fetch to %s, but it did not." % ("fail" if expect_fail else "succeed"))
+print("  result: " + out[:200])
+sys.exit(1)
