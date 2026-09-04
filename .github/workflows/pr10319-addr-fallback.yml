@@ -1,0 +1,64 @@
+name: "PR 10319 address-fallback repro"
+
+on:
+  push:
+    branches: [ "pr10319-repro-20260904203400" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr10319-addr-fallback-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repro:
+    name: "fetch with an unroutable first address (${{ matrix.side }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [ before, after ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the one dependency the module needs
+        run: python -m pip install --quiet structlog
+
+      - name: "SIDE=before: restore main's implementation (only the implementation)"
+        if: matrix.side == 'before'
+        run: |
+          set -eux
+          git fetch --no-tags --depth=1 https://github.com/unslothai/unsloth.git main
+          git checkout FETCH_HEAD -- \
+            studio/backend/core/inference/tools.py \
+            studio/backend/core/inference/external_provider.py
+          echo "--- implementation now under test: ---"
+          git diff --stat HEAD -- studio/backend/core/inference/
+
+      - name: Arrange a configured-but-blackholed IPv6 route
+        run: |
+          set -eux
+          sudo modprobe dummy || true
+          sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0
+          sudo sysctl -w net.ipv6.conf.default.disable_ipv6=0
+          sudo ip link add ublackhole0 type dummy
+          sudo ip link set ublackhole0 up
+          sudo sysctl -w net.ipv6.conf.ublackhole0.disable_ipv6=0
+          sudo ip -6 addr add 2001:db8:1319::1/64 dev ublackhole0 nodad
+          sudo ip -6 route add default dev ublackhole0 metric 1
+          sudo ip6tables -I OUTPUT -p tcp -j REJECT --reject-with icmp6-adm-prohibited
+          echo "--- addresses ---"; ip -6 addr show ublackhole0
+          echo "--- routes ---";    ip -6 route show
+          echo "--- getent (resolver order) ---"; getent ahosts example.com || true
+
+      - name: Run the probe
+        env:
+          SIDE: ${{ matrix.side }}
+          PROBE_HOST: example.com
+        run: python .github/scripts/pr10319_addr_fallback_probe.py
