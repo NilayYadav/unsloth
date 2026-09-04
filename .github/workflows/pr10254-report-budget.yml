@@ -1,0 +1,91 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10254 report budget A/B"
+
+on:
+  push:
+    branches:
+      - "pr10254-repro-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "What is under test"
+        shell: bash
+        run: |
+          set -euo pipefail
+          git log --oneline -1
+          echo '--- studio delta vs upstream main ---'
+          git fetch -q --depth=1 https://github.com/unslothai/unsloth.git main
+          git diff --stat FETCH_HEAD -- studio | tail -10
+          echo '--- the synthesis budget as written in this tree ---'
+          grep -n 'max_tokens = ' studio/backend/core/research_runs.py | sed -n '1,20p'
+
+      - name: "Install backend probe dependencies"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet pytest pydantic structlog pyyaml fastapi pyjwt huggingface_hub httpx python-multipart cryptography
+          python -c "import pytest, pydantic, structlog, yaml, fastapi, jwt, huggingface_hub, httpx, cryptography; print('probe deps ok')"
+
+      - name: "Backend probe: the budget Deep Research asks the saved connection for"
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd studio/backend
+          set +e
+          PYTHONPATH=. PR10254_FACTS_OUT="$GITHUB_WORKSPACE/pr10254-backend-facts.json" python -m pytest tests/test_pr10254_report_budget_probe.py -q -s -p no:logging 2>&1 | tee "$GITHUB_WORKSPACE/backend-probe.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "$code" > "$GITHUB_WORKSPACE/backend-probe.exit"
+          echo '--- recorded facts ---'
+          grep -E 'PR10254_SYNTHESIS_FACTS|PR10254_ROUTE_FACT' "$GITHUB_WORKSPACE/backend-probe.log" | grep -v 'print(' || true
+          grep -E 'AssertionError|Unsupported inferenceRequest fields' "$GITHUB_WORKSPACE/backend-probe.log" || true
+          echo "backend probe exit=$code"
+
+      - name: "Frontend probe: the request the app builds for the connection"
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd studio/frontend
+          set +e
+          node --experimental-strip-types --test tests/pr10254-connection-ceiling.test.ts 2>&1 | tee "$GITHUB_WORKSPACE/frontend-probe.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "$code" > "$GITHUB_WORKSPACE/frontend-probe.exit"
+          grep -E 'PR10254_FRONTEND_FACT|^# (pass|fail)' "$GITHUB_WORKSPACE/frontend-probe.log" || true
+          echo "frontend probe exit=$code"
+
+      - name: "Verdict"
+        shell: bash
+        run: |
+          set -euo pipefail
+          backend=$(cat "$GITHUB_WORKSPACE/backend-probe.exit")
+          frontend=$(cat "$GITHUB_WORKSPACE/frontend-probe.exit")
+          echo "backend=$backend frontend=$frontend"
+          if [ "$backend" != "0" ] || [ "$frontend" != "0" ]; then
+            echo 'PR10254 VERDICT: the connection ceiling is NOT used for the report.'
+            exit 1
+          fi
+          echo 'PR10254 VERDICT: the report is written against the connection ceiling.'
+
