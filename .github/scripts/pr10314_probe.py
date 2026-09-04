@@ -65,6 +65,8 @@ HISTORY = [
             }
         ],
     },
+    # The realistic continuation: the client asks the model to use the tool result.
+    {"role": "user", "content": "Given that result, what is the weather in Paris?"},
 ]
 
 
@@ -211,9 +213,9 @@ e = record("R3_messages_tool_history_no_catalog", st, body)
 check(
     "R3 /v1/messages with replayed tool history and no catalogue still answers "
     "(fold_tool_results_into_user path)",
-    st == 200,
-    "HTTP 200",
-    f"HTTP {st} {e.get('error_message', '')[:120]}",
+    st == 200 and bool(e.get("text")),
+    "HTTP 200 with non-empty text",
+    f"HTTP {st} text={e.get('text', '')[:100]!r} {e.get('error_message', '')[:120]}",
 )
 
 # ── R4: a plain request is untouched ──────────────────────────────────────
