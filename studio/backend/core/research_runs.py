@@ -506,7 +506,10 @@ def _completion_hit_context_wall(
 
 
 def _synthesis_length_limit_error(
-    usage: dict[str, int] | None, *, requested_max_tokens: int, external: bool = False
+    usage: dict[str, int] | None,
+    *,
+    requested_max_tokens: int,
+    external: bool = False,
 ) -> str:
     if external:
         # A saved connection generated this, so the loaded local window explains nothing about
