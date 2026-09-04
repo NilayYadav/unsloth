@@ -1,0 +1,189 @@
+# Disposable evidence workflow for unslothai/unsloth#10314. Delete after validation.
+#
+# Drives REAL Claude Code (headless -p) against Studio serving a GGUF whose chat
+# template does not advertise tools (gemma-3-270m-it), with a real client tool
+# catalogue on the wire. Identical bytes on before/after branches.
+
+name: "PR 10314 Claude Code evidence"
+
+on:
+  push:
+    branches:
+      - 'pr10314-claude-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    name: "PR 10314 Claude Code (${{ github.ref_name }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONUNBUFFERED: '1'
+      GGUF_REPO: unsloth/gemma-3-270m-it-GGUF
+      GGUF_FILE: gemma-3-270m-it-UD-Q4_K_XL.gguf
+      STUDIO_PORT: '18888'
+      STUDIO_LOG: logs/studio.log
+      HF_XET_CACHE: ${{ github.workspace }}/xet-scratch
+      EVIDENCE_DIR: ${{ github.workspace }}/evidence
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Linux deps for llama.cpp prebuilt
+        timeout-minutes: 15
+        env:
+          RETRY_ATTEMPTS: '2'
+          RETRY_ATTEMPT_TIMEOUT: '360'
+        run: |
+          bash .github/scripts/retry-with-apt-lock.sh sudo sh -c \
+            'apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev jq || { apt-get update && apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev jq; }'
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Unsloth (--local, --no-torch)
+        id: install
+        timeout-minutes: 25
+        uses: ./.github/actions/install-unsloth-local
+        with:
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Claude Code
+        timeout-minutes: 10
+        run: |
+          bash .github/scripts/agent-guides-install.sh claude
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/claude" --version || claude --version
+
+      - name: Restore GGUF model file
+        id: cache-gguf
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: gguf-cache
+          key: gguf-pr10314-${{ env.GGUF_FILE }}-v1
+          enableCrossOsArchive: true
+
+      - name: Download GGUF if cache miss
+        id: download-gguf
+        timeout-minutes: 15
+        if: ${{ steps.cache-gguf.outputs.cache-hit != 'true' || steps.cache-gguf.outcome != 'success' }}
+        run: |
+          python -m pip install --upgrade huggingface_hub
+          mkdir -p gguf-cache
+          bash .github/scripts/hf-download-with-retry.sh "$GGUF_REPO" "$GGUF_FILE" gguf-cache
+
+      - name: Reset auth + boot Unsloth (API-only)
+        id: boot
+        timeout-minutes: 5
+        run: |
+          bash .github/scripts/boot-studio-api-only.sh --port "$STUDIO_PORT" --log "$STUDIO_LOG"
+
+      - name: Wait for health, log in, load the toolless GGUF
+        id: ready
+        timeout-minutes: 15
+        run: |
+          for i in $(seq 1 180); do
+            if curl -fs "http://127.0.0.1:${STUDIO_PORT}/api/health" > /tmp/health.json; then
+              jq -e '.status == "healthy"' /tmp/health.json && break
+            fi
+            sleep 1
+          done
+          jq -e '.status == "healthy"' /tmp/health.json
+          OLD=$(cat ~/.unsloth/studio/auth/.bootstrap_password)
+          NEW="CIRepro-$(python -c 'import secrets; print(secrets.token_urlsafe(12))')"
+          echo "::add-mask::$OLD"
+          echo "::add-mask::$NEW"
+          OLD_TOKEN=$(curl -fs -X POST "http://127.0.0.1:${STUDIO_PORT}/api/auth/login" \
+            -H 'content-type: application/json' \
+            -d "{\"username\":\"unsloth\",\"password\":\"$OLD\"}" | jq -r .access_token)
+          curl -fs -X POST "http://127.0.0.1:${STUDIO_PORT}/api/auth/change-password" \
+            -H "Authorization: Bearer $OLD_TOKEN" -H 'content-type: application/json' \
+            -d "{\"current_password\":\"$OLD\",\"new_password\":\"$NEW\"}" > /dev/null
+          TOKEN=$(curl -fs -X POST "http://127.0.0.1:${STUDIO_PORT}/api/auth/login" \
+            -H 'content-type: application/json' \
+            -d "{\"username\":\"unsloth\",\"password\":\"$NEW\"}" | jq -r .access_token)
+          echo "::add-mask::$TOKEN"
+          echo "API_KEY=$TOKEN" >> "$GITHUB_ENV"
+          GGUF_PATH="$GITHUB_WORKSPACE/gguf-cache/${GGUF_FILE}"
+          ls -lh "$GGUF_PATH"
+          # 32k so Claude Code's count_tokens on a real tool catalogue never trips a window limit.
+          curl -fs -X POST "http://127.0.0.1:${STUDIO_PORT}/api/inference/load" \
+            -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+            --max-time 900 \
+            -d "{\"model_path\":\"$GGUF_PATH\",\"is_lora\":false,\"max_seq_length\":32768}" \
+            | jq '{status, display_name}'
+          MODEL_ID=$(curl -fs "http://127.0.0.1:${STUDIO_PORT}/v1/models" -H "Authorization: Bearer $TOKEN" | jq -r '.data[0].id')
+          echo "MODEL_ID=$MODEL_ID" >> "$GITHUB_ENV"
+          echo "loaded model id: $MODEL_ID"
+
+      - name: Drive Claude Code with a real tool catalogue
+        id: drive
+        timeout-minutes: 20
+        env:
+          # Same session env `unsloth start claude` emits (unsloth_cli/commands/start.py:_claude_local_env).
+          ANTHROPIC_BASE_URL: http://127.0.0.1:18888
+          ANTHROPIC_AUTH_TOKEN: ${{ env.API_KEY }}
+          ANTHROPIC_MODEL: ${{ env.MODEL_ID }}
+          CLAUDE_CODE_ATTRIBUTION_HEADER: '0'
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+          CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1'
+          CLAUDE_CODE_NO_FLICKER: '1'
+          CLAUDE_CODE_MAX_CONTEXT_TOKENS: '32768'
+          CLAUDE_CODE_AUTO_COMPACT_WINDOW: '32768'
+          CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '90'
+          PROMPT: 'Run `uname -a` with your Bash tool and paste the exact output.'
+        run: |
+          set +e
+          mkdir -p "$EVIDENCE_DIR" agent-workdir
+          cd agent-workdir
+          SP="$GITHUB_WORKSPACE/.github/scripts/pr10314_system_prompt.txt"
+          echo "claude version: $(claude --version)" | tee "$EVIDENCE_DIR/claude-version.txt"
+          echo "git sha: $GITHUB_SHA branch: $GITHUB_REF_NAME" | tee "$EVIDENCE_DIR/ref.txt"
+          # The command a user would type, recorded verbatim for the render.
+          printf '%s\n' "claude --model $ANTHROPIC_MODEL --tools \"Bash,Read\" -p \"$PROMPT\"" > "$EVIDENCE_DIR/command.txt"
+
+          # 1) Plain text mode: exactly what a terminal shows.
+          timeout --kill-after=30 420 claude --model "$ANTHROPIC_MODEL" \
+            --system-prompt-file "$SP" --tools "Bash,Read" \
+            -p "$PROMPT" > "$EVIDENCE_DIR/claude-text.txt" 2>&1
+          echo "$?" > "$EVIDENCE_DIR/claude-text.exit"
+          echo "--- text mode (exit $(cat "$EVIDENCE_DIR/claude-text.exit")):"; cat "$EVIDENCE_DIR/claude-text.txt"; echo
+
+          # 2) JSON mode: structured facts (is_error, result, num_turns, usage).
+          timeout --kill-after=30 420 claude --model "$ANTHROPIC_MODEL" \
+            --system-prompt-file "$SP" --tools "Bash,Read" \
+            --output-format json -p "$PROMPT" > "$EVIDENCE_DIR/claude-json.txt" 2> "$EVIDENCE_DIR/claude-json.stderr"
+          echo "$?" > "$EVIDENCE_DIR/claude-json.exit"
+          echo "--- json mode (exit $(cat "$EVIDENCE_DIR/claude-json.exit")):"; cat "$EVIDENCE_DIR/claude-json.txt"; echo
+          cat "$EVIDENCE_DIR/claude-json.stderr"
+
+          # Redact the bearer token from everything we keep.
+          grep -rlF "$ANTHROPIC_AUTH_TOKEN" "$EVIDENCE_DIR" 2>/dev/null | while IFS= read -r f; do
+            sed -i "s#${ANTHROPIC_AUTH_TOKEN}#<REDACTED>#g" "$f"
+          done
+          exit 0
+
+      - name: Show Studio log tail
+        if: always()
+        run: |
+          mkdir -p "$EVIDENCE_DIR"
+          tail -n 300 "$STUDIO_LOG" > "$EVIDENCE_DIR/studio-log-tail.txt" || true
+          grep -aE "v1/messages|400|tool" "$EVIDENCE_DIR/studio-log-tail.txt" | tail -40 || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: pr10314-claude-${{ github.ref_name }}
+          path: evidence/
+          if-no-files-found: warn
