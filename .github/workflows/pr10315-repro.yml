@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026-present the Unsloth AI Inc. team. All rights reserved.
+#
+# PR 10315 A/B reproduction: POST /v1/embeddings against a live `unsloth studio`.
+# Identical job on both branches; only the implementation under test differs.
+#   -before branch = fresh upstream main   -> expects the defect (non-200)
+#   -after  branch = same main + PR 10315  -> expects 200 + a real vector
+# Disposable; not for upstream.
+
+name: PR 10315 embeddings A/B
+
+on:
+  push:
+    branches:
+      - pr10315-emb-20260904202936-before
+      - pr10315-emb-20260904202936-after
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  embeddings-ab:
+    name: /v1/embeddings A/B
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GGUF_REPO: unsloth/gemma-3-270m-it-GGUF
+      GGUF_VARIANT: UD-Q4_K_XL
+      GGUF_FILE: gemma-3-270m-it-UD-Q4_K_XL.gguf
+      STUDIO_PORT: '18893'
+      HF_HOME: ${{ github.workspace }}/hf-cache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Derive SIDE from the branch
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            *-before) echo "SIDE=before" >> "$GITHUB_ENV" ;;
+            *-after)  echo "SIDE=after"  >> "$GITHUB_ENV" ;;
+            *) echo "::error::branch ${GITHUB_REF_NAME} has no -before/-after suffix"; exit 2 ;;
+          esac
+
+      - name: Linux deps
+        timeout-minutes: 15
+        env:
+          RETRY_ATTEMPTS: '2'
+          RETRY_ATTEMPT_TIMEOUT: '360'
+        run: |
+          bash .github/scripts/retry-with-apt-lock.sh sudo sh -c \
+            'apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev jq || { apt-get update && apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev jq; }'
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Restore HF_HOME for ${{ env.GGUF_REPO }}
+        id: cache-hf
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        continue-on-error: true
+        with:
+          path: hf-cache
+          key: hf-${{ env.GGUF_REPO }}-${{ env.GGUF_VARIANT }}-v3
+          enableCrossOsArchive: true
+
+      - name: Prime HF_HOME with the GGUF
+        if: steps.cache-hf.outputs.cache-hit != 'true' || steps.cache-hf.outcome != 'success'
+        run: |
+          python -m pip install --upgrade huggingface_hub
+          mkdir -p hf-cache
+          bash .github/scripts/hf-download-with-retry.sh "$GGUF_REPO" "$GGUF_FILE"
+
+      - name: Install Unsloth (--local, --no-torch)
+        uses: ./.github/actions/install-unsloth-local
+        with:
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Boot Unsloth studio (API-only)
+        run: bash .github/scripts/boot-studio-api-only.sh --port "$STUDIO_PORT"
+
+      - name: Wait for /api/health
+        run: bash .github/scripts/wait-for-health.sh --port "$STUDIO_PORT"
+
+      - name: Probe /v1/embeddings
+        id: probe
+        timeout-minutes: 25
+        run: python3 .github/pr10315_probe.py
+
+      - name: Studio log tail
+        if: always()
+        run: |
+          echo "----- last 200 lines of logs/studio.log -----"
+          tail -n 200 logs/studio.log || echo "(no log)"
+
+      - name: Stop studio
+        if: always()
+        run: kill "$STUDIO_PID" 2>/dev/null || true
