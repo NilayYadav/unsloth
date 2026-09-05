@@ -1,0 +1,90 @@
+name: "PR 10320 openclaw memory search repro"
+
+on:
+  push:
+    branches:
+      - "pr10320-final-20260905004952"
+      - "pr10320-final-unused-20260905004952"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr10320-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UNSLOTH_SEED: '3407'
+  STUDIO_PORT: '18901'
+  GGUF_REPO: unsloth/gemma-3-270m-it-GGUF
+  GGUF_VARIANT: Q8_0
+
+jobs:
+  repro:
+    name: openclaw memory search against Studio embeddings
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Linux deps for llama.cpp prebuilt
+        timeout-minutes: 15
+        env:
+          RETRY_ATTEMPTS: '2'
+          RETRY_ATTEMPT_TIMEOUT: '360'
+        run: |
+          bash .github/scripts/retry-with-apt-lock.sh sudo sh -c \
+            'apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev jq || { apt-get update && apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev jq; }'
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Unsloth (--local, --no-torch)
+        uses: ./.github/actions/install-unsloth-local
+        with:
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+          hf-token: ''
+
+      - name: Serve unsloth run --disable-tools (gemma-3-270m chat GGUF)
+        run: |
+          rm -rf ~/.unsloth/studio/auth
+          bash .github/scripts/serve-unsloth-run.sh \
+            --model "$GGUF_REPO" --gguf-variant "$GGUF_VARIANT" \
+            --port "$STUDIO_PORT" --log-dir logs \
+            --extra "--seed $UNSLOTH_SEED --temp 0" \
+            --health-timeout 900
+
+      - name: Probe openclaw memory search config and /v1/embeddings
+        run: python .github/scripts/pr10320_probe.py
+
+      - name: Collect server logs (debug)
+        if: always()
+        run: |
+          mkdir -p logs/studio-logs
+          cp -r "$HOME/.unsloth/studio/logs/." logs/studio-logs/ 2>/dev/null || true
+          if [ -n "${UNSLOTH_API_KEY:-}" ]; then
+            grep -rlF "$UNSLOTH_API_KEY" logs 2>/dev/null | while IFS= read -r f; do
+              sed -i "s#${UNSLOTH_API_KEY}#<REDACTED>#g" "$f" 2>/dev/null || true
+            done
+          fi
+
+      - name: Stop Unsloth
+        if: always()
+        run: |
+          if [ -n "${UNSLOTH_SERVER_PID:-}" ] && [ "${UNSLOTH_SERVER_PID}" != "0" ]; then
+            kill "${UNSLOTH_SERVER_PID}" 2>/dev/null || true
+          fi
+          sleep 2
+
+      - name: Upload logs
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: pr10320-repro-log
+          path: logs/
+          retention-days: 7
