@@ -1,0 +1,61 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10455 uncaptioned-image repro"
+
+on:
+  push:
+    branches:
+      - "pr10455-repro-pos-20260907212215"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install probe dependencies"
+        shell: bash
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet pydantic structlog pyyaml fastapi pyjwt huggingface_hub httpx python-multipart cryptography sqlite_vec
+          cd "$GITHUB_WORKSPACE/.github/pr10455-repro"
+          npm init -y >/dev/null 2>&1
+          npm install --silent --no-audit --no-fund typescript@5.6.3
+          python -c "import httpx, pydantic; print('python deps ready')"
+          node -e "require('typescript'); console.log('typescript ready')"
+
+      - name: "Probe: an image sent with no caption on an Anthropic connection"
+        shell: bash
+        run: |
+          set +e
+          echo '=============== BACKEND: what reaches the Anthropic Messages API ==============='
+          ( cd studio/backend && PYTHONPATH=. python "$GITHUB_WORKSPACE/.github/pr10455-repro/probe_backend.py" )
+          BACKEND=$?
+          echo
+          echo '=============== FRONTEND: what the composer serialises ==============='
+          node "$GITHUB_WORKSPACE/.github/pr10455-repro/probe_frontend.mjs" "$GITHUB_WORKSPACE/studio/frontend/src/features/chat/api/chat-adapter.ts"
+          FRONTEND=$?
+          echo
+          echo "backend probe exit=$BACKEND  frontend probe exit=$FRONTEND"
+          if [ $BACKEND -ne 0 ] || [ $FRONTEND -ne 0 ]; then
+            echo 'RESULT: FAIL - an uncaptioned image still goes out as an empty text block'
+            exit 1
+          fi
+          echo 'RESULT: PASS - an uncaptioned image sends the image alone, and the provider answers'
+
