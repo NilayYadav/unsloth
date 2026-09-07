@@ -1,0 +1,38 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10452 config-key repro (ubuntu-latest)"
+
+on:
+  push:
+    branches:
+      - "pr10452-repro-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install the CLI's config dependencies (no torch, no model)"
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "typer==0.27.1" "click<8.3" pyyaml pydantic
+
+      - name: "Probe: does `unsloth train --config` notice keys it does not know?"
+        shell: bash
+        run: |
+          python pr10452_probe.py
+
