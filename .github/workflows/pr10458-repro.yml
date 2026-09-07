@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  BASE_SHA: 502c4d23776d21e7e4cf01d72c52bc6ec13bf48a
+
 concurrency:
   group: pr10458-repro-${{ github.ref }}
   cancel-in-progress: true
@@ -25,11 +28,13 @@ jobs:
           python-version: "3.12"
       - name: Install probe dependencies
         run: python -m pip install --quiet pytest httpx jinja2 structlog
-      - name: Restore pre-PR llama_cpp.py (first parent = upstream main)
+      - name: Restore pre-PR llama_cpp.py (upstream/main 502c4d237)
         run: |
-          git checkout HEAD^ -- studio/backend/core/inference/llama_cpp.py
-          echo "reverted to $(git rev-parse HEAD^)"
-          git diff --stat HEAD -- studio/backend/core/inference/llama_cpp.py
+          git checkout $BASE_SHA -- studio/backend/core/inference/llama_cpp.py
+          echo "reverted studio/backend/core/inference/llama_cpp.py to $BASE_SHA"
+          git diff --stat -- studio/backend/core/inference/llama_cpp.py
+          test -n "$(git diff --name-only -- studio/backend/core/inference/llama_cpp.py)" \
+            || { echo 'revert was a no-op'; exit 1; }
       - name: Probe - every level the Think menu offers
         run: |
           set +e
@@ -79,7 +84,7 @@ jobs:
       - name: Install probe dependencies
         run: python -m pip install --quiet pytest httpx jinja2 structlog
       - name: Confirm the PR change is present
-        run: git diff --stat HEAD^ HEAD -- studio/backend/core/inference/llama_cpp.py
+        run: git diff --stat $BASE_SHA HEAD -- studio/backend/core/inference/llama_cpp.py
       - name: Probe - every level the Think menu offers
         run: |
           python .github/repro/pr10458_probe.py | tee after.txt
