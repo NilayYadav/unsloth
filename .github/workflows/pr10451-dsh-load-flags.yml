@@ -1,0 +1,75 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10451 dsh load flags A/B"
+
+on:
+  push:
+    branches:
+      - "mimir-pr10451-20260907213246-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Which side is this: show the dsh call site under test"
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "commit: $(git rev-parse HEAD)"
+          python - <<'PY'
+          src = open('unsloth_cli/commands/start.py', encoding='utf-8').read()
+          tail = src[src.index('def dsh('):]
+          body = tail[tail.index('_connect('):][:260]
+          print('--- dsh _connect( ... ) as built in this checkout ---')
+          print(body)
+          print('--- uses _load_options(ctx, ...):', '_load_options(' in body, '---')
+          PY
+
+      - name: "Install the probe dependencies (no torch, no model, no Studio)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip >/dev/null
+          python -m pip install typer click pydantic pyyaml pytest
+          python -c "import sys; print('python', sys.version.split()[0])"
+          python -c "from importlib.metadata import version; print('typer', version('typer'), '| click', version('click'))"
+
+      - name: "Probe the real CLI, then run the PR regression test"
+        shell: bash
+        run: |
+          set +e
+          echo '================ PROBE: unsloth start dsh --context-length 0 ================'
+          python .github/scripts/pr10451_dsh_attach_probe.py
+          probe_rc=$?
+          echo
+          echo '================ PR REGRESSION TEST ================'
+          python -m pytest tests/studio/test_cli_attach_load_knobs.py -v --noconftest -p no:cacheprovider
+          test_rc=$?
+          echo
+          echo '================ SUMMARY ================'
+          echo "probe_rc=$probe_rc  pytest_rc=$test_rc"
+          if [ "$probe_rc" -eq 0 ] && [ "$test_rc" -eq 0 ]; then
+            echo 'OVERALL: PASS -- the typed flag reaches /api/inference/load'
+            exit 0
+          fi
+          echo 'OVERALL: FAIL -- the typed flag was dropped'
+          exit 1
+
