@@ -1,0 +1,98 @@
+name: "PR 10458 repro: local thinking levels"
+
+on:
+  push:
+    branches:
+      - "repro-pr10458-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr10458-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  before-main:
+    name: "BEFORE (main): picked level is dropped"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install probe dependencies
+        run: python -m pip install --quiet pytest httpx jinja2 structlog
+      - name: Restore pre-PR llama_cpp.py (first parent = upstream main)
+        run: |
+          git checkout HEAD^ -- studio/backend/core/inference/llama_cpp.py
+          echo "reverted to $(git rev-parse HEAD^)"
+          git diff --stat HEAD -- studio/backend/core/inference/llama_cpp.py
+      - name: Probe - every level the Think menu offers
+        run: |
+          set +e
+          python .github/repro/pr10458_probe.py | tee before.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "probe exit code: $code"
+          if [ "$code" -ne 1 ]; then
+            echo "UNEXPECTED: probe should fail on main (exit 1), got $code"
+            exit 1
+          fi
+          grep -q "FAIL: Think menu offers 'max' but the request carries null" before.txt
+          grep -q "FAIL: Think menu offers 'xhigh' but the request carries null" before.txt
+          grep -q "FAIL: 3/7 advertised level(s) never reach the model" before.txt
+          echo "NEGATIVE CONFIRMED: 3 of 7 advertised levels never reach the model on main"
+      - name: PR regression test on main (must fail)
+        working-directory: studio/backend
+        run: |
+          set +e
+          python -m pytest tests/test_reasoning_effort_wide_ladder.py -q --noconftest > ../../before-tests.txt 2>&1
+          code=$?
+          set -e
+          tail -20 ../../before-tests.txt
+          if [ "$code" -eq 0 ]; then
+            echo "UNEXPECTED: regression test passed on main"
+            exit 1
+          fi
+          grep -q "failed" ../../before-tests.txt
+          echo "NEGATIVE CONFIRMED: the PR's regression test fails on main"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: before-main
+          path: |
+            before.txt
+            before-tests.txt
+
+  after-pr:
+    name: "AFTER (PR 10458): every level reaches the model"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install probe dependencies
+        run: python -m pip install --quiet pytest httpx jinja2 structlog
+      - name: Confirm the PR change is present
+        run: git diff --stat HEAD^ HEAD -- studio/backend/core/inference/llama_cpp.py
+      - name: Probe - every level the Think menu offers
+        run: |
+          python .github/repro/pr10458_probe.py | tee after.txt
+          grep -q "PASS: all 7 advertised level(s) reach the model" after.txt
+          echo "POSITIVE CONFIRMED: all 7 advertised levels reach the model"
+      - name: PR regression test on the PR head (must pass)
+        working-directory: studio/backend
+        run: |
+          python -m pytest tests/test_reasoning_effort_wide_ladder.py -q --noconftest \
+            | tee ../../after-tests.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: after-pr
+          path: |
+            after.txt
+            after-tests.txt
