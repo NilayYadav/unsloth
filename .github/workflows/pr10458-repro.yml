@@ -32,8 +32,8 @@ jobs:
         run: |
           git checkout $BASE_SHA -- studio/backend/core/inference/llama_cpp.py
           echo "reverted studio/backend/core/inference/llama_cpp.py to $BASE_SHA"
-          git diff --stat -- studio/backend/core/inference/llama_cpp.py
-          test -n "$(git diff --name-only -- studio/backend/core/inference/llama_cpp.py)" \
+          git diff HEAD --stat -- studio/backend/core/inference/llama_cpp.py
+          test -n "$(git diff HEAD --name-only -- studio/backend/core/inference/llama_cpp.py)" \
             || { echo 'revert was a no-op'; exit 1; }
       - name: Probe - every level the Think menu offers
         run: |
