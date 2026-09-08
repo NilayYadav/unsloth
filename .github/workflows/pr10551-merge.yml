@@ -1,0 +1,42 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10551 merge evidence"
+
+on:
+  push:
+    branches:
+      - "pr10551-merge-20260909-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install probe dependencies"
+        shell: bash
+        run: |
+          python -m pip install -q --upgrade pip && python -m pip install -q 'typer==0.27.1' 'click<8.3' pytest pyyaml requests httpx pydantic structlog nest-asyncio huggingface-hub rich
+
+      - name: "Identify the revision under test"
+        shell: bash
+        run: |
+          git log --oneline -1 && echo '--- start.py signature ---' && (grep -n '_startup_api_key\|_KEY_MINT_ATTEMPTS\|healthy_polls' unsloth_cli/commands/start.py | head -20 || echo 'none of the PR symbols are present')
+
+      - name: "Run the PR 10551 probe"
+        shell: bash
+        run: |
+          PYTHONPATH=$GITHUB_WORKSPACE python -m pytest probe_pr10551.py -v --noconftest -p no:randomly
+
