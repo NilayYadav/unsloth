@@ -1,0 +1,55 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10552 real-server A/B"
+
+on:
+  push:
+    branches:
+      - "mimir-pr10552-real-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install studio backend deps"
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          pip install -r studio/backend/requirements/studio.txt
+          pip install pytest==9.0.3 pytest-timeout pytest-xdist python-multipart aiofiles requests uvicorn 'numpy<3'
+
+      - name: "Which upload routes are async on this branch"
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -n -B1 'def upload_kb_document\|def upload_thread_document\|def upload_project_document' studio/backend/routes/rag.py
+
+      - name: "REAL uvicorn server over TCP, real 179 MB upload, nothing stubbed"
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd studio/backend
+          for i in 1 2 3; do python ../../real_server_probe.py "$PWD" || true; done
+
+      - name: "Probe as the PR ships it, serial (gating)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd studio/backend
+          python -m pytest tests/test_rag_upload_event_loop.py -v -p no:cacheprovider --timeout=300
+
