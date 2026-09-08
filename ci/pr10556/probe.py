@@ -3,18 +3,10 @@
 Prints one row per selectable variant, exactly as the picker would show it, and asserts
 that every published build is reachable under its own row.
 """
-import json, os, sys, types
+import json, os, sys
 
 BACKEND = os.path.join(os.environ["REPO"], "studio", "backend")
 sys.path.insert(0, BACKEND)
-
-# `loggers` is the only backend-wide dep the gguf module pulls that a bare runner lacks.
-mod = types.ModuleType("loggers")
-mod.get_logger = lambda *a, **k: types.SimpleNamespace(
-    info=lambda *a, **k: None, debug=lambda *a, **k: None,
-    warning=lambda *a, **k: None, error=lambda *a, **k: None,
-)
-sys.modules.setdefault("loggers", mod)
 
 from hub.utils.gguf import group_gguf_variant_files, gguf_variant_key  # noqa: E402
 
