@@ -1357,6 +1357,8 @@ def _start_studio_server(
     progress: Optional[_ModelDownloadProgress] = None
     downloaded_bytes = 0
     early_key_seen = False
+    healthy_polls = 0
+    next_mint = 0.0
     try:
         while time.monotonic() < deadline:
             if server.poll() is not None:
@@ -1365,7 +1367,10 @@ def _start_studio_server(
                 _shutdown_auto_served()
                 _fail(f"The Unsloth server stopped before it was ready. Last log lines:\n{tail}")
             tail = _log_tail(log_path, lines = 400)
-            if progress is None:
+            healthy = _studio_healthy(base)
+            healthy_polls += 1 if healthy else 0
+            key = None
+            if not early_key_seen:
                 marker = re.search(
                     rf"^{re.escape(_START_API_KEY_PREFIX)}(sk-unsloth-[^\s]+)$",
                     tail,
@@ -1373,12 +1378,27 @@ def _start_studio_server(
                 )
                 if marker:
                     early_key_seen = True
-                    progress = _ModelDownloadProgress(
-                        base,
-                        marker.group(1),
-                        model,
-                        load.gguf_variant,
-                    )
+                    key = marker.group(1)
+            # New children emit an early key marker, so wait for the final model banner;
+            # older children only print the key after load, so fall back to that.
+            ready_signal = "Model loaded:" in tail if early_key_seen else "sk-unsloth-" in tail
+            # A new child echoes the marker just after the health gate opens, so the
+            # first healthy poll doesn't mean it will never print one -- minting on that
+            # one would race a normal launch into an extra key. Count healthy polls
+            # rather than a streak, so a health probe that times out under load only
+            # delays this instead of retiring it, then keep retrying at a slow cadence:
+            # auth may only settle well after health does.
+            if (
+                progress is None
+                and key is None
+                and healthy_polls > 1
+                and not ready_signal
+                and time.monotonic() >= next_mint
+            ):
+                next_mint = time.monotonic() + _KEY_MINT_RETRY_S
+                key = _startup_api_key(base)
+            if progress is None and key:
+                progress = _ModelDownloadProgress(base, key, model, load.gguf_variant)
             if progress is not None:
                 progress.poll()
             # Fresh bytes are the one unambiguous sign the child is moving, so the cap
@@ -1390,10 +1410,7 @@ def _start_studio_server(
             if bytes_now > downloaded_bytes:
                 deadline = time.monotonic() + _SERVER_START_TIMEOUT_S
             downloaded_bytes = bytes_now
-            # New children emit an early key marker, so wait for the final model banner;
-            # older children only print the key after load, so fall back to that.
-            ready_signal = "Model loaded:" in tail if early_key_seen else "sk-unsloth-" in tail
-            if _studio_healthy(base) and ready_signal:
+            if healthy and ready_signal:
                 if progress is not None:
                     progress.complete()
                     progress.close()
@@ -1613,17 +1630,24 @@ def _remember_key(cache: Path, base: str, key: str, source: str) -> None:
         pass  # worst case the next launch mints another key
 
 
-def _key_accepted(base: str, key: str) -> bool:
-    # Only a genuine auth rejection (401/403) means "this key is bad -- skip it and try
-    # the next cached key or mint a fresh one". A 5xx or a network blip is a server-side
-    # outage, not a bad key: fail with a clean message (never a traceback) instead of
-    # silently discarding a working key and minting extras against a struggling server.
+def _key_works(base: str, key: str) -> bool:
     try:
         _http_json("GET", f"{base}/v1/models", key)
         return True
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
             return False
+        raise
+
+
+def _key_accepted(base: str, key: str) -> bool:
+    # Only a genuine auth rejection (401/403) means "this key is bad -- skip it and try
+    # the next cached key or mint a fresh one". A 5xx or a network blip is a server-side
+    # outage, not a bad key: fail with a clean message (never a traceback) instead of
+    # silently discarding a working key and minting extras against a struggling server.
+    try:
+        return _key_works(base, key)
+    except urllib.error.HTTPError as exc:
         _fail(
             f"Unsloth server error while checking an API key ({exc.code}). "
             "The server may be starting up or unhealthy; try again shortly."
@@ -1633,6 +1657,33 @@ def _key_accepted(base: str, key: str) -> bool:
             "Couldn't reach the Unsloth server while checking an API key: "
             f"{getattr(exc, 'reason', None) or exc}"
         )
+
+
+_MINTED_KEY_NAME = "Coding agents (unsloth start)"
+# Auth can lag the health gate on a cold start, and a loading server can time a
+# request out, so a failed mint is retried -- just not once per sleep.
+_KEY_MINT_RETRY_S = 30.0
+
+
+def _startup_api_key(base: str) -> Optional[str]:
+    if not is_loopback_url(base) or not verify_studio_identity(base):
+        return None
+    cache = _key_cache_path()
+    try:
+        for key in _cached_keys(cache, base, "minted"):
+            if _key_works(base, key):
+                return key
+        token = _studio_token()
+        if token is None:
+            return None
+        response = _http_json(
+            "POST", f"{base}/api/auth/api-keys", token, {"name": _MINTED_KEY_NAME}
+        )
+        key = response["key"]
+    except Exception:
+        return None
+    _remember_key(cache, base, key, "minted")
+    return key
 
 
 def _agent_api_key(
@@ -1696,7 +1747,7 @@ def _agent_api_key(
         "POST",
         f"{base}/api/auth/api-keys",
         token,
-        {"name": "Coding agents (unsloth start)"},
+        {"name": _MINTED_KEY_NAME},
         error = "Couldn't create an API key",
     )["key"]
     _remember_key(cache, base, key, "minted")
