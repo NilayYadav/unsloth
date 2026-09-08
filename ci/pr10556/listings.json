@@ -1,0 +1,196 @@
+{
+ "AngelSlim/Hy3-GGUF": [
+  {
+   "rfilename": "Hy3-IQ1_M-mtp.gguf",
+   "size": 91756066272
+  },
+  {
+   "rfilename": "Hy3-IQ1_M.gguf",
+   "size": 89446312384
+  },
+  {
+   "rfilename": "Hy3-Q2_K_XL-mtp.gguf",
+   "size": 101573522912
+  },
+  {
+   "rfilename": "Hy3-Q2_K_XL.gguf",
+   "size": 100141427136
+  },
+  {
+   "rfilename": "Hy3-Q3_K_M-mtp.gguf",
+   "size": 136454632928
+  },
+  {
+   "rfilename": "Hy3-Q3_K_M.gguf",
+   "size": 134597913024
+  },
+  {
+   "rfilename": "Hy3-Q4_K_M-mtp.gguf",
+   "size": 184656950752
+  },
+  {
+   "rfilename": "Hy3-Q4_K_M.gguf",
+   "size": 182328371648
+  }
+ ],
+ "ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF": [
+  {
+   "rfilename": "Qwen3.8-27B-GSQ-RCO-IQ2_S-mtp.gguf",
+   "size": 9607981120
+  },
+  {
+   "rfilename": "Qwen3.8-27B-GSQ-RCO-IQ2_S.gguf",
+   "size": 9259510912
+  },
+  {
+   "rfilename": "Qwen3.8-27B-GSQ-RCO-IQ2_XS-mtp.gguf",
+   "size": 8771311680
+  },
+  {
+   "rfilename": "Qwen3.8-27B-GSQ-RCO-IQ2_XS.gguf",
+   "size": 8422841472
+  },
+  {
+   "rfilename": "Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf",
+   "size": 12120016960
+  },
+  {
+   "rfilename": "Qwen3.8-27B-GSQ-RCO-IQ3_S.gguf",
+   "size": 11771546784
+  },
+  {
+   "rfilename": "Qwen3.8-27B-GSQ-RCO-IQ3_XXS-mtp.gguf",
+   "size": 10442827840
+  },
+  {
+   "rfilename": "Qwen3.8-27B-GSQ-RCO-IQ3_XXS.gguf",
+   "size": 10094357632
+  },
+  {
+   "rfilename": "imatrix-qwen3.8-27b.gguf",
+   "size": 13642624
+  },
+  {
+   "rfilename": "mmproj-Qwen3.8-27B-BF16.gguf",
+   "size": 931146528
+  }
+ ],
+ "bartowski/gemma-2-9b-it-GGUF": [
+  {
+   "rfilename": "gemma-2-9b-it-IQ2_M.gguf",
+   "size": 3434668992
+  },
+  {
+   "rfilename": "gemma-2-9b-it-IQ2_S.gguf",
+   "size": 3211487104
+  },
+  {
+   "rfilename": "gemma-2-9b-it-IQ2_XS.gguf",
+   "size": 3067381632
+  },
+  {
+   "rfilename": "gemma-2-9b-it-IQ3_M.gguf",
+   "size": 4494615488
+  },
+  {
+   "rfilename": "gemma-2-9b-it-IQ3_XS.gguf",
+   "size": 4144989120
+  },
+  {
+   "rfilename": "gemma-2-9b-it-IQ3_XXS.gguf",
+   "size": 3796739008
+  },
+  {
+   "rfilename": "gemma-2-9b-it-IQ4_XS.gguf",
+   "size": 5183030208
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q2_K.gguf",
+   "size": 3805397952
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q2_K_L.gguf",
+   "size": 4027605952
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q3_K_L-Q8.gguf",
+   "size": 5354661760
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q3_K_L.gguf",
+   "size": 5132452800
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q3_K_M.gguf",
+   "size": 4761781184
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q3_K_S.gguf",
+   "size": 4337664960
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q3_K_XL.gguf",
+   "size": 5354660768
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q4_K_L.gguf",
+   "size": 5983265728
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q4_K_M-fp16.gguf",
+   "size": 6843425696
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q4_K_M.gguf",
+   "size": 5761057728
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q4_K_S.gguf",
+   "size": 5478925248
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q5_K_L.gguf",
+   "size": 6869574592
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q5_K_M.gguf",
+   "size": 6647366592
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q5_K_S.gguf",
+   "size": 6483592128
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q6_K-Q8.gguf",
+   "size": 7811278720
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q6_K-f32.gguf",
+   "size": 10506446720
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q6_K.gguf",
+   "size": 7589069760
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q6_K_L.gguf",
+   "size": 7811277760
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q8_0-f16.gguf",
+   "size": 10687308704
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q8_0.gguf",
+   "size": 9827148736
+  },
+  {
+   "rfilename": "gemma-2-9b-it-Q8_0_L.gguf",
+   "size": 10687309696
+  },
+  {
+   "rfilename": "gemma-2-9b-it-f32.gguf",
+   "size": 36972880544
+  }
+ ]
+}

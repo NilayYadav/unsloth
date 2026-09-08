@@ -1,0 +1,72 @@
+name: PR 10556 GGUF same-quant rows (A/B)
+
+on:
+  push:
+    branches: ["mimir-pr10556-20260908221535"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ab:
+    name: ${{ matrix.side }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+        side: [before, after]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Pin the implementation under test
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git remote add upstream https://github.com/unslothai/unsloth.git || true
+          git fetch --no-tags upstream cfa31f27b89b0e6374d8d3741f802ebe9994a1d8
+          if [ "${{ matrix.side }}" = "before" ]; then
+            git checkout cfa31f27b89b0e6374d8d3741f802ebe9994a1d8 -- studio/backend
+          fi
+          git log --oneline -1
+          git rev-parse HEAD
+
+      - name: Row probe against frozen live Hub listings
+        id: probe
+        shell: bash
+        continue-on-error: true
+        run: |
+          REPO="$PWD" LISTINGS="$PWD/ci/pr10556/listings.json" \
+            python ci/pr10556/probe.py | tee probe-${{ matrix.side }}.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Assert the A/B outcome
+        shell: bash
+        run: |
+          set -eu
+          OUTCOME="${{ steps.probe.outcome }}"
+          if [ "${{ matrix.side }}" = "before" ]; then
+            if [ "$OUTCOME" != "failure" ]; then
+              echo "::error::NEGATIVE SIDE DID NOT REPRODUCE - probe passed on upstream main"; exit 1
+            fi
+            grep -q "is published but NO row fetches it" probe-before.txt
+            echo "REPRODUCED on upstream main cfa31f27: $(grep -c 'NO row fetches it' probe-before.txt) unreachable build(s)"
+          else
+            if [ "$OUTCOME" != "success" ]; then
+              echo "::error::FIX DID NOT HOLD - probe failed on the PR head"; exit 1
+            fi
+            grep -q "PASS: every published build has its own row" probe-after.txt
+            echo "FIXED on PR 10556: 0 unreachable build(s)"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-${{ matrix.side }}-${{ matrix.os }}
+          path: probe-*.txt
