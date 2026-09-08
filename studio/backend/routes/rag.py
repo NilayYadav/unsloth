@@ -476,8 +476,10 @@ def _raise_if_scope_retired(scope: str, detail: str = "Knowledge base is being d
         raise HTTPException(status_code = 409, detail = detail)
 
 
+# The three upload routes stay sync so FastAPI runs them in the threadpool; their
+# copy + start_ingestion work would stall every other request on the event loop.
 @router.post("/knowledge-bases/{kb_id}/documents")
-async def upload_kb_document(
+def upload_kb_document(
     kb_id: str,
     file: UploadFile | None = File(None),
     native_path_lease: str | None = Form(None, alias = "nativePathLease"),
@@ -531,8 +533,9 @@ def link_kb_folder(
     return _create_linked_folder("knowledge_base", kb_id, payload)
 
 
+# Stays sync for the reason above upload_kb_document.
 @router.post("/threads/{thread_id}/documents")
-async def upload_thread_document(
+def upload_thread_document(
     thread_id: str,
     file: UploadFile | None = File(None),
     native_path_lease: str | None = Form(None, alias = "nativePathLease"),
@@ -580,8 +583,9 @@ def _discard_document(document_id: str) -> None:
     _remove_stored_upload(document.get("stored_path"))
 
 
+# Stays sync for the reason above upload_kb_document.
 @router.post("/projects/{project_id}/documents")
-async def upload_project_document(
+def upload_project_document(
     project_id: str,
     file: UploadFile | None = File(None),
     native_path_lease: str | None = Form(None, alias = "nativePathLease"),
