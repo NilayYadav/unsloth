@@ -8,14 +8,28 @@ import json, os, sys
 BACKEND = os.path.join(os.environ["REPO"], "studio", "backend")
 sys.path.insert(0, BACKEND)
 
-from hub.utils.gguf import group_gguf_variant_files, gguf_variant_key  # noqa: E402
+from hub.utils.gguf import (  # noqa: E402
+    group_gguf_variant_files,
+    gguf_variant_key,
+    is_imatrix_filename,
+    is_mmproj_filename,
+    is_mtp_drafter_path,
+)
+
+
+def selectable(path):
+    """What the picker actually offers: the listers drop the imatrix, the vision mmproj and the
+    MTP drafter before grouping, so counting them as rows would overstate both sides."""
+    return not (
+        is_imatrix_filename(path) or is_mmproj_filename(path) or is_mtp_drafter_path(path)
+    )
 
 # Frozen from https://huggingface.co/api/models/<repo> on 2026-09-09.
 LISTINGS = json.load(open(os.environ["LISTINGS"]))
 
 failures = []
 for repo, files in LISTINGS.items():
-    pairs = [(f["rfilename"], f["size"]) for f in files]
+    pairs = [(f["rfilename"], f["size"]) for f in files if selectable(f["rfilename"])]
     rows = group_gguf_variant_files(pairs)
     print(f"\n=== {repo}")
     print(f"    {len(pairs)} published GGUF build(s) -> {len(rows)} picker row(s)")
