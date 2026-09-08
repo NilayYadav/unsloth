@@ -1,0 +1,83 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10553 EXIF orientation A/B repro"
+
+on:
+  push:
+    branches:
+      - "mimir-exif-20260908221630"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install deps (pillow pinned as studio/backend requirements pin it)"
+        shell: bash
+        run: |
+          python -m pip install --quiet pytest 'pillow==12.3.0' structlog
+
+      - name: "Show the change under test"
+        shell: bash
+        run: |
+          git --no-pager log --oneline -1
+          grep -n 'exif_transpose' studio/backend/core/inference/diffusion.py
+
+      - name: "NEGATIVE (fix removed) - probe real values"
+        shell: bash
+        run: |
+          cp studio/backend/core/inference/diffusion.py /tmp/diffusion.orig
+          python - <<'EOF'
+          p='studio/backend/core/inference/diffusion.py'
+          s=open(p).read()
+          n=s.replace('        ImageOps.exif_transpose(img, in_place = True)\n','')
+          assert n!=s, 'fix line not found'
+          open(p,'w').write(n)
+          EOF
+          echo '--- probe (no fix) ---'
+          python pr10553_probe.py | tee /tmp/neg_probe.txt
+          echo '--- pytest (no fix) ---'
+          set +e
+          cd studio/backend && python -m pytest tests/test_diffusion_exif_orientation.py -q --noconftest -p no:cacheprovider > /tmp/neg.txt 2>&1
+          rc=$?
+          cd - >/dev/null
+          set -e
+          cat /tmp/neg.txt
+          if [ $rc -eq 0 ]; then echo 'NEGATIVE DID NOT FAIL -> test does not prove the fix'; exit 1; fi
+          grep -q 'assert (32, 64) == (64, 32)' /tmp/neg.txt || { echo 'negative failed for the wrong reason'; exit 1; }
+          grep -q 'FAIL' /tmp/neg_probe.txt || { echo 'probe did not report FAIL without the fix'; exit 1; }
+          echo 'NEGATIVE OK: 2 failed at the orientation assertions'
+
+      - name: "Restore the fix"
+        shell: bash
+        run: |
+          cp /tmp/diffusion.orig studio/backend/core/inference/diffusion.py
+          git --no-pager diff --stat
+
+      - name: "POSITIVE (fix present) - probe real values"
+        shell: bash
+        run: |
+          echo '--- probe (with fix) ---'
+          python pr10553_probe.py | tee /tmp/pos_probe.txt
+          grep -q 'RESULT ............................ PASS' /tmp/pos_probe.txt
+          echo '--- pytest (with fix) ---'
+          cd studio/backend && python -m pytest tests/test_diffusion_exif_orientation.py -q --noconftest -p no:cacheprovider
+
+      - name: "A/B summary"
+        shell: bash
+        run: |
+          echo '=== WITHOUT THE FIX ==='; cat /tmp/neg_probe.txt; echo; echo '=== WITH THE FIX ==='; cat /tmp/pos_probe.txt
+
