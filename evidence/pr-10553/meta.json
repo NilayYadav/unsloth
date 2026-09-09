@@ -1,0 +1,85 @@
+{
+  "pr": 10553,
+  "head_ref": "0c2cb4efecbef3e1eb402f60068b082d70f61416",
+  "base_sha": "580cffabac84cf0d373d27ebed2af4251dbbf88e",
+  "head_sha": "0c2cb4efecbef3e1eb402f60068b082d70f61416",
+  "scene": "image_transform_exif_orientation",
+  "expect": "The upload is 768x448 on the wire and the browser shows it 448x768. BEFORE the decoder reads the raw pixels, so the img2img source is landscape and the run's OUTPUT is landscape with it: gallery_recorded_size [768, 448], result_pixel_size [768, 448], result_is_portrait False, result_quadrants ['red','green','blue','yellow'] (the STORED order, not the one the user saw), result_matches_browser_truth False. AFTER the tag is applied: gallery_recorded_size [448, 768], result_pixel_size [448, 768], result_is_portrait True, result_quadrants ['blue','red','yellow','green'] == browser_truth_quadrants, result_matches_browser_truth True. The quadrant read is mirror-sensitive on purpose: orientation 5 is the diagonal flip of 6 and would give the same sizes, so sizes alone cannot tell a rotation from a mirror. The viewer shot shows a wide sideways card BEFORE and an upright tall one AFTER.",
+  "facts": {
+    "BEFORE": {
+      "loaded": true,
+      "stored_pixels_on_the_wire": [
+        768,
+        448
+      ],
+      "exif_orientation_tag": 6,
+      "browser_preview_size": [
+        448,
+        768
+      ],
+      "browser_truth_quadrants": [
+        "blue",
+        "red",
+        "yellow",
+        "green"
+      ],
+      "gallery_recorded_size": [
+        768,
+        448
+      ],
+      "gallery_workflow": "img2img",
+      "result_is_portrait": false,
+      "result_pixel_size": [
+        768,
+        448
+      ],
+      "result_quadrants": [
+        "red",
+        "green",
+        "blue",
+        "yellow"
+      ],
+      "result_matches_browser_truth": false
+    },
+    "AFTER": {
+      "loaded": true,
+      "stored_pixels_on_the_wire": [
+        768,
+        448
+      ],
+      "exif_orientation_tag": 6,
+      "browser_preview_size": [
+        448,
+        768
+      ],
+      "browser_truth_quadrants": [
+        "blue",
+        "red",
+        "yellow",
+        "green"
+      ],
+      "gallery_recorded_size": [
+        448,
+        768
+      ],
+      "gallery_workflow": "img2img",
+      "result_is_portrait": true,
+      "result_pixel_size": [
+        448,
+        768
+      ],
+      "result_quadrants": [
+        "blue",
+        "red",
+        "yellow",
+        "green"
+      ],
+      "result_matches_browser_truth": true
+    }
+  },
+  "studio_env": {},
+  "pairs": [
+    "/scratch/uiroot/combined/pr10553_pair_00.png",
+    "/scratch/uiroot/combined/pr10553_pair_01.png"
+  ]
+}
