@@ -1,0 +1,66 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10662 think-gate A/B"
+
+on:
+  push:
+    branches:
+      - "mimir-pr10662-20260909221421-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.13"
+
+      - name: "Install backend test dependencies (CPU only)"
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r studio/backend/requirements/studio.txt
+          pip install python-multipart aiofiles sqlalchemy cryptography psutil pyyaml jinja2 mammoth unpdf requests 'numpy<3' pytest pytest-asyncio pytest-timeout httpx
+          pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple 'torch>=2.4,<2.11' 'torchaudio<2.11'
+          pip install 'transformers>=4.51,<5.5'
+          pip install "$(grep -m1 -E '^peft==' studio/backend/requirements/extras-no-deps.txt)"
+
+      - name: "Which implementation is under test"
+        shell: bash
+        run: |
+          echo "commit: $(git rev-parse HEAD)"
+          grep -n 'reasoning_effort\"\] != \"none\"' studio/backend/routes/inference.py || echo 'no bare string-only effort comparison left'
+          grep -n '_resolved_kwargs_think' studio/backend/routes/inference.py || echo 'shared gate helper ABSENT (this is the base implementation)'
+
+      - name: "Control - the harness works and the thinking-on cases still split"
+        shell: bash
+        run: |
+          cd studio/backend
+          python -m pytest -q --timeout=300 \
+            tests/test_responses_tool_passthrough.py::TestResponsesNonStreamingAdapter::test_reasoning_capable_gguf_parses_think_tags_by_default \
+            tests/test_responses_tool_passthrough.py::TestResponsesNonStreamingAdapter::test_effort_dial_gguf_still_parses_think_tags_when_disabled \
+            tests/test_responses_tool_passthrough.py::TestResponsesStreamAdapter::test_reasoning_capable_gguf_stream_parses_think_tags_by_default
+
+      - name: "The gate - literal think tags must survive when the request turns thinking off"
+        shell: bash
+        run: |
+          cd studio/backend
+          python -m pytest -q --timeout=300 \
+            tests/test_responses_tool_passthrough.py::TestResponsesNonStreamingAdapter::test_reasoning_capable_gguf_keeps_think_tags_visible_when_disabled \
+            tests/test_responses_tool_passthrough.py::TestResponsesNonStreamingAdapter::test_inkling_numeric_zero_effort_keeps_think_tags_visible \
+            tests/test_responses_tool_passthrough.py::TestResponsesNonStreamingAdapter::test_launch_default_thinking_off_keeps_think_tags_visible \
+            tests/test_responses_tool_passthrough.py::TestResponsesNonStreamingAdapter::test_launch_default_thinking_on_still_parses_think_tags \
+            tests/test_openai_tool_passthrough.py::TestGgufVisionToolRouting::test_reasoning_capable_gguf_keeps_think_tags_visible_when_disabled \
+            tests/test_openai_tool_passthrough.py::TestGgufVisionToolRouting::test_reasoning_capable_gguf_stream_keeps_think_tags_visible_when_disabled \
+            tests/test_anthropic_messages.py::test_think_parsing_expected_gates_on_capability_and_request
+
