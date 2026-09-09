@@ -14710,7 +14710,10 @@ def _appended_by_the_loop(text: str) -> float:
     except Exception:  # noqa: BLE001 -- an unpriced nudge, not a failed tool call
         logger.debug("result budget: tool error nudge unavailable", exc_info = True)
         return 0.0
-    if not text.startswith(TOOL_ERROR_PREFIXES):
+    # `lstrip` because `is_tool_error` does: a result whose first byte is a newline still
+    # gets the nudge, so measuring the unstripped text reserves nothing for one that will
+    # certainly be appended.
+    if not text.lstrip().startswith(TOOL_ERROR_PREFIXES):
         return 0.0
     return _text_token_cost(TOOL_ERROR_NUDGE, _window_context_tokens())
 
@@ -14721,6 +14724,7 @@ def _truncate(
     workdir: str | None = None,
     scope: "str | None" = "",
     hint: str = "",
+    reserve_tokens: float = 0.0,
 ) -> str:
     # Resolved per call, not bound at import: the default would freeze the constant
     # before any model is loaded, which is exactly when the window is still unknown.
@@ -14734,7 +14738,11 @@ def _truncate(
     # the prompt with the nudge past the end of it. Charged only to the results that will
     # actually carry one, since a reserve taken from every result spends room the thread
     # has.
-    cap, cost = limit, _appended_by_the_loop(text)
+    # `reserve_tokens` is whatever the CALLER will put after this result, priced the same
+    # way as the loop's own nudge. Without it a caller that concatenates two fitted
+    # strings spends the room twice: each `_truncate` reads the same `_request_result_room`
+    # and neither knows about the other, so the message the model is handed is the sum.
+    cap, cost = limit, _appended_by_the_loop(text) + reserve_tokens
     if hint:
         # Priced in tokens, not characters, and taken off the budget before it is converted
         # (see `_dense_char_limit`). A failing absolute path is dense: subtracting its
@@ -14750,7 +14758,7 @@ def _truncate(
             # Nothing to spend on advice: at zero room the stub IS the message, and when
             # paying for it would cut the output in half the output is worth more than the
             # advice about it. Nothing is dropped while the result fits anyway.
-            limit, hint, cost = plain, "", _appended_by_the_loop(text)
+            limit, hint, cost = plain, "", _appended_by_the_loop(text) + reserve_tokens
     else:
         limit = _dense_char_limit(text, limit, cost)
     # Mode-neutral notice: this result serves both the streaming UI and
@@ -16251,6 +16259,26 @@ def _python_exec(
         # report it: `printf data > report.csv; sleep 999` is downloadable.
         if timed_out:
             ended = _truncate(f"Execution timed out after {timeout} seconds.")
+            partial = _defuse_sentinels(output or "")
+            if partial.strip():
+                # The status line goes FIRST, and that ordering is the point: the replay
+                # stripper cuts a result at the first `__IMAGES__:` or `__RAG_SOURCES__:`
+                # it finds ANYWHERE, while `_defuse_sentinels` only breaks the
+                # line-anchored `__FILES__:` form. Behind the output, a program that
+                # printed one of those and then hung would take the sentence saying it
+                # hung down with it, and telling a hung command from a broken one is the
+                # whole reason this branch keeps the output at all.
+                #
+                # Charged to the same room, too: `_truncate` prices against
+                # `_request_result_room`, so two independent calls each take all of it
+                # and the model is handed the concatenation.
+                head = _truncate(
+                    partial,
+                    workdir = spill_dir,
+                    scope = spill_scope,
+                    reserve_tokens = _text_token_cost(f"{ended}\n", _window_context_tokens()),
+                )
+                ended = f"{ended}\n{head}"
             return ended + (
                 _created_file_sentinels(workdir, _before, _scratch_name, call_token)
                 if session_id
@@ -16404,6 +16432,26 @@ def _bash_exec(
         # report it: `printf data > report.csv; sleep 999` is downloadable.
         if timed_out:
             ended = _truncate(f"Execution timed out after {timeout} seconds.")
+            partial = _defuse_sentinels(output or "")
+            if partial.strip():
+                # The status line goes FIRST, and that ordering is the point: the replay
+                # stripper cuts a result at the first `__IMAGES__:` or `__RAG_SOURCES__:`
+                # it finds ANYWHERE, while `_defuse_sentinels` only breaks the
+                # line-anchored `__FILES__:` form. Behind the output, a program that
+                # printed one of those and then hung would take the sentence saying it
+                # hung down with it, and telling a hung command from a broken one is the
+                # whole reason this branch keeps the output at all.
+                #
+                # Charged to the same room, too: `_truncate` prices against
+                # `_request_result_room`, so two independent calls each take all of it
+                # and the model is handed the concatenation.
+                head = _truncate(
+                    partial,
+                    workdir = spill_dir,
+                    scope = spill_scope,
+                    reserve_tokens = _text_token_cost(f"{ended}\n", _window_context_tokens()),
+                )
+                ended = f"{ended}\n{head}"
             return ended + (
                 _created_file_sentinels(workdir, _before, None, call_token) if session_id else ""
             )
