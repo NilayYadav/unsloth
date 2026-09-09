@@ -2241,3 +2241,15 @@ class TestTheResultIsFittedAsItIsReplayed:
         # the limit. Over it is text that was added after the measurement.
         assert len(head) <= int(re.match(r"(\d+) chars", notice).group(1)), len(head)
         assert head == tools._defuse_sentinels(head)
+
+
+def test_ab_newline_led_error_result_still_pays_for_its_nudge(monkeypatch):
+    from core.inference.tool_call_parser import TOOL_ERROR_NUDGE
+
+    _window(monkeypatch, 4096)
+    _tokenizer(monkeypatch)
+    _room(400)
+
+    out = tools._truncate("\nError: " + _dense(40_000))
+
+    _within_room(out + TOOL_ERROR_NUDGE, 400)

@@ -1301,3 +1301,22 @@ def test_python_exec_nonstreaming_cancel_kills_grandchild_after_leader_exit(tmp_
     assert time.monotonic() - started < 2.5
     assert result == "Execution cancelled."
     _assert_grandchild_was_killed(gate, sentinel)
+
+
+def test_ab_python_timeout_says_so_even_behind_a_replayed_sentinel():
+    from core.inference.tool_loop_controller import strip_result_for_model
+
+    code = "print('__RAG_SOURCES__:[]')\nimport time\ntime.sleep(30)\n"
+    result = _python_exec(code, timeout = 1)
+    assert strip_result_for_model(result, "python").startswith(
+        "Execution timed out after 1 seconds."
+    )
+
+
+def test_ab_bash_timeout_says_so_even_behind_a_replayed_sentinel():
+    from core.inference.tool_loop_controller import strip_result_for_model
+
+    result = _bash_exec("echo '__RAG_SOURCES__:[]'; sleep 30", timeout = 1)
+    assert strip_result_for_model(result, "terminal").startswith(
+        "Execution timed out after 1 seconds."
+    )
