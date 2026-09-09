@@ -1,0 +1,50 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10558 local weight size repro"
+
+on:
+  push:
+    branches:
+      - "pr10558-repro-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install probe dependencies"
+        shell: bash
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet structlog pyyaml pydantic huggingface_hub
+          python -c "import structlog, yaml, pydantic, huggingface_hub; print('deps ready')"
+
+      - name: "Probe: size local model folders that hold two copies of their weights"
+        shell: bash
+        run: |
+          set +e
+          echo "tree: $(git rev-parse HEAD)"
+          cd studio/backend
+          PYTHONPATH=. python "$GITHUB_WORKSPACE/.github/pr10558-repro/probe_weight_size.py" . "$GITHUB_WORKSPACE/.github/pr10558-repro/config.json" 2>"$RUNNER_TEMP/probe.stderr"
+          RC=$?
+          echo
+          echo "probe exit=$RC (stderr lines: $(wc -l < "$RUNNER_TEMP/probe.stderr"))"
+          if [ $RC -ne 0 ]; then
+            echo 'RESULT: FAIL - a duplicate copy or torch bookkeeping is still charged as weights'
+            exit 1
+          fi
+          echo 'RESULT: PASS - every folder is sized by one copy of its weights'
+
