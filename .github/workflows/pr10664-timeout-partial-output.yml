@@ -1,0 +1,63 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10664 timeout partial output A/B"
+
+on:
+  push:
+    branches:
+      - "mimir-pr10664-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.13"
+
+      - name: "Install backend test dependencies (CPU only)"
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r studio/backend/requirements/studio.txt
+          pip install python-multipart aiofiles sqlalchemy cryptography psutil pyyaml jinja2 mammoth unpdf requests 'numpy<3' pytest pytest-asyncio pytest-timeout httpx
+          pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple 'torch>=2.4,<2.11' 'torchaudio<2.11'
+          pip install 'transformers>=4.51,<5.5'
+          pip install "$(grep -m1 -E '^peft==' studio/backend/requirements/extras-no-deps.txt)"
+
+      - name: "Probe: what a timed-out python/terminal call actually returns"
+        shell: bash
+        run: |
+          cd studio/backend
+          python .github-probe-timeout.py
+
+      - name: "A/B assertion 1: the PR's own regression tests"
+        shell: bash
+        run: |
+          cd studio/backend
+          python -m pytest tests/test_tool_output_streaming.py -q --timeout=180 \
+            -k 'timeout_keeps_output_already_printed' -rA
+
+      - name: "A/B assertion 2: the timed-out result fits the priced room"
+        shell: bash
+        run: |
+          cd studio/backend
+          python -m pytest tests/test_tool_result_fits_window.py -q --timeout=180 \
+            -k 'TestATimedOutCallIsPricedWithItsStatusLine' -rA
+
+      - name: "Regression: the whole result-budget suite"
+        shell: bash
+        run: |
+          cd studio/backend
+          python -m pytest tests/test_tool_result_fits_window.py tests/test_tool_output_streaming.py -q --timeout=300
+
