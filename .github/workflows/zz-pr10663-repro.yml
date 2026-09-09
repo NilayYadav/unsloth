@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026-present the Unsloth AI Inc. team. All rights reserved.
+#
+# Throwaway A/B reproduction harness for unslothai/unsloth#10663.
+# Identical on both branches; only the implementation under test differs.
+#   repro/pr10663-negative-* : upstream main + the PR's test file only  -> must FAIL
+#   repro/pr10663-positive-* : upstream main + the PR head merged       -> must PASS
+
+name: PR 10663 no-evidence research repro
+
+on:
+  push:
+    branches:
+      - 'repro/pr10663-**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr10663-repro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repro:
+    name: Deep Research no-evidence A/B
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.13'
+
+      - name: Which side of the A/B is this
+        run: |
+          echo "branch = ${GITHUB_REF_NAME}"
+          echo "sha    = ${GITHUB_SHA}"
+          echo "--- is the fix present in core/research_runs.py? ---"
+          if grep -n "No research step gathered any evidence" studio/backend/core/research_runs.py; then
+            echo "SIDE = POSITIVE (fix present)"
+          else
+            echo "SIDE = NEGATIVE (unfixed upstream main)"
+          fi
+
+      - name: Install backend test dependencies (CPU only)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r studio/backend/requirements/studio.txt
+          pip install \
+            python-multipart aiofiles sqlalchemy cryptography psutil \
+            pyyaml jinja2 mammoth unpdf requests \
+            'numpy<3' pytest pytest-asyncio pytest-xdist pytest-timeout httpx
+          pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple \
+            'torch>=2.4,<2.11' 'torchaudio<2.11'
+          pip install 'transformers>=4.51,<5.5'
+          pip install "$(grep -m1 -E '^peft==' studio/backend/requirements/extras-no-deps.txt)"
+
+      - name: Evidence probe (prints the real run values, never fails)
+        working-directory: studio/backend
+        run: |
+          python -m pytest tests/zz_pr10663_evidence.py -q -s --timeout=330 --tb=short
+
+      - name: The PR's tests
+        working-directory: studio/backend
+        run: |
+          python -m pytest tests/test_research_no_evidence.py tests/test_research_synthesis_recovery.py \
+            -q -rA --tb=short --timeout=330
