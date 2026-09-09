@@ -14721,7 +14721,6 @@ def _truncate(
     workdir: str | None = None,
     scope: "str | None" = "",
     hint: str = "",
-    reserve_tokens: float = 0.0,
 ) -> str:
     # Resolved per call, not bound at import: the default would freeze the constant
     # before any model is loaded, which is exactly when the window is still unknown.
@@ -14735,11 +14734,7 @@ def _truncate(
     # the prompt with the nudge past the end of it. Charged only to the results that will
     # actually carry one, since a reserve taken from every result spends room the thread
     # has.
-    # `reserve_tokens` is whatever the CALLER will put after this result, priced the same
-    # way as the loop's own nudge. Without it a caller that concatenates two fitted
-    # strings spends the room twice: each `_truncate` reads the same `_request_result_room`
-    # and neither knows about the other, so the message the model is handed is the sum.
-    cap, cost = limit, _appended_by_the_loop(text) + reserve_tokens
+    cap, cost = limit, _appended_by_the_loop(text)
     if hint:
         # Priced in tokens, not characters, and taken off the budget before it is converted
         # (see `_dense_char_limit`). A failing absolute path is dense: subtracting its
@@ -14755,7 +14750,7 @@ def _truncate(
             # Nothing to spend on advice: at zero room the stub IS the message, and when
             # paying for it would cut the output in half the output is worth more than the
             # advice about it. Nothing is dropped while the result fits anyway.
-            limit, hint, cost = plain, "", _appended_by_the_loop(text) + reserve_tokens
+            limit, hint, cost = plain, "", _appended_by_the_loop(text)
     else:
         limit = _dense_char_limit(text, limit, cost)
     # Mode-neutral notice: this result serves both the streaming UI and
@@ -16256,19 +16251,6 @@ def _python_exec(
         # report it: `printf data > report.csv; sleep 999` is downloadable.
         if timed_out:
             ended = _truncate(f"Execution timed out after {timeout} seconds.")
-            partial = _defuse_sentinels(output or "")
-            if partial.strip():
-                # `ended` goes after this cut, so its tokens come off the same room
-                # rather than being spent a second time: `_truncate` prices against
-                # `_request_result_room` and two independent calls each take all of it,
-                # while the model is handed the concatenation.
-                head = _truncate(
-                    partial,
-                    workdir = spill_dir,
-                    scope = spill_scope,
-                    reserve_tokens = _text_token_cost(f"\n{ended}", _window_context_tokens()),
-                )
-                ended = f"{head}\n{ended}"
             return ended + (
                 _created_file_sentinels(workdir, _before, _scratch_name, call_token)
                 if session_id
@@ -16422,19 +16404,6 @@ def _bash_exec(
         # report it: `printf data > report.csv; sleep 999` is downloadable.
         if timed_out:
             ended = _truncate(f"Execution timed out after {timeout} seconds.")
-            partial = _defuse_sentinels(output or "")
-            if partial.strip():
-                # `ended` goes after this cut, so its tokens come off the same room
-                # rather than being spent a second time: `_truncate` prices against
-                # `_request_result_room` and two independent calls each take all of it,
-                # while the model is handed the concatenation.
-                head = _truncate(
-                    partial,
-                    workdir = spill_dir,
-                    scope = spill_scope,
-                    reserve_tokens = _text_token_cost(f"\n{ended}", _window_context_tokens()),
-                )
-                ended = f"{head}\n{ended}"
             return ended + (
                 _created_file_sentinels(workdir, _before, None, call_token) if session_id else ""
             )
