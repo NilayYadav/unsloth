@@ -1,8 +1,8 @@
 {
   "pr": 10558,
-  "head_ref": "c8510155a20941c9f28cdb832ad96e5776bb2fa5",
+  "head_ref": "6aa5cac1d1aa91f58e9b7c696c50a956d08addd1",
   "base_sha": "cfa31f27b89b0e6374d8d3741f802ebe9994a1d8",
-  "head_sha": "c8510155a20941c9f28cdb832ad96e5776bb2fa5",
+  "head_sha": "6aa5cac1d1aa91f58e9b7c696c50a956d08addd1",
   "scene": "export_size_one_copy",
   "expect": "BEFORE (merge base) /api/models/export-size sums every weight-looking file, optimizer state included: api_fp16_bytes 80302667420 (74.79 GiB) and the page reads 'Est. size: ~74.8 GB'. AFTER (head) sizes one copy of the weights: api_fp16_bytes 16060556376 (14.96 GiB), 'Est. size: ~15 GB'. one_copy_bytes (16060556376) and files_on_disk_bytes (96363224655, checkpoint-100/ and optimizer.pt included) MUST read the same on both sides, or the seeded folders differ and the pair proves nothing.",
   "facts": {
