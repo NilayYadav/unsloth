@@ -1,12 +1,13 @@
 {
   "pr": 10558,
-  "head_ref": "44c9bea4ea70c55adb1a34faff68f5e7d730cda2",
+  "head_ref": "c8510155a20941c9f28cdb832ad96e5776bb2fa5",
   "base_sha": "cfa31f27b89b0e6374d8d3741f802ebe9994a1d8",
-  "head_sha": "44c9bea4ea70c55adb1a34faff68f5e7d730cda2",
+  "head_sha": "c8510155a20941c9f28cdb832ad96e5776bb2fa5",
   "scene": "export_size_one_copy",
   "expect": "BEFORE (merge base) /api/models/export-size sums every weight-looking file, optimizer state included: api_fp16_bytes 80302667420 (74.79 GiB) and the page reads 'Est. size: ~74.8 GB'. AFTER (head) sizes one copy of the weights: api_fp16_bytes 16060556376 (14.96 GiB), 'Est. size: ~15 GB'. one_copy_bytes (16060556376) and files_on_disk_bytes (96363224655, checkpoint-100/ and optimizer.pt included) MUST read the same on both sides, or the seeded folders differ and the pair proves nothing.",
   "facts": {
     "BEFORE": {
+      "model_dir": "/Users/nilay/.claude/skills/pr-ui-evidence/outputs/ui_diff_10558/home_before/outputs/Llama-3.1-8B-Instruct-full-finetune-run",
       "one_copy_bytes": 16060556376,
       "files_on_disk_bytes": 96363224655,
       "api_fp16_bytes": 80302667420,
@@ -16,6 +17,7 @@
       "ui_est_size_value": "75 GB"
     },
     "AFTER": {
+      "model_dir": "/Users/nilay/.claude/skills/pr-ui-evidence/outputs/ui_diff_10558/home_after/outputs/Llama-3.1-8B-Instruct-full-finetune-run",
       "one_copy_bytes": 16060556376,
       "files_on_disk_bytes": 96363224655,
       "api_fp16_bytes": 16060556376,
@@ -24,5 +26,9 @@
       "ui_est_size_text": "Est. size: ~15 GB",
       "ui_est_size_value": "15 GB"
     }
-  }
+  },
+  "studio_env": {},
+  "pairs": [
+    "/Users/nilay/.claude/skills/pr-ui-evidence/outputs/ui_diff_10558/combined/pr10558_before_after.png"
+  ]
 }
