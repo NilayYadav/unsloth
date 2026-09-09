@@ -30,6 +30,15 @@ def sparse(path: Path, size: int) -> None:
         handle.truncate(size)
 
 
+def write_index(folder: Path, shards: dict) -> None:
+    # The model.safetensors.index.json transformers writes beside sharded weights: every
+    # tensor maps to its shard, and metadata.total_size is the shard sum.
+    weight_map = {f"layer.{i}.weight": name for i, name in enumerate(sorted(shards))}
+    (folder / "model.safetensors.index.json").write_text(
+        json.dumps({"metadata": {"total_size": sum(shards.values())}, "weight_map": weight_map})
+    )
+
+
 root = Path(tempfile.mkdtemp(prefix = "pr10558-"))
 meta = root / "Llama-3.1-8B-Instruct-meta-download"
 run = root / "Llama-3.1-8B-Instruct-full-finetune-run"
@@ -38,6 +47,7 @@ for folder in (meta, run):
     shutil.copy(CONFIG, folder / "config.json")
     for name, size in SHARDS.items():
         sparse(folder / name, size)
+    write_index(folder, SHARDS)
 sparse(meta / "original" / "consolidated.00.pth", ORIGINAL_PTH)
 sparse(run / "optimizer.pt", OPTIMIZER_PT)
 sparse(run / "scheduler.pt", 1064)
@@ -57,6 +67,7 @@ mistral = root / "Mistral-7B-Instruct-v0.3-hf-download"
 mistral.mkdir()
 for name, size in MISTRAL_SHARDS.items():
     sparse(mistral / name, size)
+write_index(mistral, MISTRAL_SHARDS)
 sparse(mistral / "consolidated.safetensors", MISTRAL_CONSOLIDATED)
 
 # A LLaVA-style folder: a safetensors language model plus a separately loaded projector.
@@ -70,13 +81,13 @@ from utils.hardware.hardware import (
     estimate_required_model_memory_gb,
 )
 
-rows = {}
 EXPECTED = {
     "meta_download": SHARD_SUM,
     "full_finetune_run": SHARD_SUM,
     "mistral_consolidated_beside_shards": max(sum(MISTRAL_SHARDS.values()), MISTRAL_CONSOLIDATED),
     "llava_projector_beside_safetensors": 13_400_000_000 + 41_960_000,
 }
+rows = {}
 for label, folder in (
     ("meta_download", meta),
     ("full_finetune_run", run),
