@@ -2162,9 +2162,9 @@ class TestATimedOutCallIsPricedWithItsStatusLine:
         self._captured_everything(completed)
         self._captured_everything(timed_out)
 
-        line = "\nExecution timed out after 1 seconds."
-        assert timed_out.endswith(line)
-        body = timed_out[: -len(line)]
+        line = "Execution timed out after 1 seconds.\n"
+        assert timed_out.startswith(line)
+        body = timed_out[len(line) :]
 
         # In characters, at the rate the fixture's counter charges them.
         assert len(completed) - len(body) >= len(line) * 0.9, (len(body), len(completed))
@@ -2184,9 +2184,9 @@ class TestATimedOutCallIsPricedWithItsStatusLine:
         assert f"{self.PRINTED} chars total" in completed
         assert f"{self.PRINTED} chars total" in timed_out
 
-        line = "\nExecution timed out after 1 seconds."
-        assert timed_out.endswith(line)
-        body = timed_out[: -len(line)]
+        line = "Execution timed out after 1 seconds.\n"
+        assert timed_out.startswith(line)
+        body = timed_out[len(line) :]
 
         assert len(completed) - len(body) >= len(line) * 0.9, (len(body), len(completed))
 
@@ -2194,9 +2194,26 @@ class TestATimedOutCallIsPricedWithItsStatusLine:
         """The invariant the deduction buys: what the model is handed is inside the room."""
         out = self._timed_out(monkeypatch, 400)
 
-        assert out.endswith("Execution timed out after 1 seconds.")
+        assert out.startswith("Execution timed out after 1 seconds.")
         assert "x" in out, "the captured output was dropped, so nothing was measured"
         _within_room(out, 400)
+
+    def test_a_result_whose_first_byte_is_a_newline_still_pays_for_its_nudge(
+        self, monkeypatch
+    ):
+        """`is_tool_error` lstrips before it matches, so a result that opens with a blank
+        line and then an error prefix does carry `TOOL_ERROR_NUDGE`. Measuring the
+        unstripped text reserved nothing for it, and the room was then overspent by the
+        whole nudge."""
+        from core.inference.tool_call_parser import TOOL_ERROR_NUDGE
+
+        _window(monkeypatch, 4096)
+        _tokenizer(monkeypatch)
+        _room(400)
+
+        out = tools._truncate("\nError: " + _dense(40_000))
+
+        _within_room(out + TOOL_ERROR_NUDGE, 400)
 
     def test_a_silent_timeout_pays_nothing_for_output_it_never_had(self, monkeypatch):
         """The control: charged to the calls that carry output, and a command that printed
