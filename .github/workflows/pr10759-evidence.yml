@@ -1,0 +1,97 @@
+name: PR 10759 research coverage and browser evidence
+
+on:
+  push:
+    branches:
+      - evidence/pr10759-20260910-positive
+      - evidence/pr10759-20260910-negative
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    name: Research tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: '3.12'
+      - name: Install research dependencies
+        run: python -m pip install -r studio/backend/requirements/studio.txt -r .github/pr10759/requirements-ci.txt
+      - name: Run every research backend test with branch coverage
+        run: python .github/pr10759/run_tests.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: research-${{ matrix.os }}
+          path: |
+            evidence-output/backend.xml
+            evidence-output/coverage.json
+          retention-days: 30
+
+  browser:
+    name: Frontend suite and Chromium Firefox evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install Studio and browser dependencies
+        run: |
+          python -m pip install -r studio/backend/requirements/studio.txt -r .github/pr10759/requirements-ci.txt
+          python -m playwright install --with-deps chromium firefox
+      - name: Install exact frontend lockfile
+        working-directory: studio/frontend
+        run: npm ci --ignore-scripts
+      - name: Full frontend test suite
+        id: frontend_tests
+        continue-on-error: true
+        working-directory: studio/frontend
+        run: |
+          mkdir -p ../../evidence-output
+          npm test > ../../evidence-output/frontend-tests.txt 2>&1
+          tail -15 ../../evidence-output/frontend-tests.txt
+      - name: TypeScript and production build
+        working-directory: studio/frontend
+        run: npm run build
+      - name: Chromium exact report retention and reopen
+        id: chromium
+        continue-on-error: true
+        run: python .github/pr10759/browser_probe.py chromium
+      - name: Firefox exact report retention and reopen
+        id: firefox
+        continue-on-error: true
+        run: python .github/pr10759/browser_probe.py firefox
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: browser-evidence
+          path: evidence-output/
+          retention-days: 30
+      - name: Require all frontend and browser assertions
+        if: always()
+        env:
+          TESTS: ${{ steps.frontend_tests.outcome }}
+          CHROMIUM: ${{ steps.chromium.outcome }}
+          FIREFOX: ${{ steps.firefox.outcome }}
+        run: |
+          test "$TESTS" = success
+          test "$CHROMIUM" = success
+          test "$FIREFOX" = success
