@@ -1,0 +1,45 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10664 card A/B"
+
+on:
+  push:
+    branches:
+      - "mimir-pr10664-final*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+
+      - name: "Install frontend dependencies"
+        shell: bash
+        run: |
+          cd studio/frontend
+          npm ci --ignore-scripts --no-fund --no-audit
+
+      - name: "A/B assertion: the finished card keeps the timeout status"
+        shell: bash
+        run: |
+          cd studio/frontend
+          node --experimental-strip-types --test tests/timeout-card-keeps-its-status.test.ts
+
+      - name: "Regression: the whole frontend test suite"
+        shell: bash
+        run: |
+          cd studio/frontend
+          npm test
+
