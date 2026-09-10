@@ -1,0 +1,127 @@
+{
+  "before": "d4359a4787e99f0d758f92ee1a9bc8660eddf615",
+  "after": "c760345e8f472ea8d8d892fb19bab92024b4ebaa",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "comparison": "Identical image and fresh per-side ModelScope caches; only loader.py differs.",
+  "results": [
+    {
+      "side": "before",
+      "mocked_model_or_network": false,
+      "gpu": "NVIDIA L4",
+      "modelscope_version": "1.25.0",
+      "loader_sha256": "3a55165b1e09b5a6b80f72f0ca1b01e022f2277ff15478f0a1d1fe52ef9cddf4",
+      "outcome": "precision_conflict",
+      "error": "Unsloth: Can only load in 4bit or 8bit or 16bit, not a combination!\nAlso, we by default set `load_in_4bit = True`.\nIf you want to load in 16bit, set `load_in_4bit = False` and `load_in_16bit = True`.",
+      "elapsed_seconds": 26.6197,
+      "cached_files": [
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/.mdl",
+          "bytes": 53
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/.msc",
+          "bytes": 709
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/.mv",
+          "bytes": 36
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/LICENSE",
+          "bytes": 11343
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/README.md",
+          "bytes": 4917
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/config.json",
+          "bytes": 659
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/configuration.json",
+          "bytes": 2
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/generation_config.json",
+          "bytes": 242
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/merges.txt",
+          "bytes": 1671839
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/model.safetensors",
+          "bytes": 988097824
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/tokenizer.json",
+          "bytes": 7031645
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/tokenizer_config.json",
+          "bytes": 7305
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/vocab.json",
+          "bytes": 2776833
+        }
+      ],
+      "cache_bytes": 999603407,
+      "weight_bytes": 988097824,
+      "exit_code": 0
+    },
+    {
+      "side": "after",
+      "mocked_model_or_network": false,
+      "gpu": "NVIDIA L4",
+      "modelscope_version": "1.25.0",
+      "loader_sha256": "35abf24839341aabc3ecd7700758d3ed20bedaad8f944007f5dcdad302ba2208",
+      "outcome": "precision_conflict",
+      "error": "Unsloth: Can only load in 4bit or 8bit or 16bit, not a combination!\nAlso, we by default set `load_in_4bit = True`.\nIf you want to load in 16bit, set `load_in_4bit = False` and `load_in_16bit = True`.",
+      "elapsed_seconds": 3.2266,
+      "cached_files": [
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/.mdl",
+          "bytes": 53
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/.msc",
+          "bytes": 450
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/.mv",
+          "bytes": 36
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/config.json",
+          "bytes": 659
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/configuration.json",
+          "bytes": 2
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/generation_config.json",
+          "bytes": 242
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/tokenizer.json",
+          "bytes": 7031645
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/tokenizer_config.json",
+          "bytes": 7305
+        },
+        {
+          "path": "models/Qwen/Qwen2___5-0___5B-Instruct/vocab.json",
+          "bytes": 2776833
+        }
+      ],
+      "cache_bytes": 9817225,
+      "weight_bytes": 0,
+      "exit_code": 0
+    }
+  ],
+  "status": "verified"
+}

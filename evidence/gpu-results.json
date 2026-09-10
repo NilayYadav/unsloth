@@ -1,0 +1,217 @@
+{
+  "pr": 10756,
+  "head": "c760345e8f472ea8d8d892fb19bab92024b4ebaa",
+  "before_loader_ref": "e726fb1f563948fabde75f35fd745158c210f3e9",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "model_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+  "comparison": "Identical head installation; only loader.py changes to the pre-PR implementation for BEFORE.",
+  "results": [
+    {
+      "case": "conflicting_16bit",
+      "mocked_model_or_network": false,
+      "versions": {
+        "unsloth": "2026.9.4",
+        "unsloth_zoo": "2026.9.3",
+        "torch": "2.8.0",
+        "transformers": "4.57.6",
+        "peft": "0.20.0",
+        "bitsandbytes": "0.49.2"
+      },
+      "gpu": "NVIDIA L4",
+      "gpu_total_bytes": 23659151360,
+      "loader_sha256": "1b8a6b08828d7d944f00cb7ae8ddfb8b6b94bb5a1af3b1b3571c69cc515034bf",
+      "kwargs": {
+        "model_name": "/opt/test-model",
+        "max_seq_length": 512,
+        "load_in_16bit": true
+      },
+      "allocated_before_bytes": 0,
+      "load_seconds": 7.8703,
+      "outcome": "loaded",
+      "is_loaded_in_4bit": true,
+      "linear4bit_modules": 168,
+      "parameter_dtypes": [
+        "torch.bfloat16",
+        "torch.uint8"
+      ],
+      "model_memory_footprint_bytes": 451325824,
+      "peak_allocated_bytes": 507511808,
+      "allocated_after_bytes": 474616320,
+      "generated_tokens": 9,
+      "generated_text": "2 + 2 equals 4.",
+      "side": "before",
+      "exit_code": 0
+    },
+    {
+      "case": "default_4bit",
+      "mocked_model_or_network": false,
+      "versions": {
+        "unsloth": "2026.9.4",
+        "unsloth_zoo": "2026.9.3",
+        "torch": "2.8.0",
+        "transformers": "4.57.6",
+        "peft": "0.20.0",
+        "bitsandbytes": "0.49.2"
+      },
+      "gpu": "NVIDIA L4",
+      "gpu_total_bytes": 23659151360,
+      "loader_sha256": "1b8a6b08828d7d944f00cb7ae8ddfb8b6b94bb5a1af3b1b3571c69cc515034bf",
+      "kwargs": {
+        "model_name": "/opt/test-model",
+        "max_seq_length": 512
+      },
+      "allocated_before_bytes": 0,
+      "load_seconds": 6.56,
+      "outcome": "loaded",
+      "is_loaded_in_4bit": true,
+      "linear4bit_modules": 168,
+      "parameter_dtypes": [
+        "torch.bfloat16",
+        "torch.uint8"
+      ],
+      "model_memory_footprint_bytes": 451325824,
+      "peak_allocated_bytes": 507511808,
+      "allocated_after_bytes": 474616320,
+      "generated_tokens": 9,
+      "generated_text": "2 + 2 equals 4.",
+      "side": "before",
+      "exit_code": 0
+    },
+    {
+      "case": "corrected_16bit",
+      "mocked_model_or_network": false,
+      "versions": {
+        "unsloth": "2026.9.4",
+        "unsloth_zoo": "2026.9.3",
+        "torch": "2.8.0",
+        "transformers": "4.57.6",
+        "peft": "0.20.0",
+        "bitsandbytes": "0.49.2"
+      },
+      "gpu": "NVIDIA L4",
+      "gpu_total_bytes": 23659151360,
+      "loader_sha256": "1b8a6b08828d7d944f00cb7ae8ddfb8b6b94bb5a1af3b1b3571c69cc515034bf",
+      "kwargs": {
+        "model_name": "/opt/test-model",
+        "max_seq_length": 512,
+        "load_in_4bit": false,
+        "load_in_16bit": true
+      },
+      "allocated_before_bytes": 0,
+      "load_seconds": 5.8256,
+      "outcome": "loaded",
+      "is_loaded_in_4bit": false,
+      "linear4bit_modules": 0,
+      "parameter_dtypes": [
+        "torch.bfloat16"
+      ],
+      "model_memory_footprint_bytes": 988065664,
+      "peak_allocated_bytes": 1005235712,
+      "allocated_after_bytes": 1005235712,
+      "generated_tokens": 9,
+      "generated_text": "2 + 2 equals 4.",
+      "side": "before",
+      "exit_code": 0
+    },
+    {
+      "case": "conflicting_16bit",
+      "mocked_model_or_network": false,
+      "versions": {
+        "unsloth": "2026.9.4",
+        "unsloth_zoo": "2026.9.3",
+        "torch": "2.8.0",
+        "transformers": "4.57.6",
+        "peft": "0.20.0",
+        "bitsandbytes": "0.49.2"
+      },
+      "gpu": "NVIDIA L4",
+      "gpu_total_bytes": 23659151360,
+      "loader_sha256": "35abf24839341aabc3ecd7700758d3ed20bedaad8f944007f5dcdad302ba2208",
+      "kwargs": {
+        "model_name": "/opt/test-model",
+        "max_seq_length": 512,
+        "load_in_16bit": true
+      },
+      "allocated_before_bytes": 0,
+      "load_seconds": 0.2328,
+      "outcome": "precision_conflict",
+      "error": "Unsloth: Can only load in 4bit or 8bit or 16bit, not a combination!\nAlso, we by default set `load_in_4bit = True`.\nIf you want to load in 16bit, set `load_in_4bit = False` and `load_in_16bit = True`.",
+      "peak_allocated_bytes": 0,
+      "allocated_after_bytes": 0,
+      "side": "after",
+      "exit_code": 0
+    },
+    {
+      "case": "default_4bit",
+      "mocked_model_or_network": false,
+      "versions": {
+        "unsloth": "2026.9.4",
+        "unsloth_zoo": "2026.9.3",
+        "torch": "2.8.0",
+        "transformers": "4.57.6",
+        "peft": "0.20.0",
+        "bitsandbytes": "0.49.2"
+      },
+      "gpu": "NVIDIA L4",
+      "gpu_total_bytes": 23659151360,
+      "loader_sha256": "35abf24839341aabc3ecd7700758d3ed20bedaad8f944007f5dcdad302ba2208",
+      "kwargs": {
+        "model_name": "/opt/test-model",
+        "max_seq_length": 512
+      },
+      "allocated_before_bytes": 0,
+      "load_seconds": 7.2043,
+      "outcome": "loaded",
+      "is_loaded_in_4bit": true,
+      "linear4bit_modules": 168,
+      "parameter_dtypes": [
+        "torch.bfloat16",
+        "torch.uint8"
+      ],
+      "model_memory_footprint_bytes": 451325824,
+      "peak_allocated_bytes": 507511808,
+      "allocated_after_bytes": 474616320,
+      "generated_tokens": 9,
+      "generated_text": "2 + 2 equals 4.",
+      "side": "after",
+      "exit_code": 0
+    },
+    {
+      "case": "corrected_16bit",
+      "mocked_model_or_network": false,
+      "versions": {
+        "unsloth": "2026.9.4",
+        "unsloth_zoo": "2026.9.3",
+        "torch": "2.8.0",
+        "transformers": "4.57.6",
+        "peft": "0.20.0",
+        "bitsandbytes": "0.49.2"
+      },
+      "gpu": "NVIDIA L4",
+      "gpu_total_bytes": 23659151360,
+      "loader_sha256": "35abf24839341aabc3ecd7700758d3ed20bedaad8f944007f5dcdad302ba2208",
+      "kwargs": {
+        "model_name": "/opt/test-model",
+        "max_seq_length": 512,
+        "load_in_4bit": false,
+        "load_in_16bit": true
+      },
+      "allocated_before_bytes": 0,
+      "load_seconds": 6.4981,
+      "outcome": "loaded",
+      "is_loaded_in_4bit": false,
+      "linear4bit_modules": 0,
+      "parameter_dtypes": [
+        "torch.bfloat16"
+      ],
+      "model_memory_footprint_bytes": 988065664,
+      "peak_allocated_bytes": 1005235712,
+      "allocated_after_bytes": 1005235712,
+      "generated_tokens": 9,
+      "generated_text": "2 + 2 equals 4.",
+      "side": "after",
+      "exit_code": 0
+    }
+  ],
+  "status": "verified"
+}
