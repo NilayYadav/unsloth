@@ -1,0 +1,30 @@
+{
+  "history_parameter": "previous_response_id",
+  "history_reference": "resp_previous",
+  "control_http_status": 400,
+  "control_response": {
+    "error": {
+      "message": "No model loaded. Call POST /inference/load first. Or enable Model auto-switch (Settings > API) to load a requested model automatically.",
+      "type": "invalid_request_error",
+      "param": null,
+      "code": null
+    }
+  },
+  "control_monitor_rows": 1,
+  "control_row_status": "error",
+  "probe_http_status": 400,
+  "probe_response": {
+    "error": {
+      "message": "No model loaded. Call POST /inference/load first. Or enable Model auto-switch (Settings > API) to load a requested model automatically.",
+      "type": "invalid_request_error",
+      "param": null,
+      "code": null
+    }
+  },
+  "probe_monitor_rows": 1,
+  "probe_row_status": "error",
+  "active_model": null,
+  "logging_enabled": true,
+  "ui_console_errors": [],
+  "ui_page_errors": []
+}

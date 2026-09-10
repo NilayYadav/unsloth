@@ -1,0 +1,88 @@
+{
+  "plan": {
+    "pr": 10761,
+    "before_sha": "d0dbe9059efa443c6ad8bd1d51af7e2d9276a2bc",
+    "after_sha": "c051392d0368c5ea0467e2049a1ac7bcc7b09ab7",
+    "scene": "responses_history_monitor",
+    "expect": "With no loaded model on either side, a non-streaming Responses request with conversation reaches inference and creates one failed monitor row before; after it returns unsupported_parameter HTTP 400 before inference and creates zero monitor rows. An otherwise identical request without conversation creates a failed monitor control row on both sides.",
+    "viewport": [
+      1440,
+      1000
+    ],
+    "model": null,
+    "limitations": [
+      "This scene proves request rejection and monitor visibility, not successful model inference or model switching."
+    ],
+    "launch": "Separate source checkouts, npm ci + npm run build on each, identical backend dependency lock in separate venvs, separate Studio homes/cache/auth/ports. Launch production main.app and setup_frontend with uvicorn; no route or monitor mocks.",
+    "history_parameter": "conversation"
+  },
+  "facts": {
+    "BEFORE": {
+      "history_parameter": "conversation",
+      "history_reference": "conv_previous",
+      "control_http_status": 400,
+      "control_response": {
+        "error": {
+          "message": "No model loaded. Call POST /inference/load first. Or enable Model auto-switch (Settings > API) to load a requested model automatically.",
+          "type": "invalid_request_error",
+          "param": null,
+          "code": null
+        }
+      },
+      "control_monitor_rows": 1,
+      "control_row_status": "error",
+      "probe_http_status": 400,
+      "probe_response": {
+        "error": {
+          "message": "No model loaded. Call POST /inference/load first. Or enable Model auto-switch (Settings > API) to load a requested model automatically.",
+          "type": "invalid_request_error",
+          "param": null,
+          "code": null
+        }
+      },
+      "probe_monitor_rows": 1,
+      "probe_row_status": "error",
+      "active_model": null,
+      "logging_enabled": true,
+      "ui_console_errors": [],
+      "ui_page_errors": [],
+      "ui_response_row_count": 1,
+      "ui_no_traffic_message": 0,
+      "ui_body_text": "unsloth\nBETA\nNew chat\nModel hub\nProjects\nImages\nVideo\nTrain\nMore\nRecents\n\nNo chats yet\n\nU\nUnsloth\nUnsloth\nCommand Palette\n\nSearch for a command to run...\n\nAPI\n\nLive traffic through Unsloth's OpenAI-compatible server.\n\nPause\nUnload\nRefresh\nClear log\nAPI settings\nBASE URL\nhttp://127.0.0.1:18753/v1\nCopy\nSTATUS\nNo model loaded\nLOADED MODEL\nNone\nIN FLIGHT\n0\nREQUESTS\n1\nrecent window\nCOMPLETED\n0\nERRORS\n1\n100% of finished\nAVG LATENCY\n0 ms\nmax 0 ms\nTHROUGHPUT\n\u2013\n0 tokens \u00b7 generation only\nAll requests\n1 of 1\n/responses\n0 ms\ndefault\n03:32:32 AM\n\nAn internal error occurred\n\nERROR\napireq_b1b03045fb5646d98797aac5dca7828e\nPOST /v1/responses\n\ndefault\n\nSTARTED\n03:32:32 AM\nDURATION\n0 ms\nPROMPT TOKENS\n\u2013\nCOMPLETION TOKENS\n\u2013\nTOTAL TOKENS\n\u2013\nCONTEXT\n\u2013\nFIRST TOKEN\n\u2013\nGENERATING\n\u2013\nPROMPT SPEED\n\u2013\nGENERATION SPEED\n\u2013\nSTOP REASON\n\u2013\nERROR\nCopy\nAn internal error occurred\nPROMPT\nCopy\nuser: What was my project code?\nREPLY\n\u2013\nSettings applied on API load\n\nWhen a request names one of these models, Unsloth loads it with these settings, the same ones you saved in the model's settings page. Models without an entry load with app defaults. Edit an entry from that model's settings, or forget it here, which clears it from the picker too.\n\nNo saved model settings yet. Open a model's settings, turn on \"Remember for this model\", and it will be applied to API loads too."
+    },
+    "AFTER": {
+      "history_parameter": "conversation",
+      "history_reference": "conv_previous",
+      "control_http_status": 400,
+      "control_response": {
+        "error": {
+          "message": "No model loaded. Call POST /inference/load first. Or enable Model auto-switch (Settings > API) to load a requested model automatically.",
+          "type": "invalid_request_error",
+          "param": null,
+          "code": null
+        }
+      },
+      "control_monitor_rows": 1,
+      "control_row_status": "error",
+      "probe_http_status": 400,
+      "probe_response": {
+        "error": {
+          "message": "'conversation' is not supported. Send the full conversation history in 'input'.",
+          "type": "invalid_request_error",
+          "param": "conversation",
+          "code": "unsupported_parameter"
+        }
+      },
+      "probe_monitor_rows": 0,
+      "probe_row_status": null,
+      "active_model": null,
+      "logging_enabled": true,
+      "ui_console_errors": [],
+      "ui_page_errors": [],
+      "ui_response_row_count": 0,
+      "ui_no_traffic_message": 1,
+      "ui_body_text": "unsloth\nBETA\nNew chat\nModel hub\nProjects\nImages\nVideo\nTrain\nMore\nRecents\n\nNo chats yet\n\nU\nUnsloth\nUnsloth\nCommand Palette\n\nSearch for a command to run...\n\nAPI\n\nLive traffic through Unsloth's OpenAI-compatible server.\n\nPause\nUnload\nRefresh\nClear log\nAPI settings\nBASE URL\nhttp://127.0.0.1:18754/v1\nCopy\nSTATUS\nNo model loaded\nLOADED MODEL\nNone\nIN FLIGHT\n0\nREQUESTS\n0\nrecent window\nCOMPLETED\n0\nERRORS\n0\nAVG LATENCY\n\u2013\nTHROUGHPUT\n\u2013\n0 tokens \u00b7 generation only\nAll requests\n0 of 0\n\nNo API traffic yet. Point a client at the base URL above to see requests here.\n\nSelect a request to inspect its prompt, reply, tokens and errors.\n\nSettings applied on API load\n\nWhen a request names one of these models, Unsloth loads it with these settings, the same ones you saved in the model's settings page. Models without an entry load with app defaults. Edit an entry from that model's settings, or forget it here, which clears it from the picker too.\n\nNo saved model settings yet. Open a model's settings, turn on \"Remember for this model\", and it will be applied to API loads too."
+    }
+  },
+  "identical_images": false
+}
