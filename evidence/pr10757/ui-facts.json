@@ -1,0 +1,31 @@
+{
+  "pr": 10757,
+  "head": "f92877a0c0ff94285eda1e7afd61926aac7c8b31",
+  "screenshot_base": "d0dbe9059efa443c6ad8bd1d51af7e2d9276a2bc",
+  "screenshot_fixed": "0b3c6fc682549c5acaeeb121f83373891f490ea6",
+  "provider_source_sha256": "9ee4807cd77b3d9f8e59531eb2f6e068211060192474ffc0c44bef9b54048463",
+  "source_equivalence": "Screenshot fixed commit and PR head differ only in the test license header and blank line; production source is identical.",
+  "mode": "Archived actual Studio browser flow with controlled provider HTTP responses; re-inspected for this PR.",
+  "submissions": 6,
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "before_error_result": "(search complete)",
+  "after_error_result": "Error: max_uses_exceeded",
+  "answer_visible_both": true,
+  "after_reload_and_reopen": {
+    "error_preserved": true,
+    "answer_preserved": true
+  },
+  "successful_source_url_both": "https://www.python.org/downloads/",
+  "empty_success_both": "(search complete)",
+  "identical_provider_response_bytes_per_pair": true,
+  "live_provider_inference": false,
+  "github_actions_browser_run": false,
+  "image_sha256": {
+    "before.png": "d2a09094f6b16029cd2bd1a28724cd9f30ae368557f87e07acf29dcac47a8c04",
+    "after.png": "5f73bfa100fc792df2c8df75ceedebe3ed2c15740d3845df90d2ce0f197c0263",
+    "before-after.png": "54fae8b61d2ce02f3b748a166c700fc2e4f229004be343d852f775e9efc81d83"
+  }
+}
