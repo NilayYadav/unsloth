@@ -1,0 +1,62 @@
+{
+  "pr": "https://github.com/unslothai/unsloth/pull/10763",
+  "merge_base": "d0dbe9059efa443c6ad8bd1d51af7e2d9276a2bc",
+  "head": "5a9dcbf7a88a1908b22c3047a0e9b13c08eba6a7",
+  "scene": "Settings > Agents > Model; search stories260k",
+  "expect": "One installed Ollama model is absent before and offered after.",
+  "before": {
+    "api_ids": [],
+    "options": [],
+    "matching_options": 0,
+    "page_errors": [],
+    "browser": "151.0.7922.34",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    }
+  },
+  "after": {
+    "api_ids": [
+      "ollama/stories260k:latest"
+    ],
+    "options": [
+      "ollama/stories260k:latest"
+    ],
+    "matching_options": 1,
+    "page_errors": [],
+    "browser": "151.0.7922.34",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    }
+  },
+  "fact_delta": {
+    "api_ids": [
+      [],
+      [
+        "ollama/stories260k:latest"
+      ]
+    ],
+    "matching_options": [
+      0,
+      1
+    ],
+    "options": [
+      [],
+      [
+        "ollama/stories260k:latest"
+      ]
+    ]
+  },
+  "fixture": {
+    "source": "ggml-org/models: tinyllamas/stories260K.gguf",
+    "sha256": "270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d",
+    "bytes": 1185376,
+    "ollama_tag": "stories260k:latest",
+    "manifests_per_side": 1
+  },
+  "execution": "Separate source builds (npm ci --ignore-scripts; npm run build), production FastAPI app and auth, isolated homes/caches/ports. Same Python dependencies. Test harness restricts inventory roots to the one seeded Ollama store. No catalog/API responses or UI DOM are mocked.",
+  "scope": "Discovery and UI selection only; this scene does not load a model or run inference. Offline Hub metadata causes the same unrelated quantization warning on both full screenshots.",
+  "capture": "Playwright Chromium, fixed 1440x1000 viewport. Picker clips use identical x738/y370/width274/height181 coordinates; composite adds labels only.",
+  "command": "python capture.py; python prepare_publish.py"
+}
