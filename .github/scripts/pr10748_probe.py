@@ -24,8 +24,8 @@ class Hub(BaseHTTPRequestHandler):
         pass
 
     def respond(self, head=False):
-        authorized = self.headers.get('Authorization') == 'Bearer ' + accepted_token
-        requests_seen.append({'method': self.command, 'authorized': authorized})
+        authorized = accepted_token is None or self.headers.get('Authorization') == 'Bearer ' + accepted_token
+        requests_seen.append({'method': self.command, 'authorized': authorized, 'has_auth': bool(self.headers.get('Authorization'))})
         if not authorized:
             self.send_response(401)
             self.send_header('X-Error-Code', 'RepoNotFound')
@@ -78,6 +78,7 @@ with tempfile.TemporaryDirectory(prefix='pr10748-') as temp:
         ('explicit_restricted', False, TOKENS[1], False, None, TOKENS[1], True),
         ('implicit_disabled', True, None, True, None, TOKENS[0], False),
         ('environment_precedence', True, None, False, TOKENS[2], TOKENS[2], True),
+        ('corrupt_cached_public', True, None, False, None, None, True),
     ]
     try:
         for name, ambient, explicit, disabled, environment, expected_token, should_download in scenarios:
@@ -88,11 +89,20 @@ with tempfile.TemporaryDirectory(prefix='pr10748-') as temp:
                 os.environ['HF_TOKEN'] = environment
             else:
                 os.environ.pop('HF_TOKEN', None)
+            Path(os.environ['HF_TOKEN_PATH']).write_bytes(
+                b'\xff\xfe\xff' if name == 'corrupt_cached_public' else TOKENS[0].encode())
             requests_seen.clear()
             cache = home / name / 'hub'
-            proc = spawn_worker(['--repo-id', 'fixture/model'], explicit, use_xet=False,
-                                allow_ambient_token=ambient, cache_env={'HF_HUB_CACHE': str(cache),
-                                'HUGGINGFACE_HUB_CACHE': str(cache)})
+            try:
+                proc = spawn_worker(['--repo-id', 'fixture/model'], explicit, use_xet=False,
+                                    allow_ambient_token=ambient, cache_env={'HF_HUB_CACHE': str(cache),
+                                    'HUGGINGFACE_HUB_CACHE': str(cache)})
+            except (OSError, UnicodeError) as exc:
+                row = {'scenario': name, 'spawn_error': type(exc).__name__, 'requests': len(requests_seen),
+                       'downloaded_bytes': 0, 'expected_download': should_download, 'pass': False}
+                results.append(row)
+                print(json.dumps(row), flush=True)
+                continue
             try:
                 _, stderr = proc.communicate(timeout=45)
             except BaseException:
@@ -103,9 +113,12 @@ with tempfile.TemporaryDirectory(prefix='pr10748-') as temp:
             downloaded = target.read_bytes() if target.exists() else b''
             row = {'scenario': name, 'exit_code': proc.returncode, 'requests': len(requests_seen),
                    'authorized_requests': sum(x['authorized'] for x in requests_seen),
+                   'auth_header_requests': sum(x['has_auth'] for x in requests_seen),
                    'downloaded_bytes': len(downloaded), 'expected_download': should_download}
             row['pass'] = (proc.returncode == 0 and downloaded == PAYLOAD) if should_download else (
                 proc.returncode != 0 and not downloaded and bool(requests_seen) and not any(x['authorized'] for x in requests_seen))
+            if name == 'corrupt_cached_public':
+                row['pass'] = row['pass'] and row['auth_header_requests'] == 0
             results.append(row)
             print(json.dumps(row), flush=True)
             if not row['pass']:
