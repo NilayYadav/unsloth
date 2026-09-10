@@ -1,0 +1,24 @@
+{
+  "browser": "chromium",
+  "browser_version": "145.0.7632.6",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "checkout_sha": "5cb96c2cffa6e0c5188afc7128248eb39376e7c3",
+  "status": "failed",
+  "report_chars": 0,
+  "expected_report_chars": 755,
+  "report_exact": false,
+  "sources": 1,
+  "incomplete_visible": false,
+  "report_visible": false,
+  "source_visible": false,
+  "error": "peer closed connection without sending complete message body (received 1096 bytes, expected 2096)",
+  "error_visible": true,
+  "private_preamble_visible": false,
+  "activity_opened": true,
+  "reload_and_recents_reopen": true,
+  "page_errors": [],
+  "every_report_paragraph_rendered": false
+}

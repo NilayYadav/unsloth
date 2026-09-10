@@ -1,0 +1,69 @@
+{
+  "positive": {
+    "linux": {
+      "tests": 517,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 517,
+      "failed_tests": []
+    },
+    "macos": {
+      "tests": 517,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 517,
+      "failed_tests": []
+    },
+    "windows": {
+      "tests": 517,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 517,
+      "failed_tests": []
+    }
+  },
+  "negative": {
+    "linux": {
+      "tests": 517,
+      "failures": 4,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 513,
+      "failed_tests": [
+        "test_interrupted_stream_retains_last_bytes_in_failed_report_and_chat[error0]",
+        "test_interrupted_stream_retains_last_bytes_in_failed_report_and_chat[error1]",
+        "test_interrupted_stream_retains_last_bytes_in_failed_report_and_chat[error2]",
+        "test_interrupted_report_validates_citations"
+      ]
+    },
+    "macos": {
+      "tests": 517,
+      "failures": 4,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 513,
+      "failed_tests": [
+        "test_interrupted_stream_retains_last_bytes_in_failed_report_and_chat[error0]",
+        "test_interrupted_stream_retains_last_bytes_in_failed_report_and_chat[error1]",
+        "test_interrupted_stream_retains_last_bytes_in_failed_report_and_chat[error2]",
+        "test_interrupted_report_validates_citations"
+      ]
+    },
+    "windows": {
+      "tests": 517,
+      "failures": 4,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 513,
+      "failed_tests": [
+        "test_interrupted_stream_retains_last_bytes_in_failed_report_and_chat[error0]",
+        "test_interrupted_stream_retains_last_bytes_in_failed_report_and_chat[error1]",
+        "test_interrupted_stream_retains_last_bytes_in_failed_report_and_chat[error2]",
+        "test_interrupted_report_validates_citations"
+      ]
+    }
+  }
+}

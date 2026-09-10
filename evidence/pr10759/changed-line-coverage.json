@@ -1,0 +1,32 @@
+{
+  "studio/backend/core/research_runs.py": {
+    "added_executable_lines": [
+      1904,
+      1905,
+      1906,
+      1907,
+      1908,
+      1909,
+      1912,
+      1913,
+      1914,
+      1915,
+      1916,
+      1917,
+      1918,
+      2026,
+      2027,
+      2028,
+      2029,
+      2033,
+      2036
+    ],
+    "missed_added_executable_lines": []
+  },
+  "studio/backend/storage/research_runs_db.py": {
+    "added_executable_lines": [
+      995
+    ],
+    "missed_added_executable_lines": []
+  }
+}

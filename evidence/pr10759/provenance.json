@@ -1,0 +1,47 @@
+{
+  "pr": "https://github.com/unslothai/unsloth/pull/10759",
+  "head": "bb64dcf58896f1389300203641a0c372dfbb3e1e",
+  "staging_base": "e726fb1f563948fabde75f35fd745158c210f3e9",
+  "initial_positive": "1d418b522a4b440a5639bcb189ebd8ffbb5ffeb1",
+  "initial_negative": "95bd5d06749bc0bc315cbcbb0fac7776f11215b0",
+  "final_positive": "a8744f35afc71fadd77abaeb45041c6ff960930e",
+  "final_negative": "5cb96c2cffa6e0c5188afc7128248eb39376e7c3",
+  "scope": "All 10 research backend test modules, full frontend test suite, production build, real authenticated Studio activity/reload/reopen in Chromium and Firefox.",
+  "fixture": "The real supervisor consumes deterministic loopback HTTP SSE output and persists the genuine incomplete-body failure. Source gathering/model output are simulated; planning is approved through the real DB transition before browser navigation.",
+  "expect": "Identical failure and one source on both refs; validated report 0 -> 755 chars, incomplete label and every report paragraph visible after reload/reopen only with fix.",
+  "coverage": {
+    "covered_lines": 1821,
+    "num_statements": 2051,
+    "percent_covered": 86.62048851622312,
+    "percent_covered_display": "87",
+    "missing_lines": 230,
+    "excluded_lines": 0,
+    "percent_statements_covered": 88.78595806923452,
+    "percent_statements_covered_display": "89",
+    "num_branches": 692,
+    "num_partial_branches": 105,
+    "covered_branches": 555,
+    "missing_branches": 137,
+    "percent_branches_covered": 80.20231213872832,
+    "percent_branches_covered_display": "80"
+  },
+  "backend_runs": {
+    "positive": "https://github.com/NilayYadav/unsloth/actions/runs/34536811203",
+    "negative": "https://github.com/NilayYadav/unsloth/actions/runs/34536811234"
+  },
+  "browser_runs": {
+    "positive": "https://github.com/NilayYadav/unsloth/actions/runs/34537565869",
+    "negative": "https://github.com/NilayYadav/unsloth/actions/runs/34537565836"
+  },
+  "harness_correction": "First Chromium capture read the DOM before deferred Markdown painted. The harness now awaits all report paragraphs and has delayed-render and missing-report controls. No product code was changed.",
+  "result": "positive browser run succeeded; negative failed only the REPORT_RETENTION assertions in both browsers",
+  "frontend_tests": {
+    "tests": 7284,
+    "passed": 7284,
+    "failed": 0,
+    "skipped": 0
+  },
+  "visual_inspection": "All four published 1440x1000 original before/after screenshots inspected; expected report difference visible in Chromium and Firefox. Byte-equivalent screenshot guard passed.",
+  "negative_macos_retry": "Initial run also hit existing time-sensitive batching assertion (3 vs 2 writes); unchanged exact-job retry produced only the 4 expected interruption failures.",
+  "artifact_retention_days": 30
+}
