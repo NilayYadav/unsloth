@@ -1,0 +1,146 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/models",
+    "status": 200,
+    "authorized": false,
+    "browser": true,
+    "bytes": 0
+  },
+  {
+    "method": "GET",
+    "path": "/api/models",
+    "status": 200,
+    "authorized": false,
+    "browser": true,
+    "bytes": 0
+  },
+  {
+    "method": "GET",
+    "path": "/api/models/fixture/saved-login-model",
+    "status": 200,
+    "authorized": false,
+    "browser": true,
+    "bytes": 0
+  },
+  {
+    "method": "GET",
+    "path": "/fixture/saved-login-model/raw/main/README.md",
+    "status": 200,
+    "authorized": false,
+    "browser": true,
+    "bytes": 208
+  },
+  {
+    "method": "GET",
+    "path": "/api/models/fixture/saved-login-model/revision/HEAD",
+    "status": 200,
+    "authorized": false,
+    "browser": true,
+    "bytes": 0
+  },
+  {
+    "method": "HEAD",
+    "path": "/None/resolve/main/config.json",
+    "status": 200,
+    "authorized": true,
+    "browser": false,
+    "bytes": 0
+  },
+  {
+    "method": "GET",
+    "path": "/api/organizations/fixture/overview",
+    "status": 200,
+    "authorized": false,
+    "browser": true,
+    "bytes": 0
+  },
+  {
+    "method": "GET",
+    "path": "/api/users/fixture/overview",
+    "status": 200,
+    "authorized": false,
+    "browser": true,
+    "bytes": 0
+  },
+  {
+    "method": "GET",
+    "path": "/api/models/fixture/saved-login-model",
+    "status": 200,
+    "authorized": true,
+    "browser": false,
+    "bytes": 0
+  },
+  {
+    "method": "GET",
+    "path": "/api/models/fixture/saved-login-model/revision/main",
+    "status": 200,
+    "authorized": true,
+    "browser": false,
+    "bytes": 0
+  },
+  {
+    "method": "GET",
+    "path": "/api/models/fixture/saved-login-model/tree/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "status": 200,
+    "authorized": true,
+    "browser": false,
+    "bytes": 0
+  },
+  {
+    "method": "HEAD",
+    "path": "/fixture/saved-login-model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/config.json",
+    "status": 200,
+    "authorized": true,
+    "browser": false,
+    "bytes": 0
+  },
+  {
+    "method": "GET",
+    "path": "/fixture/saved-login-model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/config.json",
+    "status": 200,
+    "authorized": true,
+    "browser": false,
+    "bytes": 147
+  },
+  {
+    "method": "HEAD",
+    "path": "/fixture/saved-login-model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/model.safetensors",
+    "status": 200,
+    "authorized": true,
+    "browser": false,
+    "bytes": 0
+  },
+  {
+    "method": "GET",
+    "path": "/fixture/saved-login-model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/model.safetensors",
+    "status": 200,
+    "authorized": true,
+    "browser": false,
+    "bytes": 76
+  },
+  {
+    "method": "HEAD",
+    "path": "/fixture/saved-login-model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/README.md",
+    "status": 200,
+    "authorized": true,
+    "browser": false,
+    "bytes": 0
+  },
+  {
+    "method": "GET",
+    "path": "/fixture/saved-login-model/resolve/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/README.md",
+    "status": 200,
+    "authorized": true,
+    "browser": false,
+    "bytes": 208
+  },
+  {
+    "method": "GET",
+    "path": "/api/models/fixture/saved-login-model",
+    "status": 200,
+    "authorized": true,
+    "browser": false,
+    "bytes": 0
+  }
+]

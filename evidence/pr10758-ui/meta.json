@@ -1,0 +1,85 @@
+{
+  "pr": 10758,
+  "head_ref": "hf-cached-auth",
+  "base_sha": "d0dbe9059efa443c6ad8bd1d51af7e2d9276a2bc",
+  "head_sha": "5ea4eb441760864a076bcc1255a329500ed8634b",
+  "scene": "saved_hf_login_download",
+  "expect": "BEFORE: the real download worker sends no token, receives 401, and the UI shows download failure with no complete snapshot. AFTER: the worker uses the cached login, downloads every fixture file, and the UI shows On device. Browser download requests carry no explicit Hugging Face token on either side.",
+  "facts": {
+    "BEFORE": {
+      "state": "error",
+      "download_requests": [
+        {
+          "path": "/api/hub/download",
+          "body": {
+            "repo_id": "fixture/saved-login-model",
+            "gguf_variant": null,
+            "scope_id": null,
+            "use_xet": false,
+            "transport_mode": "http"
+          },
+          "has_explicit_hf_token": false
+        }
+      ],
+      "downloaded_files": {},
+      "downloaded_bytes": 0,
+      "complete_snapshot": false,
+      "on_device_visible": false,
+      "page_errors": [],
+      "remote_401s": 2,
+      "authenticated_file_requests": 1,
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "browser": "151.0.7922.34"
+    },
+    "AFTER": {
+      "state": "complete",
+      "download_requests": [
+        {
+          "path": "/api/hub/download",
+          "body": {
+            "repo_id": "fixture/saved-login-model",
+            "gguf_variant": null,
+            "scope_id": null,
+            "use_xet": false,
+            "transport_mode": "http"
+          },
+          "has_explicit_hf_token": false
+        }
+      ],
+      "downloaded_files": {
+        "config.json": 147,
+        "model.safetensors": 76,
+        "README.md": 208
+      },
+      "downloaded_bytes": 431,
+      "complete_snapshot": true,
+      "on_device_visible": true,
+      "page_errors": [],
+      "remote_401s": 0,
+      "authenticated_file_requests": 7,
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "browser": "151.0.7922.34"
+    }
+  },
+  "pairs": [
+    "before-after.png"
+  ],
+  "execution": "Local macOS; real isolated Studio installs, Chromium browser, backend and worker; synthetic loopback Hugging Face endpoint. No real gated account or inference.",
+  "guards": {
+    "offline_tests_passed": 6,
+    "different_image_bytes": true,
+    "different_facts": true,
+    "visually_inspected": true
+  },
+  "sha256": {
+    "before.png": "0874c26263ee5c0a01f92e9807e52f06a1dfc9161690ff6609d942a0291c489d",
+    "after.png": "145fc186b339cbaeb894665180ae67bb0d7f81dda9fbee154b66d3c091baecdf",
+    "before-after.png": "39972d465793c8bda47f224461037667f1bc2f69ccddef33c0736eb761981c9b"
+  }
+}
