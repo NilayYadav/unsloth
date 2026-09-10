@@ -5384,6 +5384,93 @@ def save_to_gguf_generic(
     return metadata
 
 
+def _push_merged_to_hub_revision(save_kwargs):
+    import tempfile
+    from huggingface_hub import CommitOperationAdd, ModelCard, hf_hub_download
+    from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
+    from unsloth_zoo.saving_utils import get_original_model_id
+
+    if not save_kwargs["is_main_process"]:
+        return
+    token = save_kwargs["token"]
+    if token is None:
+        token = get_token()
+    repo_id, username = _determine_username(save_kwargs["save_directory"], None, token)
+    api = HfApi(token = token)
+    api.create_repo(
+        repo_id = repo_id,
+        repo_type = "model",
+        private = save_kwargs["private"],
+        exist_ok = True,
+    )
+    revision = save_kwargs["revision"]
+    if revision is not None and not revision.startswith("refs/pr/"):
+        api.create_branch(repo_id = repo_id, repo_type = "model", branch = revision, exist_ok = True)
+    with tempfile.TemporaryDirectory(prefix = "unsloth-merged-") as directory:
+        unsloth_generic_save(
+            **{**save_kwargs, "save_directory": directory, "push_to_hub": False, "token": token}
+        )
+        card_path = Path(directory) / "README.md"
+        try:
+            remote_card_path = hf_hub_download(
+                repo_id = repo_id,
+                filename = "README.md",
+                repo_type = "model",
+                revision = revision,
+                token = token,
+            )
+            card = ModelCard.load(remote_card_path)
+        except LocalEntryNotFoundError:
+            raise
+        except EntryNotFoundError:
+            card = ModelCard.load(card_path) if card_path.is_file() else None
+        if card is None:
+            model = save_kwargs["model"]
+            base_model = model.config._name_or_path
+            if os.path.isdir(base_model):
+                original_model_id = get_original_model_id(base_model)
+                base_model = (
+                    original_model_id
+                    if original_model_id is not None and not os.path.exists(original_model_id)
+                    else repo_id
+                )
+            card = ModelCard(
+                MODEL_CARD.format(
+                    username = username,
+                    base_model = base_model,
+                    model_type = model.config.model_type,
+                    method = "",
+                    extra = "unsloth",
+                )
+            )
+        if save_kwargs["datasets"]:
+            card.data.datasets = save_kwargs["datasets"]
+        card.data.tags = list(
+            dict.fromkeys([*(card.data.tags or []), *(save_kwargs["tags"] or []), "unsloth"])
+        )
+        card.save(card_path)
+        return api.create_commit(
+            repo_id = repo_id,
+            repo_type = "model",
+            operations = [
+                CommitOperationAdd(
+                    path_in_repo = path.relative_to(directory).as_posix(), path_or_fileobj = path
+                )
+                for path in sorted(Path(directory).rglob("*"))
+                if path.is_file()
+                and not {".cache", ".git"}.intersection(path.relative_to(directory).parts)
+            ],
+            revision = save_kwargs["revision"],
+            create_pr = save_kwargs["create_pr"],
+            commit_message = (
+                save_kwargs["commit_message"]
+                if save_kwargs["commit_message"] is not None
+                else "Trained with Unsloth"
+            ),
+            commit_description = save_kwargs["commit_description"],
+        )
+
+
 @_normalize_tied_weights_keys_for_save
 @torch.inference_mode
 def unsloth_generic_save(
@@ -5411,6 +5498,9 @@ def unsloth_generic_save(
     maximum_memory_usage: float = 0.9,
     datasets: Optional[List[str]] = None,
 ):
+    if push_to_hub and (create_pr or revision is not None):
+        return _push_merged_to_hub_revision(dict(locals()))
+
     if isinstance(tokenizer, (PreTrainedTokenizerBase, ProcessorMixin)):
         tokenizer = patch_saving_functions(tokenizer)
 
