@@ -1,0 +1,261 @@
+[
+  {
+    "case": "base64_mixed",
+    "http_status": 200,
+    "answer": "742",
+    "elapsed_seconds": 0.286,
+    "response": {
+      "id": "msg_c5614173670b43c989177ee7",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "742"
+        }
+      ],
+      "model": "unsloth/gemma-4-E2B-it-GGUF",
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 231,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 4
+      }
+    }
+  },
+  {
+    "case": "image_only",
+    "http_status": 200,
+    "answer": "742",
+    "elapsed_seconds": 0.245,
+    "response": {
+      "id": "msg_e7ef26d2de3a4e06b18a1c7f",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "742"
+        }
+      ],
+      "model": "unsloth/gemma-4-E2B-it-GGUF",
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 224,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 4
+      }
+    }
+  },
+  {
+    "case": "data_url",
+    "http_status": 200,
+    "answer": "742",
+    "elapsed_seconds": 0.077,
+    "response": {
+      "id": "msg_9307b5197be447a78600e282",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "742"
+        }
+      ],
+      "model": "unsloth/gemma-4-E2B-it-GGUF",
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 231,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 4
+      }
+    }
+  },
+  {
+    "case": "two_images",
+    "http_status": 200,
+    "answer": "742",
+    "elapsed_seconds": 0.486,
+    "response": {
+      "id": "msg_796e70ed5a95461cb0c7b68e",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "742"
+        }
+      ],
+      "model": "unsloth/gemma-4-E2B-it-GGUF",
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 363,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 4
+      }
+    }
+  },
+  {
+    "case": "history",
+    "http_status": 200,
+    "answer": "742",
+    "elapsed_seconds": 0.304,
+    "response": {
+      "id": "msg_9b7df9ad9bd54b66be1a308b",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "742"
+        }
+      ],
+      "model": "unsloth/gemma-4-E2B-it-GGUF",
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 276,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 4
+      }
+    }
+  },
+  {
+    "case": "streaming",
+    "http_status": 200,
+    "answer": "742",
+    "elapsed_seconds": 0.247,
+    "response": {
+      "events": [
+        {
+          "type": "message_start",
+          "message": {
+            "id": "msg_6e0a1834930246169392d3d6",
+            "type": "message",
+            "role": "assistant",
+            "content": [],
+            "model": "unsloth/gemma-4-E2B-it-GGUF",
+            "stop_reason": null,
+            "stop_sequence": null,
+            "usage": {
+              "input_tokens": 126,
+              "output_tokens": 0,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0
+            }
+          }
+        },
+        {
+          "type": "content_block_start",
+          "index": 0,
+          "content_block": {
+            "type": "text",
+            "text": ""
+          }
+        },
+        {
+          "type": "content_block_delta",
+          "index": 0,
+          "delta": {
+            "type": "text_delta",
+            "text": "7"
+          }
+        },
+        {
+          "type": "content_block_delta",
+          "index": 0,
+          "delta": {
+            "type": "text_delta",
+            "text": "4"
+          }
+        },
+        {
+          "type": "content_block_delta",
+          "index": 0,
+          "delta": {
+            "type": "text_delta",
+            "text": "2"
+          }
+        },
+        {
+          "type": "content_block_stop",
+          "index": 0
+        },
+        {
+          "type": "message_delta",
+          "delta": {
+            "stop_reason": "end_turn",
+            "stop_sequence": null
+          },
+          "usage": {
+            "input_tokens": 231,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 4
+          }
+        },
+        {
+          "type": "message_stop"
+        }
+      ]
+    }
+  },
+  {
+    "case": "top_level_control",
+    "http_status": 200,
+    "answer": "742",
+    "elapsed_seconds": 0.271,
+    "response": {
+      "id": "msg_ebffd1ebc1a94c478ac1bc7a",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "742"
+        }
+      ],
+      "model": "unsloth/gemma-4-E2B-it-GGUF",
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "usage": {
+        "input_tokens": 178,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 4
+      }
+    }
+  },
+  {
+    "case": "count_image",
+    "http_status": 503,
+    "answer": "",
+    "elapsed_seconds": 0.003,
+    "response": {
+      "type": "error",
+      "request_id": null,
+      "error": {
+        "type": "api_error",
+        "message": "Cannot count tokens for messages containing images."
+      }
+    }
+  },
+  {
+    "case": "count_text",
+    "http_status": 200,
+    "answer": "",
+    "elapsed_seconds": 0.006,
+    "response": {
+      "input_tokens": 32
+    }
+  }
+]

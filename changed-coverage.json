@@ -1,0 +1,18 @@
+{
+  "studio/backend/core/inference/anthropic_compat.py": {
+    "changed_executable_lines": 17,
+    "covered": 17,
+    "missing": [],
+    "branches_from_changed_lines": 12,
+    "missing_branches": [],
+    "file_statement_coverage": 90.92526690391459
+  },
+  "studio/backend/routes/inference.py": {
+    "changed_executable_lines": 33,
+    "covered": 33,
+    "missing": [],
+    "branches_from_changed_lines": 26,
+    "missing_branches": [],
+    "file_statement_coverage": 30.664265429105768
+  }
+}

@@ -1,0 +1,38 @@
+........................................................................ [  5%]
+........................................................................ [ 10%]
+........................................................................ [ 16%]
+........................................................................ [ 21%]
+........................................................................ [ 26%]
+........................................................................ [ 32%]
+.....................................................................sss [ 37%]
+ss...................................................................... [ 42%]
+........................................................................ [ 48%]
+........................................................................ [ 53%]
+........................................................................ [ 58%]
+........................................................................ [ 64%]
+........................................................................ [ 69%]
+........................................................................ [ 74%]
+........................................................................ [ 80%]
+........................................................................ [ 85%]
+........................................................................ [ 91%]
+..................................s..................................... [ 96%]
+.................................................                        [100%]
+=============================== warnings summary ===============================
+../ci-venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1345
+  <workspace>/pr10751/ci-venv/lib/python3.12/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+../ci-venv/lib/python3.12/site-packages/starlette/testclient.py:53
+  <workspace>/pr10751/ci-venv/lib/python3.12/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+______________ coverage: platform darwin, python 3.12.13-final-0 _______________
+
+Coverage HTML written to dir <workspace>/pr10751/full-evidence/coverage-html
+Coverage JSON written to file <workspace>/pr10751/full-evidence/coverage.json
+=========================== short test summary info ============================
+SKIPPED [5] ../wt_r10751/studio/backend/tests/test_llama_admission_compat_matrix.py:105: covered by the multi-slot cases
+SKIPPED [1] studio/backend/tests/test_openai_auto_switch.py:9312: could not import 'mlx_lm.utils': No module named 'mlx_lm'
+1339 passed, 6 skipped, 2 warnings in 60.23s (0:01:00)

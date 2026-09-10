@@ -1,0 +1,13 @@
+.......                                                                  [100%]
+=============================== warnings summary ===============================
+../ci-venv/lib/python3.12/site-packages/starlette/testclient.py:53
+  <workspace>/pr10751/ci-venv/lib/python3.12/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+______________ coverage: platform darwin, python 3.12.13-final-0 _______________
+
+Coverage HTML written to dir <workspace>/pr10751/full-evidence/coverage-html
+Coverage JSON written to file <workspace>/pr10751/full-evidence/coverage.json
+7 passed, 1 warning in 6.36s

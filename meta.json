@@ -1,0 +1,103 @@
+{
+  "pr": "https://github.com/unslothai/unsloth/pull/10762",
+  "before_sha": "d0dbe9059efa443c6ad8bd1d51af7e2d9276a2bc",
+  "after_sha": "dbf0d7aacf8f733939f2969fe004742f53dfe890",
+  "model": "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL",
+  "model_revision": "739965d73654c0ead8020786aa998fc813070087",
+  "llama_server": "build 10840 commit 58670d128; AppleClang 21 arm64",
+  "context_length": 8192,
+  "parallel_slots": 1,
+  "scene": "native_tool_image_monitor",
+  "facts": {
+    "before": {
+      "plan": {
+        "pr": 10762,
+        "scene": "native_tool_image_monitor",
+        "what": "Actual Studio API monitor reply to a native Anthropic tool result carrying a screenshot",
+        "expect": "Before drops the image and cannot read the screenshot; after replies 742. Same image, request, cached Gemma vision weights and llama-server binary.",
+        "kwargs": {},
+        "needs_model": true,
+        "verified": null
+      },
+      "response": {
+        "id": "msg_d7ee0cc6cd844d3aa3f1f78d",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "NO_IMAGE"
+          }
+        ],
+        "model": "unsloth/gemma-4-E2B-it-GGUF",
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "usage": {
+          "input_tokens": 99,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 4
+        }
+      },
+      "page_errors": [],
+      "browser": "Chromium",
+      "viewport": {
+        "width": 1440,
+        "height": 1250
+      },
+      "browser_version": "151.0.7922.34",
+      "ui_body_text": "unsloth\nBETA\nNew chat\nModel hub\nProjects\nImages\nVideo\nTrain\nMore\nRecents\n\nNo chats yet\n\nU\nUnsloth\nUnsloth\nCommand Palette\n\nSearch for a command to run...\n\nAPI\n\nLive traffic through Unsloth's OpenAI-compatible server.\n\nPause\nUnload\nRefresh\nClear log\nAPI settings\nBASE URL\nhttp://127.0.0.1:18861/v1\nCopy\nSTATUS\nReady\nSLOTS\n0/1 busy\nLOADED MODEL\nunsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL \u00b7 8,192 ctx\nIN FLIGHT\n0\nREQUESTS\n1\nrecent window\nCOMPLETED\n1\nERRORS\n0\n0% of finished\nAVG LATENCY\n151 ms\nmax 151 ms\nTHROUGHPUT\n\u2013\n103 tokens \u00b7 generation only\nAll requests\n1 of 1\n/messages\n151 ms\nunsloth/gemma-4-E2B-it-GGUF\n03:50:38 AM\n\nNO_IMAGE\n\nCOMPLETED\napireq_f337a507d43840ffa73328a0ecb200cb\nPOST /v1/messages\n\nunsloth/gemma-4-E2B-it-GGUF\n\nSTARTED\n03:50:38 AM\nDURATION\n151 ms\nPROMPT TOKENS\n99\nCOMPLETION TOKENS\n4\nTOTAL TOKENS\n103\nCONTEXT\n8,192\nFIRST TOKEN\n\u2013\nGENERATING\n\u2013\nPROMPT SPEED\n\u2013\nGENERATION SPEED\n\u2013\nSTOP REASON\nend_turn\nCONTEXT USED\n1%\nPROMPT\nCopy\nuser: Read the three-digit number in the screenshot returned by inspect_capture. Reply only with the number. If no image is available, reply NO_IMAGE.\n\nassistant: [tool calls]\n\ntool: Screenshot follows. End of screenshot.\nREPLY\nCopy\nNO_IMAGE\nSettings applied on API load\n\nWhen a request names one of these models, Unsloth loads it with these settings, the same ones you saved in the model's settings page. Models without an entry load with app defaults. Edit an entry from that model's settings, or forget it here, which clears it from the picker too.\n\nNo saved model settings yet. Open a model's settings, turn on \"Remember for this model\", and it will be applied to API loads too."
+    },
+    "after": {
+      "plan": {
+        "pr": 10762,
+        "scene": "native_tool_image_monitor",
+        "what": "Actual Studio API monitor reply to a native Anthropic tool result carrying a screenshot",
+        "expect": "Before drops the image and cannot read the screenshot; after replies 742. Same image, request, cached Gemma vision weights and llama-server binary.",
+        "kwargs": {},
+        "needs_model": true,
+        "verified": null
+      },
+      "response": {
+        "id": "msg_07d5e27aade440b4bce9175a",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "742"
+          }
+        ],
+        "model": "unsloth/gemma-4-E2B-it-GGUF",
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "usage": {
+          "input_tokens": 231,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 4
+        }
+      },
+      "page_errors": [],
+      "browser": "Chromium",
+      "viewport": {
+        "width": 1440,
+        "height": 1250
+      },
+      "browser_version": "151.0.7922.34",
+      "ui_body_text": "unsloth\nBETA\nNew chat\nModel hub\nProjects\nImages\nVideo\nTrain\nMore\nRecents\n\nNo chats yet\n\nU\nUnsloth\nUnsloth\nCommand Palette\n\nSearch for a command to run...\n\nAPI\n\nLive traffic through Unsloth's OpenAI-compatible server.\n\nPause\nUnload\nRefresh\nClear log\nAPI settings\nBASE URL\nhttp://127.0.0.1:18862/v1\nCopy\nSTATUS\nReady\nSLOTS\n0/1 busy\nLOADED MODEL\nunsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL \u00b7 8,192 ctx\nIN FLIGHT\n0\nREQUESTS\n1\nrecent window\nCOMPLETED\n1\nERRORS\n0\n0% of finished\nAVG LATENCY\n70 ms\nmax 70 ms\nTHROUGHPUT\n\u2013\n235 tokens \u00b7 generation only\nAll requests\n1 of 1\n/messages\n70 ms\nunsloth/gemma-4-E2B-it-GGUF\n03:49:43 AM\n\n742\n\nCOMPLETED\napireq_0f0f501cc4cd4105860efe1a1dc1b56b\nPOST /v1/messages\n\nunsloth/gemma-4-E2B-it-GGUF\n\nSTARTED\n03:49:43 AM\nDURATION\n70 ms\nPROMPT TOKENS\n231\nCOMPLETION TOKENS\n4\nTOTAL TOKENS\n235\nCONTEXT\n8,192\nFIRST TOKEN\n\u2013\nGENERATING\n\u2013\nPROMPT SPEED\n\u2013\nGENERATION SPEED\n\u2013\nSTOP REASON\nend_turn\nCONTEXT USED\n3%\nPROMPT\nCopy\nuser: Read the three-digit number in the screenshot returned by inspect_capture. Reply only with the number. If no image is available, reply NO_IMAGE.\n\nassistant: [tool calls]\n\ntool: Screenshot follows.\n[image]\nEnd of screenshot.\nREPLY\nCopy\n742\nSettings applied on API load\n\nWhen a request names one of these models, Unsloth loads it with these settings, the same ones you saved in the model's settings page. Models without an entry load with app defaults. Edit an entry from that model's settings, or forget it here, which clears it from the picker too.\n\nNo saved model settings yet. Open a model's settings, turn on \"Remember for this model\", and it will be applied to API loads too."
+    }
+  },
+  "identical_images": false,
+  "tests": {
+    "passed": 1346,
+    "skipped": 6,
+    "skips": "5 redundant matrix cases; optional mlx_lm unavailable"
+  },
+  "limitations": [
+    "Local macOS evidence; no GitHub Actions run.",
+    "Direct source app launches, separately built frontends and separate homes/auth/HF/XDG caches; shared read-only Python dependency environment, cached model weights and pinned llama-server binary. Installer is outside this evidence.",
+    "Coverage claim concerns changed executable lines and branches originating on those lines, not all backend code.",
+    "Automated checks and browser driving do not satisfy independent human testing."
+  ]
+}
