@@ -1,0 +1,65 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 10758 auth and event-loop reproduction"
+
+on:
+  push:
+    branches:
+      - "repro/pr10748-20260910-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Auth repro (${{ matrix.os }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: studio/backend
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install fixed dependencies"
+        shell: bash
+        run: |
+          python -m pip install -r .github/scripts/pr10748-requirements.txt
+
+      - name: "Real download worker against synthetic gated Hub"
+        shell: bash
+        run: |
+          python .github/scripts/pr10748_probe.py
+
+      - name: "Authentication regression suite"
+        if: always()
+        shell: bash
+        run: |
+          python -m pytest studio/backend/tests/test_hub_download_ambient_token.py studio/backend/tests/test_hub_download_token_off_event_loop.py studio/backend/tests/test_scoped_download_job.py -q --tb=short --junitxml=pr10748-tests.xml
+
+      - name: Download lifecycle and service regressions
+        if: always()
+        shell: bash
+        run: |
+          python -m pytest studio/backend/hub/tests/test_model_services.py studio/backend/hub/tests/test_dataset_services.py studio/backend/hub/tests/test_download_lifecycle.py -q --tb=short --junitxml=pr10758-services.xml
+
+      - name: Save measured results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr10748-${{ matrix.os }}
+          path: |
+            pr10748-facts.json
+            pr10748-tests.xml
+            pr10758-services.xml
+          retention-days: 14
