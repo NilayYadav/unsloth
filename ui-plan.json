@@ -1,0 +1,11 @@
+{
+  "pr": 10753,
+  "before_sha": "d0dbe9059efa443c6ad8bd1d51af7e2d9276a2bc",
+  "after_sha": "1f9e49059f074982129064c3476c5687e1bc5e48",
+  "scene": "responses_history_monitor",
+  "expect": "With no loaded model on either side, a non-streaming Responses request with previous_response_id reaches inference and creates one failed monitor row before; after it returns unsupported_parameter HTTP 400 before inference and creates zero monitor rows. An otherwise identical request without previous_response_id creates a failed monitor control row on both sides.",
+  "viewport": [1440, 1000],
+  "model": null,
+  "limitations": ["This scene proves request rejection and monitor visibility, not successful model inference or model switching."],
+  "launch": "Separate source checkouts, npm ci + npm run build on each, identical backend dependency lock in separate venvs, separate Studio homes/cache/auth/ports. Launch production main.app and setup_frontend with uvicorn; no route or monitor mocks."
+}
