@@ -165,9 +165,13 @@ def spawn_worker(
             # No tuning module: that unsloth_zoo is also the one setting HF_XET_HIGH_PERFORMANCE=1 at import, and the inherited "1" would hand the worker a 64GB ceiling, since xet-core applies the preset AFTER reading the environment.
             for key in ("HF_XET_HIGH_PERFORMANCE", "HF_XET_HP"):
                 env[key] = "0"
-    # Fall back to the backend's own HF_TOKEN so private repos stay downloadable, but never for a repo an API caller named: that would lend them the owner's identity.
     if not hf_token and allow_ambient_token:
-        hf_token = os.environ.get("HF_TOKEN") or None
+        from huggingface_hub.utils import get_token_to_send
+        try:
+            hf_token = get_token_to_send(None)
+        except (OSError, UnicodeError):
+            logger.warning("Could not read the saved Hugging Face token; downloading anonymously")
+            hf_token = None
     env["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "0" if hf_token else "1"
     # hf_transfer's parallel Range chunks can leave sparse partials even in "http" mode, so disable it and keep the worker's writer sequential.
     env["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
@@ -1098,9 +1102,13 @@ def cancel_worker(
     proc = registry.get_process(key)
     # No worker process yet: arm a pending cancel so register_process kills it on arrival during the claim-to-register window.
     if proc is None:
-        if registry.mark_pending_cancel(key, generation):
+        if not registry.mark_pending_cancel(key, generation):
+            return registry.get_job(key).state
+        # Registration can race the first lookup while launch runs in a thread.
+        # If it already passed the pending-cancel check, stop that process below.
+        proc = registry.get_process(key)
+        if proc is None:
             return "cancelling"
-        return registry.get_job(key).state
     # Worker already exited; let its watcher classify the real return code.
     if proc.poll() is not None:
         get_metadata = getattr(registry, "get_job_metadata", None)
