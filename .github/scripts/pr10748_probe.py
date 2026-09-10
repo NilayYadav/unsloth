@@ -90,7 +90,7 @@ with tempfile.TemporaryDirectory(prefix='pr10748-') as temp:
             else:
                 os.environ.pop('HF_TOKEN', None)
             Path(os.environ['HF_TOKEN_PATH']).write_bytes(
-                b'\xff\xfe\xff' if name == 'corrupt_cached_public' else TOKENS[0].encode())
+                b'\x81' if name == 'corrupt_cached_public' else TOKENS[0].encode())
             requests_seen.clear()
             cache = home / name / 'hub'
             try:
