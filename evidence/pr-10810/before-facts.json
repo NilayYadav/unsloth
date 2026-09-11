@@ -1,0 +1,46 @@
+{
+  "provider_registered": true,
+  "code_pill_active": "true",
+  "code_pill_disabled": false,
+  "terminal_offered_to_model": true,
+  "edit_file_offered_to_model": true,
+  "provider_completions": 5,
+  "calls_emitted": [
+    "edit_file {\"path\": \"notes.txt\", \"edits\": [{\"old_string\": \"\", \"new_string\": \"version one\\n\"}]}",
+    "terminal {\"command\": \"cat notes.txt\"}",
+    "edit_file {\"path\": \"notes.txt\", \"edits\": [{\"old_string\": \"version one\", \"new_string\": \"version two\"}]}",
+    "terminal {\"command\": \"cat notes.txt\"}"
+  ],
+  "approvals_clicked": 2,
+  "tool_results_returned": 3,
+  "tool_results": [
+    {
+      "id": "call_pr10810_0",
+      "text": "Created notes.txt (2 lines)"
+    },
+    {
+      "id": "call_pr10810_1",
+      "text": "version one"
+    },
+    {
+      "id": "call_pr10810_2",
+      "text": "Edited notes.txt (1 replacement) @@ -1,2 +1,2 @@ -version one +version two"
+    }
+  ],
+  "read_before_edit_printed_version_one": true,
+  "rerun_after_edit_executed": false,
+  "rerun_after_edit_skipped_as_duplicate": false,
+  "rerun_after_edit_result_head": "",
+  "tool_cards_rendered": 4,
+  "tool_group_label": "4 tool calls",
+  "card_texts": {
+    "card_0": "Used tool: edit_file {\"edits\":[{\"new_string\":\"version one\\n\",\"old_string\":\"\"}],\"path\":\"notes.txt\"} Result: Created notes.txt (2 lines)",
+    "card_1": "Used tool: $ cat notes.txt command Copy Download bash cat notes.txt output Copy version one",
+    "card_2": "Used tool: edit_file {\"edits\":[{\"new_string\":\"version two\",\"old_string\":\"version one\"}],\"path\":\"notes.txt\"} Result: Edited notes.txt (1 replacement) @@ -1,2 +1,2 @@ -version one +version two",
+    "card_3": "Used tool: $ cat notes.txt command Copy Download bash cat notes.txt output Copy Unsloth did not run this call because an identical one had already completed."
+  },
+  "ui_answer_says_rerun_printed_version_two": false,
+  "ui_answer_says_rerun_not_run": true,
+  "label": "BEFORE",
+  "git_sha": "95892b697bfe2be6e38a61b4d666608a4a7ff02b"
+}
