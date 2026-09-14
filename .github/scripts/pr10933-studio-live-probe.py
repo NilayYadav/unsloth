@@ -156,7 +156,8 @@ async def effort_scene(base_url: str, init: str, artifact_dir: Path, facts: dict
         await page.wait_for_timeout(5_000)
         facts["effort_model_on_screen"] = EFFORT_MODEL.split("/")[-1] in (await page.locator("body").inner_text())
 
-        dropdown = page.locator("button.unsloth-thinking-pill").first
+        # Both controls share the unsloth-thinking-pill class; only data-pill-label tells them apart.
+        dropdown = page.locator('[data-pill-label="Thinking settings"]').first
         toggle = page.locator('[data-pill-label="Thinking"]').first
         if await dropdown.count():
             facts["think_control"] = "effort dropdown"
@@ -219,19 +220,15 @@ async def image_scene(base_url: str, init: str, artifact_dir: Path, facts: dict)
         await composer.wait_for(state="visible", timeout=90_000)
         await page.wait_for_timeout(5_000)
         facts["text_only_model_on_screen"] = TEXT_ONLY_MODEL.split("/")[-1] in (await page.locator("body").inner_text())
-        inputs = page.locator('input[type="file"]')
-        target = None
-        for index in range(await inputs.count()):
-            accept = (await inputs.nth(index).get_attribute("accept")) or ""
-            if "image" in accept:
-                target = inputs.nth(index)
-                break
-        if target is None:
-            facts["image_input_found"] = False
-            await page.screenshot(path=str(artifact_dir / "03_image_attach.png"))
-            return
+        # The single-chat composer builds its file input only when "Add photos & files" is picked from the + menu.
+        await page.locator('button[aria-label="Tools and attachments"]').first.click()
+        add_files = page.get_by_role("menuitem", name="Add photos & files")
+        await add_files.wait_for(state="visible", timeout=10_000)
+        async with page.expect_file_chooser(timeout=10_000) as chooser_info:
+            await add_files.click()
+        chooser = await chooser_info.value
         facts["image_input_found"] = True
-        await target.set_input_files(str(image_path))
+        await chooser.set_files(str(image_path))
         refusal = page.get_by_text(re.compile(r"cannot accept images")).first
         try:
             await refusal.wait_for(state="visible", timeout=8_000)
@@ -300,8 +297,13 @@ async def main() -> int:
                 "unsloth_chat_external_provider_keys": {provider_id: "stand-in-key"},
             })
 
-        await effort_scene(base_url, init_for(EFFORT_MODEL), artifact_dir, facts)
-        await image_scene(base_url, init_for(TEXT_ONLY_MODEL), artifact_dir, facts)
+        # A scene error is recorded as a fact and still ends at the named checks below.
+        for name, scene, model in (("effort", effort_scene, EFFORT_MODEL), ("image", image_scene, TEXT_ONLY_MODEL)):
+            try:
+                await scene(base_url, init_for(model), artifact_dir, facts)
+            except Exception as exc:  # noqa: BLE001
+                facts[f"{name}_scene_error"] = f"{type(exc).__name__}: {str(exc).splitlines()[0][:300]}"
+                log(f"WARN {name} scene error: {facts[name + '_scene_error']}")
     finally:
         try:
             os.killpg(proc.pid, signal.SIGTERM)
