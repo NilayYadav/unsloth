@@ -271,7 +271,17 @@ async def main() -> int:
         password = read_bootstrap_password(home, log_path)
         if not password:
             raise SystemExit("FAIL could not read the Studio bootstrap password")
-        auth = await login(base_url, "unsloth", password)
+        first = await login(base_url, "unsloth", password)
+        # Every authenticated route answers 403 "Password change required" until the bootstrap password is rotated.
+        async with httpx.AsyncClient(base_url=base_url, timeout=30) as client:
+            rotated = await client.post(
+                "/api/auth/change-password",
+                json={"current_password": password, "new_password": f"probe-{os.urandom(12).hex()}"},
+                headers={"Authorization": f"Bearer {first.access_token}"},
+            )
+            rotated.raise_for_status()
+            tokens = rotated.json()
+        auth = type("Auth", (), {"access_token": tokens["access_token"], "refresh_token": tokens.get("refresh_token", "")})()
         async with httpx.AsyncClient(base_url=base_url, headers={"Authorization": f"Bearer {auth.access_token}"}, timeout=30) as client:
             made = await client.post("/api/providers/", json={
                 "provider_type": "openrouter",
