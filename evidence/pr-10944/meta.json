@@ -1,0 +1,157 @@
+{
+  "pr": 10944,
+  "base": "03af220ac0023ab846727397b3a1de9efa0aec42",
+  "head": "fab6233c44da23f6785f5b96035fbf1ef0c46732",
+  "model": "unsloth/Qwen2-VL-2B-Instruct-bnb-4bit",
+  "gpu": "L4",
+  "sides": {
+    "before": {
+      "ref": "03af220ac0023ab846727397b3a1de9efa0aec42",
+      "checked_out": "03af220ac0023ab846727397b3a1de9efa0aec42",
+      "file_sha256": {
+        "studio/backend/core/inference/inference.py": "f64bec87e9ee17764a798d0138f3f2675b4c9dbc250ab6f7022b63e85ca9a5fd",
+        "studio/backend/core/inference/chat_template_helpers.py": "b63179aa2e6c132a92158674e30c0133a02e4feac3db288214e99f38404fc394"
+      },
+      "port": 9101,
+      "pid": 56,
+      "server_cwd": "/root/unsloth",
+      "facts": {
+        "model": "unsloth/Qwen2-VL-2B-Instruct-bnb-4bit",
+        "code_word": "PELICAN-42",
+        "image_word": "CAT",
+        "active_model": "unsloth/Qwen2-VL-2B-Instruct-bnb-4bit",
+        "is_vision": true,
+        "is_gguf": false,
+        "api_image_chat_recall": {
+          "route": "/v1/chat/completions",
+          "answer": "CAT",
+          "prompt_tokens": 307
+        },
+        "api_image_chat_reads_image": {
+          "route": "/v1/chat/completions",
+          "answer": "CAT",
+          "prompt_tokens": 303
+        },
+        "api_text_only_control_recall": {
+          "route": "/v1/chat/completions",
+          "answer": "PELICAN-42",
+          "prompt_tokens": 100
+        },
+        "api_image_chat_recall_has_code_word": false,
+        "api_text_only_control_recall_has_code_word": true,
+        "api_image_chat_reads_image_has_word": true,
+        "pick_model_note": "picker skipped: TimeoutError",
+        "ui_turn1_answer": "OK",
+        "ui_turn2_answer": "CAT",
+        "ui_turn2_request": {
+          "roles": [
+            "user",
+            "assistant",
+            "user"
+          ],
+          "image_parts_per_message": [
+            0,
+            0,
+            1
+          ],
+          "mentions_code_word": true
+        },
+        "ui_turn3_answer": "CAT",
+        "ui_turn3_request": {
+          "roles": [
+            "user",
+            "assistant",
+            "user",
+            "assistant",
+            "user"
+          ],
+          "image_parts_per_message": [
+            0,
+            0,
+            1,
+            0,
+            0
+          ],
+          "mentions_code_word": true
+        },
+        "ui_turn2_reads_image": true,
+        "ui_turn3_recalls_code_word": false
+      },
+      "exit_code_before_stop": null
+    },
+    "after": {
+      "ref": "fab6233c44da23f6785f5b96035fbf1ef0c46732",
+      "checked_out": "fab6233c44da23f6785f5b96035fbf1ef0c46732",
+      "file_sha256": {
+        "studio/backend/core/inference/inference.py": "04e6d091a43e91b95e4220e2ed56b462f8e7395d4f3d61515bcae6bfbdeb2297",
+        "studio/backend/core/inference/chat_template_helpers.py": "32f4cb97b9f6b9bb50719b73b015e9378fe25c735b5955161952063836b0fb71"
+      },
+      "port": 9102,
+      "pid": 573,
+      "server_cwd": "/root/unsloth",
+      "facts": {
+        "model": "unsloth/Qwen2-VL-2B-Instruct-bnb-4bit",
+        "code_word": "PELICAN-42",
+        "image_word": "CAT",
+        "active_model": "unsloth/Qwen2-VL-2B-Instruct-bnb-4bit",
+        "is_vision": true,
+        "is_gguf": false,
+        "api_image_chat_recall": {
+          "route": "/v1/chat/completions",
+          "answer": "PELICAN-42",
+          "prompt_tokens": 363
+        },
+        "api_image_chat_reads_image": {
+          "route": "/v1/chat/completions",
+          "answer": "CAT",
+          "prompt_tokens": 359
+        },
+        "api_text_only_control_recall": {
+          "route": "/v1/chat/completions",
+          "answer": "PELICAN-42",
+          "prompt_tokens": 100
+        },
+        "api_image_chat_recall_has_code_word": true,
+        "api_text_only_control_recall_has_code_word": true,
+        "api_image_chat_reads_image_has_word": true,
+        "pick_model_note": "picker skipped: TimeoutError",
+        "ui_turn1_answer": "OK",
+        "ui_turn2_answer": "CAT",
+        "ui_turn2_request": {
+          "roles": [
+            "user",
+            "assistant",
+            "user"
+          ],
+          "image_parts_per_message": [
+            0,
+            0,
+            1
+          ],
+          "mentions_code_word": true
+        },
+        "ui_turn3_answer": "PELICAN-42",
+        "ui_turn3_request": {
+          "roles": [
+            "user",
+            "assistant",
+            "user",
+            "assistant",
+            "user"
+          ],
+          "image_parts_per_message": [
+            0,
+            0,
+            1,
+            0,
+            0
+          ],
+          "mentions_code_word": true
+        },
+        "ui_turn2_reads_image": true,
+        "ui_turn3_recalls_code_word": true
+      },
+      "exit_code_before_stop": null
+    }
+  }
+}
