@@ -51,8 +51,21 @@ class StandIn(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        # An empty live catalog keeps both sides on the bundled snapshot, so the pair is deterministic.
-        self._json({"data": []})
+        # OpenRouter's /models shape for the two routes the probe drives. Upstream main never asks for it; the PR reads
+        # the effort ladder, mandatory flag and input modalities from here.
+        self._json({"data": [
+            {
+                "id": EFFORT_MODEL,
+                "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]},
+                "reasoning": {"supported_efforts": ["none", "high", "xhigh"], "mandatory": False, "default_effort": "high"},
+                "top_provider": {"max_completion_tokens": 65536},
+            },
+            {
+                "id": TEXT_ONLY_MODEL,
+                "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]},
+                "reasoning": {"mandatory": True},
+            },
+        ]})
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length") or 0)
@@ -291,10 +304,21 @@ async def main() -> int:
             made.raise_for_status()
             provider_id = made.json()["id"]
 
+        # The stand-in is not OpenRouter's own endpoint, so Studio will not fetch a live catalog for it. Seed the
+        # browser's cached copy of OpenRouter's catalog instead, stamped fresh; upstream main never reads this key.
+        live_catalog = {"openrouter": {"fetchedAt": int(time.time() * 1000), "models": {
+            EFFORT_MODEL: {"reasoning": True, "efforts": ["none", "high", "xhigh"], "mandatory": False,
+                           "defaultEffort": "high", "inputModalities": ["text"], "maxOutputTokens": 65536},
+            TEXT_ONLY_MODEL: {"reasoning": True, "efforts": [], "mandatory": True,
+                              "defaultEffort": None, "inputModalities": ["text"], "maxOutputTokens": None},
+        }}}
+        facts["live_catalog_seeded"] = True
+
         def init_for(model: str) -> str:
             return seed_init_script(auth, [], extra_local_storage={
                 "unsloth_chat_last_external_checkpoint": f"external::{provider_id}::{model}",
                 "unsloth_chat_external_provider_keys": {provider_id: "stand-in-key"},
+                "unsloth_chat_provider_model_catalog": live_catalog,
             })
 
         # A scene error is recorded as a fact and still ends at the named checks below.
