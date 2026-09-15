@@ -228,6 +228,7 @@ export const zhCN = {
       connections: "连接",
       apiKeys: "API",
       remoteLan: "远程与局域网",
+      cluster: "集群",
       about: "关于",
       voice: "语音",
       data: "数据",
@@ -1595,6 +1596,11 @@ export const zhCN = {
       title: "远程与局域网",
       description:
         "通过局域网或临时公开 URL，从其他设备访问此 Unsloth。",
+    },
+    cluster: {
+      title: "GPU 集群",
+      description:
+        "汇集同一网络中其他电脑的 GPU，运行单台电脑无法容纳的大模型。",
     },
     apiKeys: {
       title: "API",

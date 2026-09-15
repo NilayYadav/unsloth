@@ -230,6 +230,7 @@ export const ko = {
       connections: "연결",
       apiKeys: "API",
       remoteLan: "원격 및 LAN",
+      cluster: "클러스터",
       about: "정보",
       data: "데이터",
       agents: "에이전트",
@@ -1632,6 +1633,11 @@ export const ko = {
       title: "원격 및 LAN",
       description:
         "로컬 네트워크나 임시 공개 URL을 통해 다른 기기에서 이 Unsloth에 접속합니다.",
+    },
+    cluster: {
+      title: "GPU 클러스터",
+      description:
+        "같은 네트워크에 있는 다른 컴퓨터의 GPU를 모아 컴퓨터 한 대로는 너무 큰 모델을 실행합니다.",
     },
     apiKeys: {
       title: "API",

@@ -30,6 +30,7 @@ import {
   Message01Icon,
   PaintBrush02Icon,
   Search01Icon,
+  ServerStack01Icon,
   Settings02Icon,
   UserIcon,
 } from "@hugeicons/core-free-icons";
@@ -85,6 +86,8 @@ const TAB_LOADERS = {
     import("./tabs/api-keys-tab").then((m) => ({ default: m.ApiKeysTab })),
   "remote-lan": () =>
     import("./tabs/remote-lan-tab").then((m) => ({ default: m.RemoteLanTab })),
+  cluster: () =>
+    import("./tabs/cluster-tab").then((m) => ({ default: m.ClusterTab })),
   agents: () =>
     import("./tabs/agents-tab").then((m) => ({ default: m.AgentsTab })),
   debugging: () =>
@@ -206,6 +209,11 @@ const TABS: TabDef[] = [
     id: "remote-lan",
     labelKey: "settings.tabs.remoteLan",
     icon: HomeWifiIcon,
+  },
+  {
+    id: "cluster",
+    labelKey: "settings.tabs.cluster",
+    icon: ServerStack01Icon,
   },
   {
     id: "connections",
@@ -399,6 +407,7 @@ export function SettingsDialog() {
     data: null,
     "api-keys": null,
     "remote-lan": null,
+    cluster: null,
     agents: null,
     debugging: null,
     about: null,

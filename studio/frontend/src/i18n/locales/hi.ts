@@ -233,6 +233,7 @@ export const hi = {
       connections: "कनेक्शन",
       apiKeys: "API",
       remoteLan: "रिमोट और LAN",
+      cluster: "क्लस्टर",
       about: "परिचय",
       data: "डेटा",
       agents: "एजेंट",
@@ -1641,6 +1642,11 @@ export const hi = {
       title: "रिमोट और LAN",
       description:
         "इस Unsloth तक अपने दूसरे डिवाइस से पहुँचें, अपने लोकल नेटवर्क या एक अस्थायी सार्वजनिक URL से।",
+    },
+    cluster: {
+      title: "GPU क्लस्टर",
+      description:
+        "एक ही नेटवर्क पर अपने दूसरे कंप्यूटरों के GPU जोड़कर ऐसे मॉडल चलाएँ जो एक कंप्यूटर के लिए बहुत बड़े हैं।",
     },
     apiKeys: {
       title: "API",

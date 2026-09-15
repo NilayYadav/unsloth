@@ -3834,7 +3834,7 @@ else
 
         if [ "$BUILD_OK" = true ]; then
             # Set Release explicitly (llama.cpp only defaults to it on non-MSVC/Xcode).
-            CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON -DGGML_NATIVE=ON"
+            CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON -DGGML_NATIVE=ON -DGGML_RPC=ON"
             _TRY_METAL_CPU_FALLBACK=false
             _HOST_SYSTEM="$(uname -s 2>/dev/null || true)"
             _HOST_MACHINE="$(uname -m 2>/dev/null || true)"
@@ -4150,6 +4150,8 @@ else
             # Best-effort: the DiffusionGemma visual server (an example target, present
             # on llama.cpp PR #24423). No-op when the diffusion example is not configured.
             run_quiet_no_exit "build diffusion visual server" cmake --build "$_BUILD_TMP/build" --config Release --target llama-diffusion-gemma-visual-server -j"$NCPU" || true
+            # Best-effort: GPU sharing for distributed inference (Settings > Cluster).
+            run_quiet_no_exit "build ggml-rpc-server" cmake --build "$_BUILD_TMP/build" --config Release --target ggml-rpc-server -j"$NCPU" || true
         fi
 
         # Opt-in post-build GPU smoke test (#5854 gap 2). Default off (Blackwell

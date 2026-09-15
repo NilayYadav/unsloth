@@ -232,6 +232,7 @@ export const ja = {
       connections: "接続",
       apiKeys: "API",
       remoteLan: "リモートとLAN",
+      cluster: "クラスター",
       about: "情報",
       voice: "音声",
       data: "データ",
@@ -1613,6 +1614,11 @@ export const ja = {
       title: "リモートとLAN",
       description:
         "ローカルネットワークまたは一時的な公開URLを介して、他のデバイスからこのUnslothにアクセスできます。",
+    },
+    cluster: {
+      title: "GPUクラスター",
+      description:
+        "同じネットワーク上の他のコンピューターのGPUをまとめて、1台に収まらない大きなモデルを実行します。",
     },
     apiKeys: {
       title: "API",

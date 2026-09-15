@@ -1655,6 +1655,12 @@ def studio_default(
         "explicitly configured HTTP(S)_PROXY, so the proxy can apply hostname policy and "
         "TLS interception. Direct fetches stay pinned to the validated IP.",
     ),
+    share_gpu: bool = typer.Option(
+        False,
+        "--share-gpu",
+        help = "Share this computer's GPUs with other Unsloth Studio installs on your network "
+        "for distributed inference, and print the pairing code to enter on them.",
+    ),
     password: str = typer.Option(
         "",
         "--password",
@@ -1780,6 +1786,8 @@ def studio_default(
         os.environ["UNSLOTH_STUDIO_DISABLE_DNS_PINNING"] = "1"
     else:
         os.environ.setdefault("UNSLOTH_STUDIO_DISABLE_DNS_PINNING", "0")
+    if share_gpu:
+        os.environ["UNSLOTH_CLUSTER_SHARE"] = "1"
 
     # Resolve the child launcher BEFORE the gate: a headless gate strips the seeded password, so aborting afterwards leaves no way to log in.
     studio_venv_dir = STUDIO_HOME / "unsloth_studio"

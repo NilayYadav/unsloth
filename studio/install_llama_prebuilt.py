@@ -4300,9 +4300,10 @@ def runtime_patterns_for_install_kind(
     # repackage the SO/DLL set (e.g. ggml-org/llama.cpp#23462 split the
     # per-binary entry code into paired ``lib<binary>-impl.so`` shared
     # libraries between b9279 and b9283) without us re-enumerating
-    # every new file. Unsloth invokes llama-server, llama-quantize, and the
+    # every new file. Unsloth invokes llama-server, llama-quantize, the
     # DiffusionGemma visual-server (when the bundle ships it, for native
-    # DiffusionGemma serving); other CLIs upstream ships (llama-cli,
+    # DiffusionGemma serving) and ggml-rpc-server (GPU sharing for distributed
+    # inference); other CLIs upstream ships (llama-cli,
     # llama-bench, ...) are skipped.
     if install_kind in {
         "linux-cpu",
@@ -4312,12 +4313,19 @@ def runtime_patterns_for_install_kind(
         "linux-arm64",
         "linux-vulkan",
     }:
-        return ["llama-server", "llama-quantize", "llama-diffusion-gemma-visual-server", "lib*.so*"]
+        return [
+            "llama-server",
+            "llama-quantize",
+            "llama-diffusion-gemma-visual-server",
+            "ggml-rpc-server",
+            "lib*.so*",
+        ]
     if install_kind in {"macos-arm64", "macos-x64"}:
         return [
             "llama-server",
             "llama-quantize",
             "llama-diffusion-gemma-visual-server",
+            "ggml-rpc-server",
             "lib*.dylib",
         ]
     if install_kind in {
@@ -4332,6 +4340,7 @@ def runtime_patterns_for_install_kind(
             "llama-server.exe",
             "llama-quantize.exe",
             "llama-diffusion-gemma-visual-server.exe",
+            "ggml-rpc-server.exe",
             "*.dll",
         ]
     raise PrebuiltFallback(f"unsupported install kind for runtime overlay: {install_kind}")
@@ -5069,6 +5078,9 @@ def install_from_archives(
         raise PrebuiltFallback("unix executables were not installed correctly into build/bin")
     os.chmod(source_server, 0o755)
     os.chmod(source_quantize, 0o755)
+    rpc_server = build_bin / "ggml-rpc-server"
+    if rpc_server.is_file():
+        os.chmod(rpc_server, 0o755)
 
     root_server = install_dir / "llama-server"
     root_quantize = install_dir / "llama-quantize"

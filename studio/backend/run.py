@@ -1439,6 +1439,14 @@ def _graceful_shutdown(server = None):
     except Exception as e:
         logger.warning("Error stopping the LAN listener: %s", e)
 
+    try:
+        from core.cluster.head import release_cluster_attachment
+        from core.cluster.worker import shutdown_sharing
+        release_cluster_attachment()
+        shutdown_sharing()
+    except Exception as e:
+        logger.warning("Error stopping GPU sharing: %s", e)
+
     if server is not None:
         server.should_exit = True
 
@@ -2891,6 +2899,12 @@ def run_server(
     atexit.register(close_lan_listener_lifecycle)
     if maybe_auto_start_lan_access(app):
         logger.info("LAN access auto-started")
+
+    from core.cluster.worker import maybe_auto_start_sharing, shutdown_sharing
+
+    atexit.register(shutdown_sharing)
+    if maybe_auto_start_sharing():
+        logger.info("GPU sharing auto-start scheduled")
 
     if not silent:
         _emit_startup_output(

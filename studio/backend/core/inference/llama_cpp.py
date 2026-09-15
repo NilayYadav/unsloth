@@ -8324,6 +8324,7 @@ class LlamaCppBackend:
                 "ctx_checkpoints_flag": None,
                 "supports_no_cache_prompt": False,
                 "supports_metrics": False,
+                "supports_rpc": False,
                 "supports_slot_save": False,
                 "supports_no_mmproj_offload": False,
                 "supports_load_mode": False,
@@ -8371,6 +8372,7 @@ class LlamaCppBackend:
         ctx_checkpoints_flag = None
         supports_no_cache_prompt = False
         supports_metrics = False
+        supports_rpc = False
         supports_slot_save = False
         supports_no_mmproj_offload = False
         supports_load_mode = False
@@ -8596,6 +8598,7 @@ class LlamaCppBackend:
             supports_ctx_checkpoints = ctx_checkpoints_flag is not None
             supports_no_cache_prompt = _is_real("--no-cache-prompt")
             supports_metrics = _is_real("--metrics")
+            supports_rpc = _is_real("--rpc")
             supports_slot_save = _is_real("--slot-save-path")
             supports_no_mmproj_offload = _is_real("--no-mmproj-offload")
             # --load-mode supersedes --mlock / --no-mmap, which are deprecated.
@@ -8688,6 +8691,7 @@ class LlamaCppBackend:
             "ctx_checkpoints_flag": ctx_checkpoints_flag,
             "supports_no_cache_prompt": supports_no_cache_prompt,
             "supports_metrics": supports_metrics,
+            "supports_rpc": supports_rpc,
             "supports_slot_save": supports_slot_save,
             "supports_no_mmproj_offload": supports_no_mmproj_offload,
             "supports_load_mode": supports_load_mode,
@@ -24172,6 +24176,19 @@ class LlamaCppBackend:
                     tp_tensor_split = None
                     effective_ctx = requested_ctx  # fall back to original
 
+                _cluster_attachment = self._plan_cluster_for_load(
+                    use_fit = use_fit,
+                    rpc_supported = lambda: bool(_launch_caps(binary).get("supports_rpc")),
+                    gpu_memory_mode = gpu_memory_mode,
+                    tensor_parallel = tensor_parallel,
+                    extra_args = extra_args,
+                    model_size = model_size,
+                    effective_ctx = effective_ctx,
+                    cache_type_kv = cache_type_kv,
+                    n_parallel = n_parallel,
+                    local_gpus = _detected_gpus,
+                )
+
                 # A hand-set context unified memory cannot hold. Raised here so the handler
                 # above cannot turn it back into the launch it refuses, and ahead of the
                 # Vulkan and APU checks, which describe hardware this branch has ruled out.
@@ -24564,6 +24581,10 @@ class LlamaCppBackend:
                         # Single effective GPU: the split is never emitted, so
                         # don't report it as active via /status and /load.
                         self._tensor_split = None
+                elif use_fit and _cluster_attachment is not None:
+                    # the fitter fills back to front and llama.cpp puts RPC devices at the
+                    # front, so the local GPU fills first and the cluster only takes the rest
+                    cmd.extend(["--rpc", ",".join(_cluster_attachment.endpoints), "--fit", "on"])
                 elif use_fit:
                     # Unsloth could not prove a fit, so llama.cpp's fitter takes the
                     # placement. Its dense path fills "back to front with dense
@@ -26677,6 +26698,15 @@ class LlamaCppBackend:
                         # offload spends a second full model load on a theory unrelated
                         # to the failure. The caller latches both, so both skip alike.
                         _startup_output = "\n".join(self._stdout_lines[-50:])
+                        if _cluster_attachment is not None and _startup_crashed:
+                            from core.cluster.head import cluster_failure_message, get_cluster_head
+
+                            _cluster_message = cluster_failure_message(
+                                "\n".join(self._stdout_lines), _cluster_attachment
+                            )
+                            if _cluster_message:
+                                get_cluster_head().note_failure(_cluster_attachment, _cluster_message)
+                                raise RuntimeError(_cluster_message)
                         _tensor_capability_crash = self._is_tensor_split_assert(
                             _startup_output
                         ) or self._is_tensor_quant_kv_unsupported(_startup_output)
@@ -29175,6 +29205,12 @@ class LlamaCppBackend:
             _was_resident = self._process is not None
             self._kill_process()
             self._cleanup_cpu_fallback_runtime()
+            try:
+                from core.cluster.head import release_cluster_attachment
+
+                release_cluster_attachment()
+            except Exception:
+                logger.debug("cluster release on unload failed", exc_info = True)
             # The one unload line: routes/inference.py logged a second, differently named.
             if _was_resident:
                 logger.info(f"Unloaded GGUF model: {self._model_identifier}")
@@ -30495,6 +30531,52 @@ class LlamaCppBackend:
             layout = None
         self._spill_layout_cache = (key, layout)
         return layout
+
+    def _plan_cluster_for_load(
+        self,
+        *,
+        use_fit: bool,
+        rpc_supported: Callable[[], bool],
+        gpu_memory_mode: Optional[str],
+        tensor_parallel: bool,
+        extra_args: Optional[Iterable[str]],
+        model_size: Optional[int],
+        effective_ctx: int,
+        cache_type_kv: Optional[str],
+        n_parallel: int,
+        local_gpus: "list[tuple[int, int]]",
+    ):
+        # Only when Unsloth could not place the model on this computer: a load that
+        # fits locally never pays a network hop per token.
+        if not use_fit or not model_size or not local_gpus:
+            return None
+        if gpu_memory_mode == "manual" or tensor_parallel:
+            return None
+        if (_extra_args_device(extra_args, {"--rpc"}) or "").strip() or str(
+            os.environ.get("LLAMA_ARG_RPC", "")
+        ).strip():
+            return None
+        try:
+            from core.cluster.head import get_cluster_head
+            from core.cluster.planner import deficit_mib
+
+            head = get_cluster_head()
+            if not head.has_enabled_nodes() or not rpc_supported():
+                return None
+            planning_ctx = effective_ctx if effective_ctx > 0 else min(self._context_length or 8192, 8192)
+            kv_bytes = self._estimate_kv_cache_bytes(planning_ctx, cache_type_kv, n_parallel = n_parallel)
+            shortfall = deficit_mib(int(model_size) + int(kv_bytes or 0), [free for _idx, free in local_gpus])
+            if shortfall <= 0:
+                return None
+
+            def alive() -> bool:
+                proc = self._process
+                return proc is not None and getattr(proc, "poll", lambda: 0)() is None
+
+            return head.plan_for_load(shortfall, alive)
+        except Exception as exc:
+            logger.warning("Cluster planning skipped: %s", exc)
+            return None
 
     @staticmethod
     def _fit_off_retry_eligible(cmd: "list[str]", use_fit: bool) -> bool:

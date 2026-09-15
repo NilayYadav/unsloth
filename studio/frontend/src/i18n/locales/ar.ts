@@ -230,6 +230,7 @@ export const ar = {
       connections: "الاتصالات",
       apiKeys: "API",
       remoteLan: "الوصول عن بُعد والشبكة المحلية",
+      cluster: "العنقود",
       about: "حول",
       data: "البيانات",
       agents: "الوكلاء",
@@ -1635,6 +1636,11 @@ export const ar = {
       title: "الوصول عن بُعد والشبكة المحلية",
       description:
         "الوصول إلى Unsloth من أجهزتك الأخرى عبر شبكتك المحلية أو عنوان URL عام مؤقت.",
+    },
+    cluster: {
+      title: "عنقود GPU",
+      description:
+        "شغّل نماذج أكبر من أن يستوعبها جهاز واحد عبر تجميع وحدات GPU من أجهزتك الأخرى على الشبكة نفسها.",
     },
     apiKeys: {
       title: "API",

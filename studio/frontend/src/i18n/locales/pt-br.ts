@@ -232,6 +232,7 @@ export const ptBR = {
       connections: "Conexões",
       apiKeys: "API",
       remoteLan: "Remoto e LAN",
+      cluster: "Cluster",
       about: "Sobre",
       voice: "Voz",
       data: "Dados",
@@ -1653,6 +1654,11 @@ export const ptBR = {
       title: "Remoto e LAN",
       description:
         "Acesse este Unsloth dos seus outros dispositivos, pela rede local ou por uma URL pública temporária.",
+    },
+    cluster: {
+      title: "Cluster de GPU",
+      description:
+        "Execute modelos grandes demais para um só computador reunindo as GPUs dos seus outros computadores na mesma rede.",
     },
     apiKeys: {
       title: "API",

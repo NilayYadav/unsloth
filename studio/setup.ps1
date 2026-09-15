@@ -7141,6 +7141,7 @@ if ($LocalLlamaCppLinked) {
         $CmakeArgs += '-DLLAMA_BUILD_TESTS=OFF'
         $CmakeArgs += '-DLLAMA_BUILD_EXAMPLES=OFF'
         $CmakeArgs += '-DLLAMA_BUILD_SERVER=ON'
+        $CmakeArgs += '-DGGML_RPC=ON'
         $CmakeArgs += '-DGGML_NATIVE=ON'
         # HTTPS support via OpenSSL
         if ($OpenSslAvailable -and $OpenSslRoot) {
@@ -7246,6 +7247,8 @@ if ($LocalLlamaCppLinked) {
     # Example target from llama.cpp PR #24423.
     if ($BuildOk) {
         $null = cmake --build $BuildDir --config Release --target llama-diffusion-gemma-visual-server -j $NumCpu 2>&1 | Out-String
+        # Best-effort: GPU sharing for distributed inference (Settings > Cluster).
+        $null = cmake --build $BuildDir --config Release --target ggml-rpc-server -j $NumCpu 2>&1 | Out-String
     }
 
     # Swap temp build dir into final location (only if we built in a temp dir)

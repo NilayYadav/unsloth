@@ -234,6 +234,7 @@ export const de = {
       connections: "Verbindungen",
       apiKeys: "API",
       remoteLan: "Remote & LAN",
+      cluster: "Cluster",
       about: "Info",
       data: "Daten",
       agents: "Agenten",
@@ -1680,6 +1681,11 @@ export const de = {
       title: "Remote & LAN",
       description:
         "Erreiche dieses Unsloth von deinen anderen Geräten über dein lokales Netzwerk oder eine temporäre öffentliche URL.",
+    },
+    cluster: {
+      title: "GPU-Cluster",
+      description:
+        "Führe Modelle aus, die für einen Computer zu groß sind, indem du die GPUs deiner anderen Computer im selben Netzwerk bündelst.",
     },
     apiKeys: {
       title: "API",

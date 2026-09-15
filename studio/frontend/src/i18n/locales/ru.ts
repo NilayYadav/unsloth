@@ -232,6 +232,7 @@ export const ru = {
       connections: "Подключения",
       apiKeys: "API",
       remoteLan: "Удалённый доступ и LAN",
+      cluster: "Кластер",
       about: "О программе",
       data: "Данные",
       agents: "Агенты",
@@ -1651,6 +1652,11 @@ export const ru = {
       title: "Удалённый доступ и LAN",
       description:
         "Откройте этот Unsloth с других устройств: через локальную сеть или временный публичный URL.",
+    },
+    cluster: {
+      title: "GPU-кластер",
+      description:
+        "Запускайте модели, которые слишком велики для одного компьютера, объединяя GPU других ваших компьютеров в той же сети.",
     },
     apiKeys: {
       title: "API",

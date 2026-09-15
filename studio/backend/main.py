@@ -337,6 +337,7 @@ from hub.utils.download_registry import (
     terminate_active_downloads as terminate_hub_downloads,
 )
 from routes.settings import router as settings_router
+from routes.cluster import router as cluster_router
 from routes.prompts import router as prompts_router
 from routes.profile_stats import router as profile_stats_router
 from auth import policy as auth_policy, storage
@@ -1188,6 +1189,7 @@ _BODY_PROTECTED_PREFIXES = (
     "/api/hub",
     "/api/chat",
     "/api/settings",
+    "/api/cluster",
     "/api/train",
     "/api/export",
     "/mcp",
@@ -1531,6 +1533,7 @@ app.include_router(providers_router, prefix = "/api/providers", tags = ["provide
 app.include_router(openai_codex_auth_router, prefix = "/api/providers", tags = ["providers"])
 
 app.include_router(settings_router, prefix = "/api/settings", tags = ["settings"])
+app.include_router(cluster_router, prefix = "/api/cluster", tags = ["cluster"])
 app.include_router(mcp_servers_router, prefix = "/api/mcp/servers", tags = ["mcp"])
 app.include_router(skills_router, prefix = "/api/skills", tags = ["skills"])
 app.include_router(prompts_router, prefix = "/api/prompts", tags = ["prompts"])
