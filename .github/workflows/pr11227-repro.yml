@@ -32,8 +32,12 @@ jobs:
           sys.path.insert(0, ".")
           from hub.utils.snapshot_filters import snapshot_download_size
 
-          REPOS = ["openai/gpt-oss-20b", "meta-llama/Llama-3.2-1B-Instruct", "openai/whisper-small"]
-          LIMIT_GB = {"openai/gpt-oss-20b": 20.0}
+          REPOS = ["openai/gpt-oss-20b", "meta-llama/Llama-3.2-1B-Instruct",
+                   "openai/whisper-small", "bigscience/bloom"]
+          # bloom shards its root safetensors with an underscore and ships the same
+          # 72 shards again as .bin, so it only drops below 400 GB once the trigger
+          # accepts that separator.
+          LIMIT_GB = {"openai/gpt-oss-20b": 20.0, "bigscience/bloom": 400.0}
           out = {}
           failed = []
           for repo in REPOS:
