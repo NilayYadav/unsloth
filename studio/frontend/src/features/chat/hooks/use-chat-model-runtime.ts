@@ -10,6 +10,10 @@ import {
 } from "../lib/server-tuning-fields";
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "@/lib/toast";
+import {
+  isBackendDownForDesktopUpdate,
+  isSilencedDesktopUpdateFailure,
+} from "@/lib/desktop-update-activity";
 import { subscribeModelLifecycle } from "@/lib/model-lifecycle-events";
 import {
   type TransferSample,
@@ -475,6 +479,9 @@ async function syncInferenceStatusToStore(options?: {
   externalChatSlotLoad?: boolean;
 }): Promise<void> {
   const signal = options?.signal;
+  // Latched here, not read in the catch: Skip & Restart can clear the flag while this read is
+  // still working through its retry ladder, and the rejection it leaves is still the update's.
+  const downWhenIssued = isBackendDownForDesktopUpdate();
   const includeLoras = options?.includeLoras ?? true;
   const generation = ++syncGeneration;
   const loraGeneration = includeLoras ? ++loraSyncGeneration : null;
@@ -619,6 +626,8 @@ async function syncInferenceStatusToStore(options?: {
     // A superseded refresh reports nothing, or a stale failure would raise a toast about a read
     // whose answer would have been discarded. The LoRA inventory settles from its own request.
     if (signal?.aborted || superseded()) return;
+    // The desktop update stopped the backend itself, and the update screen already says so.
+    if (isSilencedDesktopUpdateFailure(error, downWhenIssued)) return;
     const message =
       error instanceof Error ? error.message : "Failed to load models";
     setModelsError(message);
