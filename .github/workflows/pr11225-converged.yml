@@ -61,5 +61,6 @@ jobs:
       - name: "Tunnel unit tests at HEAD"
         shell: bash
         run: |
+          python3 -m pip install --quiet pytest
           cd studio/backend && python3 -m pytest tests/test_cloudflare_tunnel.py tests/test_secure_tunnel_gate.py tests/test_remote_access_settings.py -q
 
