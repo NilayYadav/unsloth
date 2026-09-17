@@ -1,0 +1,55 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 11225 retry A/B + startup stall"
+
+on:
+  push:
+    branches:
+      - "mimir-pr11225-repro-fixed-20260917213006"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Fetch the A/B base and the PR as first submitted"
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin 062e643086311fc6c276de2a93afcd3e85259796
+          git fetch --no-tags --depth=1 origin 3970c93c3c190635d6e51408968c7972ece0f9cd
+          git worktree add --detach /tmp/pr11225_base 062e643086311fc6c276de2a93afcd3e85259796
+          git worktree add --detach /tmp/pr11225_v1 3970c93c3c190635d6e51408968c7972ece0f9cd
+
+      - name: "Repro BEFORE: one cloudflared run, hard error"
+        shell: bash
+        run: |
+          python3 .github/repro/pr11225_probe.py /tmp/pr11225_base before
+
+      - name: "Repro AFTER the fix: retries and comes online"
+        shell: bash
+        run: |
+          python3 .github/repro/pr11225_probe.py . after
+
+      - name: "Startup stall on a network that swallows the request"
+        shell: bash
+        run: |
+          echo '--- before the PR (062e6430)'
+          python3 .github/repro/pr11225_stall.py /tmp/pr11225_base
+          echo '--- PR as first submitted (3970c93c)'
+          python3 .github/repro/pr11225_stall.py /tmp/pr11225_v1
+          echo '--- PR with the fix (HEAD)'
+          python3 .github/repro/pr11225_stall.py .
+
