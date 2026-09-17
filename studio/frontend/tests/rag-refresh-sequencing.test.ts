@@ -835,3 +835,5 @@ test("the work timer is armed for the earliest sender deadline", () => {
   senders.delete("tab-a");
   assert.equal(armFor(), 31_000 + TTL);
 });
+
+// Baseline CI touch: no behaviour change.
