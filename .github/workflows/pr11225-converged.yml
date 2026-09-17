@@ -62,5 +62,7 @@ jobs:
         shell: bash
         run: |
           python3 -m pip install --quiet pytest
-          cd studio/backend && python3 -m pytest tests/test_cloudflare_tunnel.py tests/test_secure_tunnel_gate.py tests/test_remote_access_settings.py -q
+          # Only the tunnel suite: it is stdlib-only by design, so it runs on a bare runner. The
+          # sibling suites need structlog/fastapi and run in the upstream studio job instead.
+          cd studio/backend && python3 -m pytest tests/test_cloudflare_tunnel.py -q
 
