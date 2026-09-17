@@ -1,0 +1,40 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 11225 cloudflared no-URL retry A/B"
+
+on:
+  push:
+    branches:
+      - "mimir-pr11225-repro-20260917211118"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Probe BEFORE (PR parent 062e643086, no retry)"
+        shell: bash
+        run: |
+          # shallow checkout has only the head commit; fetch the PR parent for the A/B base
+          git fetch --no-tags --depth=1 origin 062e643086311fc6c276de2a93afcd3e85259796
+          git worktree add --detach /tmp/pr11225_base 062e643086311fc6c276de2a93afcd3e85259796
+          python3 .github/repro/pr11225_probe.py /tmp/pr11225_base before
+
+      - name: "Probe AFTER (PR head, retries)"
+        shell: bash
+        run: |
+          python3 .github/repro/pr11225_probe.py . after
+
