@@ -61,10 +61,9 @@ jobs:
       - name: "Tunnel unit tests at HEAD"
         shell: bash
         run: |
-          python3 -m pip install --quiet pytest
-          # The tunnel suite's lifecycle tests, which is what this PR touches. The rest of the file
-          # (cloudflared download) needs huggingface_hub and the sibling suites need structlog and
-          # fastapi, so the full set runs in the upstream studio job rather than on a bare runner.
-          cd studio/backend && python3 -m pytest tests/test_cloudflare_tunnel.py -q \
-            -k "start_studio_tunnel or retry_wait or stop_studio_tunnel"
+          # huggingface_hub because an autouse session fixture in studio/backend/tests/conftest.py
+          # imports it unguarded, so without it every test in the file errors at setup.
+          python3 -m pip install --quiet pytest huggingface_hub
+          # The sibling suites additionally need structlog/fastapi; they run in the upstream studio job.
+          cd studio/backend && python3 -m pytest tests/test_cloudflare_tunnel.py -q
 
