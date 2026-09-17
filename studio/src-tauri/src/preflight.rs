@@ -1320,4 +1320,52 @@ exit 1
             } if reason == "cap_false"
         ));
     }
+
+    /// PR #11226 reproduction. An install, update or repair holds the managed
+    /// runtime gate, so the preflight probe cannot spawn the CLI. That is a busy
+    /// environment, not a broken install: reporting it as broken makes the app
+    /// start a repair that the same gate then refuses.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_held_runtime_gate_is_not_a_broken_install() {
+        use std::os::fd::AsRawFd;
+
+        let home = tempfile::tempdir().unwrap();
+        let previous_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", home.path());
+
+        let studio = home.path().join(".unsloth").join("studio");
+        std::fs::create_dir_all(&studio).unwrap();
+        let gate = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(studio.join(".studio-runtime.lock"))
+            .unwrap();
+        assert_eq!(
+            unsafe { libc::flock(gate.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0,
+            "the test could not take the managed runtime gate"
+        );
+
+        let fake = fake_cli("held-runtime-gate", "#!/bin/sh\nexit 0\n");
+        let probe = probe_managed_bin(fake.bin.clone()).await;
+
+        match previous_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+        drop(gate);
+
+        let result = choose_preflight(probe.clone(), BackendProbe::Missing);
+        assert_eq!(
+            result.reason.as_deref(),
+            Some("managed_environment_busy"),
+            "a busy gate was reported as {probe:?} -> {result:?}"
+        );
+        assert!(
+            !result.can_auto_repair,
+            "a busy gate must not start a repair: {result:?}"
+        );
+    }
 }

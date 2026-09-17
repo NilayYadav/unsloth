@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026-present the Unsloth AI Inc. team. All rights reserved.
+#
+# Disposable A/B reproduction harness for unslothai/unsloth#11226.
+# Identical on both branches; only the product code under test differs.
+
+name: PR 11226 busy-gate repro
+
+on:
+  push:
+    branches:
+      - 'pr11226-repro-*'
+
+permissions:
+  contents: read
+
+jobs:
+  busy-gate:
+    name: a held runtime gate is not a broken install
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Linux native deps for Tauri / WebKit2GTK
+        timeout-minutes: 15
+        env:
+          RETRY_ATTEMPTS: '2'
+          RETRY_ATTEMPT_TIMEOUT: '360'
+        run: |
+          bash .github/scripts/retry-with-apt-lock.sh sudo sh -c \
+            'apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf || { apt-get update && apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf; }'
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable @ 2026-03-27
+
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+        with:
+          save-if: false
+          workspaces: studio/src-tauri -> target
+
+      # `cargo test` compiles the Tauri binary crate, whose build script wants a
+      # frontend dist directory. A placeholder is enough: no window is opened.
+      - name: Placeholder frontend dist
+        run: |
+          mkdir -p studio/frontend/dist
+          printf '<!doctype html><title>repro</title>' > studio/frontend/dist/index.html
+
+      - name: Reproduce the busy managed runtime gate
+        working-directory: studio/src-tauri
+        # One test, one thread: the test overrides HOME for the duration of the
+        # probe, which is process-global.
+        run: |
+          set -o pipefail
+          cargo test a_held_runtime_gate_is_not_a_broken_install -- --nocapture --test-threads=1 2>&1 | tee repro.log
+          echo "REPRO ASSERTION PASSED"
+
+      - name: Upload repro log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: pr11226-repro-log-${{ github.ref_name }}
+          path: studio/src-tauri/repro.log
+          if-no-files-found: warn
+          retention-days: 3
