@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026-present the Unsloth AI Inc. team. All rights reserved.
+
+name: PR 11230 seed-token leak repro
+
+on:
+  push:
+    branches:
+      - 'pr11230-repro-*'
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: publish_recipe_dataset seed token
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.13'
+
+      - name: Install the minimum this import chain needs
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest fastapi structlog huggingface_hub
+
+      - name: Which implementation is on this branch
+        run: |
+          echo "branch=${GITHUB_REF_NAME}"
+          echo "sha=${GITHUB_SHA}"
+          if grep -q '_scrub_seed_source_tokens' studio/backend/core/data_recipe/huggingface.py; then
+            echo "implementation=FIXED"
+          else
+            echo "implementation=UNFIXED (pre-PR publish path)"
+          fi
+
+      - name: Probe - what publish_recipe_dataset actually uploads
+        working-directory: studio/backend
+        env:
+          PYTHONPATH: .
+        run: python ../../.github/pr11230_probe.py
+
+      - name: PR-owned regression test
+        working-directory: studio/backend
+        env:
+          PYTHONPATH: .
+        run: python -m pytest tests/test_data_recipe_publish_seed_token.py -q --tb=short
