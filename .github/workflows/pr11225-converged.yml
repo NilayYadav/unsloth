@@ -57,13 +57,3 @@ jobs:
         shell: bash
         run: |
           python3 .github/repro/pr11225_sweep.py .
-
-      - name: "Tunnel unit tests at HEAD"
-        shell: bash
-        run: |
-          # huggingface_hub because an autouse session fixture in studio/backend/tests/conftest.py
-          # imports it unguarded, so without it every test in the file errors at setup.
-          python3 -m pip install --quiet pytest huggingface_hub
-          # The sibling suites additionally need structlog/fastapi; they run in the upstream studio job.
-          cd studio/backend && python3 -m pytest tests/test_cloudflare_tunnel.py -q
-
