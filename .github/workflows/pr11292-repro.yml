@@ -1,0 +1,61 @@
+name: PR 11292 role-mapping A/B repro
+
+on:
+  push:
+    branches: [pr11292-repro]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ab:
+    name: "${{ matrix.side }} (expect ${{ matrix.expect }})"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - side: base-upstream-main
+            ref: 768d644036a948441ba80b626c9e747c1fecfbae
+            expect: broken
+          - side: head-with-pr-11292
+            ref: pr11292-ci-head
+            expect: fixed
+    steps:
+      - name: Check out the probe
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: pr11292-repro
+          path: probe
+
+      - name: Check out the code under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ matrix.ref }}
+          path: under-test
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+
+      - name: Show the two heuristic sources under test
+        run: |
+          cd under-test
+          git log --oneline -1
+          sha1sum studio/backend/utils/datasets/format_detection.py \
+                  studio/backend/hub/utils/dataset_format.py
+
+      - name: Run the identical probe
+        run: |
+          python probe/ci-probe/probe.py under-test/studio/backend "${{ matrix.expect }}"
+
+      - name: Upload the mapping results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mapping-${{ matrix.side }}
+          path: probe-result.json
+          if-no-files-found: warn
+          retention-days: 1
