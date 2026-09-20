@@ -126,13 +126,18 @@ test("the port form is capability-gated and keeps its live error region mounted"
     SECTION_SOURCE.match(/["'`]Port["'`]/g)?.length,
     1,
   );
+  // The row shows only while the port can take effect: supported and stopped.
   assert.match(
     SECTION_SOURCE,
-    /\{status\?\.portConfigurationSupported\s*\?\s*\(\s*<SettingsRow\s+label="Port"/,
+    /showPortRow\s*=\s*status\?\.portConfigurationSupported\s*&&\s*!stopAction/,
   );
   assert.match(
     SECTION_SOURCE,
-    /aria-describedby=\{portErrorVisible\s*\?\s*portErrorId\s*:\s*undefined\}/,
+    /\{showPortRow\s*\?\s*\(\s*<SettingsRow\s+label="Port"/,
+  );
+  assert.match(
+    SECTION_SOURCE,
+    /aria-describedby=\{\s*portErrorVisible\s*\?\s*portErrorId\s*:\s*undefined\s*\}/,
   );
   assert.match(
     SECTION_SOURCE,

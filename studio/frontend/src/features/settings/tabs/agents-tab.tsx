@@ -60,7 +60,7 @@ import {
   normalizeHost,
   quoteShellArg,
 } from "../components/agent-command";
-import { SettingsSection } from "../components/settings-section";
+import { CollapsibleSettingsSection } from "../components/collapsible-settings-section";
 import {
   isChatGenerativeHubModel,
   isClassifierOrRerankerHubModel,
@@ -590,18 +590,6 @@ function SubagentSection({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <span
-          data-settings-label={t("settings.agents.subagent.title")}
-          className="text-xs font-medium text-foreground"
-        >
-          {t("settings.agents.subagent.title")}
-        </span>
-        <p className="text-ui-11 leading-relaxed text-muted-foreground">
-          {t("settings.agents.subagent.description", { agent: agent.name })}
-        </p>
-      </div>
-
       <div className="flex min-w-0 flex-col gap-2">
         <span className="text-ui-11 font-medium text-foreground">
           {t("settings.agents.subagent.setupCommand")}
@@ -1295,46 +1283,6 @@ export function AgentsTab() {
         {t("settings.agents.intro")}
       </p>
 
-      <fieldset className="flex min-w-0 items-center gap-0.5">
-        <legend className="mb-2 text-xs font-medium text-foreground">
-          {t("settings.agents.commandShell")}
-        </legend>
-        <button
-          type="button"
-          onClick={() => {
-            setCommandOsOverride("unix");
-            setStoredOs("unix");
-            resetCopied();
-          }}
-          aria-pressed={commandOs === "unix"}
-          className={cn(
-            "rounded-full px-2.5 py-1 text-ui-11 font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            commandOs === "unix"
-              ? "hub-tab-toggle-pill text-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {t("settings.apiKeys.osUnix")}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setCommandOsOverride("windows");
-            setStoredOs("windows");
-            resetCopied();
-          }}
-          aria-pressed={commandOs === "windows"}
-          className={cn(
-            "rounded-full px-2.5 py-1 text-ui-11 font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            commandOs === "windows"
-              ? "hub-tab-toggle-pill text-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {t("settings.apiKeys.osWindows")}
-        </button>
-      </fieldset>
-
       <section
         aria-label={t("settings.agents.commandBuilder")}
         className="flex w-full flex-col gap-6"
@@ -1612,9 +1560,52 @@ export function AgentsTab() {
         ) : null}
 
         <div className="flex min-w-0 flex-col gap-2.5">
-          <span className="text-xs font-medium text-foreground">
-            {t("settings.agents.generatedCommand")}
-          </span>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <span className="text-xs font-medium text-foreground">
+              {t("settings.agents.generatedCommand")}
+            </span>
+            {/* Inline with the command it rewrites; the legend names it for
+                screen readers without taking a row of the layout. */}
+            <fieldset className="flex items-center gap-0.5">
+              <legend className="sr-only">
+                {t("settings.agents.commandShell")}
+              </legend>
+              <button
+                type="button"
+                onClick={() => {
+                  setCommandOsOverride("unix");
+                  setStoredOs("unix");
+                  resetCopied();
+                }}
+                aria-pressed={commandOs === "unix"}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-ui-11 font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  commandOs === "unix"
+                    ? "hub-tab-toggle-pill text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t("settings.apiKeys.osUnix")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCommandOsOverride("windows");
+                  setStoredOs("windows");
+                  resetCopied();
+                }}
+                aria-pressed={commandOs === "windows"}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-ui-11 font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  commandOs === "windows"
+                    ? "hub-tab-toggle-pill text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t("settings.apiKeys.osWindows")}
+              </button>
+            </fieldset>
+          </div>
           <p className="text-ui-11 leading-relaxed text-muted-foreground">
             {t("settings.agents.automaticSettingsNote")}
           </p>
@@ -1638,22 +1629,31 @@ export function AgentsTab() {
           </p>
         </div>
 
-        <SubagentSection
-          key={`${selectedAgent}:${commandModel}`}
-          command={shellCommands.subagent}
-          agent={selectedAgentDetails}
-        />
+        {SUBAGENT_AGENT_IDS.has(selectedAgent) ? (
+          <CollapsibleSettingsSection
+            title={t("settings.agents.subagent.title")}
+            description={t("settings.agents.subagent.description", {
+              agent: selectedAgentDetails.name,
+            })}
+          >
+            <SubagentSection
+              key={`${selectedAgent}:${commandModel}`}
+              command={shellCommands.subagent}
+              agent={selectedAgentDetails}
+            />
+          </CollapsibleSettingsSection>
+        ) : null}
 
         <p className="text-ui-11 leading-relaxed text-muted-foreground">
           {t("settings.agents.modelNote")}
         </p>
       </section>
 
-      <SettingsSection
+      <CollapsibleSettingsSection
         title={t("settings.agents.options.title")}
         description={t("settings.agents.options.description")}
       >
-        <div className="mt-1 flex flex-col divide-y divide-border/60">
+        <div className="flex flex-col divide-y divide-border/60">
           {OPTION_ROWS.map((row) => (
             <div
               key={row.flag}
@@ -1668,22 +1668,20 @@ export function AgentsTab() {
             </div>
           ))}
         </div>
-      </SettingsSection>
+      </CollapsibleSettingsSection>
 
-      <SettingsSection
+      <CollapsibleSettingsSection
         title={t("settings.agents.remote.title")}
         description={t("settings.agents.remote.description")}
       >
-        <div className="pt-3">
-          <CommandBlock command={shellCommands.remoteSetup} />
-        </div>
-      </SettingsSection>
+        <CommandBlock command={shellCommands.remoteSetup} />
+      </CollapsibleSettingsSection>
 
-      <SettingsSection
+      <CollapsibleSettingsSection
         title={t("settings.agents.passthrough.title")}
         description={t("settings.agents.passthrough.description")}
       >
-        <div className="flex flex-col gap-3 pt-3">
+        <div className="flex flex-col gap-3">
           {shellCommands.passThrough.map((passThroughCommand) => (
             <CommandBlock
               key={passThroughCommand}
@@ -1691,16 +1689,14 @@ export function AgentsTab() {
             />
           ))}
         </div>
-      </SettingsSection>
+      </CollapsibleSettingsSection>
 
-      <SettingsSection
+      <CollapsibleSettingsSection
         title={t("settings.agents.dryRun.title")}
         description={t("settings.agents.dryRun.description")}
       >
-        <div className="pt-3">
-          <CommandBlock command={shellCommands.dryRun} />
-        </div>
-      </SettingsSection>
+        <CommandBlock command={shellCommands.dryRun} />
+      </CollapsibleSettingsSection>
     </div>
   );
 }

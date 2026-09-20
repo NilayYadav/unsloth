@@ -2,15 +2,6 @@
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -30,7 +21,6 @@ import {
 import {
   LAN_ACCESS_POLL_MS,
   type LanAccessStatus,
-  keylessLanAccessDescription,
   lanAccessAutoStartReadOnly,
   lanAccessBlockMessage,
   lanAccessErrorMessage,
@@ -38,15 +28,18 @@ import {
   lanAccessStopDisconnectsOrigin,
   validLanAccessPort,
 } from "@/features/settings/api/lan-access-state";
+import { useSettingsDialogStore } from "@/features/settings/stores/settings-dialog-store";
 import { isTauri } from "@/lib/api-base";
-import { copyToClipboard } from "@/lib/copy-to-clipboard";
-import { Tick02Icon } from "@/lib/tick-icon";
 import { cn } from "@/lib/utils";
-import { Copy01Icon, QrCodeIcon, Wifi01Icon } from "@hugeicons/core-free-icons";
+import {
+  Alert02Icon,
+  ArrowRight01Icon,
+  Wifi01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import QRCode from "react-qr-code";
 import { SettingsRow } from "./settings-row";
+import { UrlActions } from "./url-actions";
 
 type LanAccessOperation = "start" | "stop" | "auto" | "port";
 type PortMode = "automatic" | "custom";
@@ -57,14 +50,6 @@ const STATE_LABEL: Record<LanAccessStatus["state"], string> = {
   error: "Error",
 };
 
-const OWNER_LABEL: Record<
-  Exclude<LanAccessStatus["managedBy"], null>,
-  string
-> = {
-  launch: "Launch managed",
-  settings: "Settings managed",
-};
-
 function stateDotClass(state?: LanAccessStatus["state"]): string {
   if (state === "online") {
     return "bg-emerald-500";
@@ -73,7 +58,6 @@ function stateDotClass(state?: LanAccessStatus["state"]): string {
 }
 
 function AccessStatus({ status }: { status: LanAccessStatus | null }) {
-  const owner = status?.managedBy ? OWNER_LABEL[status.managedBy] : null;
   return (
     <output
       className="flex items-center gap-1.5 text-xs text-muted-foreground"
@@ -83,79 +67,7 @@ function AccessStatus({ status }: { status: LanAccessStatus | null }) {
         className={cn("size-2 rounded-full", stateDotClass(status?.state))}
       />
       {status ? STATE_LABEL[status.state] : "Unavailable"}
-      {owner ? ` · ${owner}` : ""}
     </output>
-  );
-}
-
-function CopyLanUrlButton({ url, label }: { url: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  const text = copied ? "Copied" : label;
-  const copyTimer = useRef<number | null>(null);
-  useEffect(() => {
-    return () => {
-      if (copyTimer.current !== null) {
-        window.clearTimeout(copyTimer.current);
-      }
-    };
-  }, []);
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      className="gap-1.5"
-      aria-label={`${text} ${url}`}
-      onClick={async () => {
-        if (!(await copyToClipboard(url))) {
-          return;
-        }
-        setCopied(true);
-        if (copyTimer.current !== null) {
-          window.clearTimeout(copyTimer.current);
-        }
-        copyTimer.current = window.setTimeout(() => setCopied(false), 1800);
-      }}
-    >
-      <HugeiconsIcon
-        icon={copied ? Tick02Icon : Copy01Icon}
-        className="size-3.5"
-      />
-      {text}
-    </Button>
-  );
-}
-
-function LanUrlQrButton({ url }: { url: string }) {
-  return (
-    <Dialog>
-      <DialogTrigger asChild={true}>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="gap-1.5"
-          aria-label={`Show QR code for ${url}`}
-        >
-          <HugeiconsIcon icon={QrCodeIcon} className="size-3.5" />
-          QR
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-xs">
-        <DialogHeader>
-          <DialogTitle>Open on your phone</DialogTitle>
-          <DialogDescription>
-            Scan from a device on the same network to open this address.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="mx-auto mt-2 rounded-md bg-white p-3">
-          <QRCode value={url} size={192} />
-        </div>
-        <code className="block break-all text-center font-mono text-xs text-muted-foreground">
-          {url}
-        </code>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -181,20 +93,12 @@ function StatusMessage({
   );
 }
 
-function LanUrlActions({ url, copyLabel }: { url: string; copyLabel: string }) {
-  return (
-    <div className="flex shrink-0 items-center gap-2">
-      <LanUrlQrButton url={url} />
-      <CopyLanUrlButton url={url} label={copyLabel} />
-    </div>
-  );
-}
-
 function LanUrlPanel({ status }: { status: LanAccessStatus | null }) {
   if (!status || status.urls.length === 0) {
     return null;
   }
   const single = status.urls.length === 1;
+  const isPublic = status.publicUrls.length > 0;
   return (
     <div className="flex flex-col gap-1.5 border-t border-border/60 p-4">
       <div className="flex items-center justify-between gap-3">
@@ -202,7 +106,11 @@ function LanUrlPanel({ status }: { status: LanAccessStatus | null }) {
           {single ? "Network address" : "Network addresses"}
         </span>
         {single ? (
-          <LanUrlActions url={status.urls[0]} copyLabel="Copy URL" />
+          <UrlActions
+            url={status.urls[0]}
+            copyLabel="Copy URL"
+            qrDescription="Scan from a device on the same network to open this address."
+          />
         ) : null}
       </div>
       {status.urls.map((url) => (
@@ -210,27 +118,74 @@ function LanUrlPanel({ status }: { status: LanAccessStatus | null }) {
           <code className="block w-full min-w-0 break-all rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs text-foreground">
             {url}
           </code>
-          {single ? null : <LanUrlActions url={url} copyLabel="Copy" />}
+          {single ? null : (
+            <UrlActions
+              url={url}
+              copyLabel="Copy"
+              qrDescription="Scan from a device on the same network to open this address."
+            />
+          )}
         </div>
       ))}
-      {status.publicUrls.length > 0 ? (
-        <span className="text-xs text-destructive leading-snug">
-          {status.publicUrls[0]} is a public internet address, so this reaches
-          beyond your local network. Anyone who has the password or an API key
-          can sign in and run code on this machine.
+      <div
+        className={cn(
+          "mt-1 flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-snug",
+          isPublic
+            ? "border-destructive/30 bg-destructive/5 text-destructive"
+            : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+        )}
+      >
+        <HugeiconsIcon
+          icon={Alert02Icon}
+          className="mt-0.5 size-3.5 shrink-0"
+        />
+        <span>
+          {isPublic
+            ? `${status.publicUrls[0]} is a public internet address, so this reaches beyond your local network. Anyone who has the password or an API key can sign in and run code on this machine.`
+            : status.servesWebUi
+              ? "Anyone on this network who has the password or an API key can sign in and run code on this machine."
+              : "This launch serves the API only, so devices on the network can call the API but not open the web UI."}
         </span>
-      ) : (
-        <span className="text-xs text-muted-foreground leading-snug">
-          {status.servesWebUi
-            ? "Anyone on this network who has the password or an API key can sign in and run code on this machine."
-            : "This launch serves the API only, so devices on the network can call the API but not open the web UI."}
-        </span>
-      )}
+      </div>
     </div>
   );
 }
 
-export function LanAccessSection() {
+function KeylessLinkRow({ status }: { status: LanAccessStatus | null }) {
+  const setActiveTab = useSettingsDialogStore((state) => state.setActiveTab);
+  const scopeLabel =
+    status?.keylessScope === "inference"
+      ? "Inference"
+      : status?.keylessScope === "full"
+        ? "Local full"
+        : "Off";
+  return (
+    <SettingsRow
+      label="Keyless API access"
+      description="Let local apps call the API without a key. Managed in API keys."
+    >
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="gap-1.5"
+        onClick={() => setActiveTab("api-keys")}
+      >
+        {scopeLabel}
+        <span className="text-muted-foreground">·</span>
+        API keys
+        <HugeiconsIcon icon={ArrowRight01Icon} className="size-3.5" />
+      </Button>
+    </SettingsRow>
+  );
+}
+
+export function LanAccessSection({
+  /** The API keys tab mounts the keyless panel itself, so the cross-link is noise there. */
+  keylessLink = true,
+}: {
+  keylessLink?: boolean;
+}) {
   const portErrorId = useId();
   const [status, setStatus] = useState<LanAccessStatus | null>(null);
   const [busy, setBusy] = useState<LanAccessOperation | null>(null);
@@ -372,6 +327,10 @@ export function LanAccessSection() {
           ? "Stop"
           : "Start";
 
+  // The port only takes effect at start, so it is editable while stopped and
+  // hidden once the listener is up.
+  const showPortRow = status?.portConfigurationSupported && !stopAction;
+
   return (
     <section
       data-settings-label="LAN access"
@@ -417,10 +376,10 @@ export function LanAccessSection() {
       <LanUrlPanel status={status} />
 
       <div className="border-t border-border/60 px-4 py-1">
-        {status?.portConfigurationSupported ? (
+        {showPortRow ? (
           <SettingsRow
             label="Port"
-            description="Automatic tries 8888, then 8889–8908. Custom uses only the selected port. Stop LAN access before changing it."
+            description="Automatic picks a free port (8888, then 8889–8908). Custom uses only the selected port."
           >
             <div className="flex flex-col items-end gap-1.5">
               <div className="flex items-center gap-2">
@@ -453,7 +412,9 @@ export function LanAccessSection() {
                     disabled={busy !== null || lanAccessPortReadOnly(status)}
                     aria-label="Custom LAN port"
                     aria-invalid={portInvalid}
-                    aria-describedby={portErrorVisible ? portErrorId : undefined}
+                    aria-describedby={
+                      portErrorVisible ? portErrorId : undefined
+                    }
                     className="h-8 w-24"
                     onChange={(event) => {
                       setPortDraft(event.target.value);
@@ -490,21 +451,10 @@ export function LanAccessSection() {
             </div>
           </SettingsRow>
         ) : null}
-        <SettingsRow
-          label="Keyless API status"
-          description={keylessLanAccessDescription(status)}
-        >
-          <span className="text-xs font-medium text-muted-foreground">
-            {status?.keylessScope === "inference"
-              ? "Inference"
-              : status?.keylessScope === "full"
-                ? "Local full"
-                : "Off"}
-          </span>
-        </SettingsRow>
+        {keylessLink ? <KeylessLinkRow status={status} /> : null}
         <SettingsRow
           label="Start automatically"
-          description="Put Unsloth on the network each time it starts. Stopping LAN access now won’t turn this off."
+          description="Put Unsloth on the network each time it starts, even if you stop it now."
         >
           <Switch
             checked={status?.autoStart ?? false}

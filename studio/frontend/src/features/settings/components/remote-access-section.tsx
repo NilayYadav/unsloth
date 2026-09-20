@@ -1,18 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
-import { useLoginMode } from "@/features/auth/account-session";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { usePlatformStore } from "@/config/env";
+import { useLoginMode } from "@/features/auth/account-session";
 import {
   loadRemoteAccess,
   startRemoteAccess,
@@ -28,19 +20,13 @@ import {
   remoteAccessStopDisconnectsOrigin,
 } from "@/features/settings/api/remote-access-state";
 import { isTauri } from "@/lib/api-base";
-import { copyToClipboard } from "@/lib/copy-to-clipboard";
-import { Tick02Icon } from "@/lib/tick-icon";
 import { cn } from "@/lib/utils";
-import {
-  Copy01Icon,
-  Globe02Icon,
-  QrCodeIcon,
-} from "@hugeicons/core-free-icons";
+import { Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import QRCode from "react-qr-code";
 import { ChangePasswordDialog } from "./change-password-dialog";
 import { SettingsRow } from "./settings-row";
+import { UrlActions } from "./url-actions";
 
 type RemoteAccessOperation = "start" | "stop" | "auto";
 
@@ -50,15 +36,6 @@ const STATE_LABEL: Record<RemoteAccessStatus["state"], string> = {
   online: "Online",
   stopping: "Stopping",
   error: "Error",
-};
-
-const OWNER_LABEL: Record<
-  Exclude<RemoteAccessStatus["managedBy"], null>,
-  string
-> = {
-  launch: "Launch managed",
-  settings: "Settings managed",
-  colab: "Colab managed",
 };
 
 function stateDotClass(state?: RemoteAccessStatus["state"]): string {
@@ -72,7 +49,6 @@ function stateDotClass(state?: RemoteAccessStatus["state"]): string {
 }
 
 function AccessStatus({ status }: { status: RemoteAccessStatus | null }) {
-  const owner = status?.managedBy ? OWNER_LABEL[status.managedBy] : null;
   return (
     <output
       className="flex items-center gap-1.5 text-xs text-muted-foreground"
@@ -82,71 +58,7 @@ function AccessStatus({ status }: { status: RemoteAccessStatus | null }) {
         className={cn("size-2 rounded-full", stateDotClass(status?.state))}
       />
       {status ? STATE_LABEL[status.state] : "Unavailable"}
-      {owner ? ` · ${owner}` : ""}
     </output>
-  );
-}
-
-function CopyRemoteUrlButton({ url }: { url: string }) {
-  const [copied, setCopied] = useState(false);
-  const copyTimer = useRef<number | null>(null);
-  useEffect(() => {
-    return () => {
-      if (copyTimer.current !== null) {
-        window.clearTimeout(copyTimer.current);
-      }
-    };
-  }, []);
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      className="gap-1.5"
-      onClick={async () => {
-        if (!(await copyToClipboard(url))) {
-          return;
-        }
-        setCopied(true);
-        if (copyTimer.current !== null) {
-          window.clearTimeout(copyTimer.current);
-        }
-        copyTimer.current = window.setTimeout(() => setCopied(false), 1800);
-      }}
-    >
-      <HugeiconsIcon
-        icon={copied ? Tick02Icon : Copy01Icon}
-        className="size-3.5"
-      />
-      {copied ? "Copied" : "Copy URL"}
-    </Button>
-  );
-}
-
-function RemoteUrlQrButton({ url }: { url: string }) {
-  return (
-    <Dialog>
-      <DialogTrigger asChild={true}>
-        <Button type="button" size="sm" variant="outline" className="gap-1.5">
-          <HugeiconsIcon icon={QrCodeIcon} className="size-3.5" />
-          QR
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-xs">
-        <DialogHeader>
-          <DialogTitle>Open on your phone</DialogTitle>
-          <DialogDescription>
-            Scan to open the remote URL in your phone’s browser.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="mx-auto mt-2 rounded-md bg-white p-3">
-          <QRCode value={url} size={192} />
-        </div>
-        <code className="block break-all text-center font-mono text-xs text-muted-foreground">
-          {url}
-        </code>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -180,10 +92,11 @@ function RemoteUrlPanel({ url }: { url: string | null }) {
     <div className="flex flex-col gap-1.5 border-t border-border/60 p-4">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-medium text-foreground">Remote URL</span>
-        <div className="flex items-center gap-2">
-          <RemoteUrlQrButton url={url} />
-          <CopyRemoteUrlButton url={url} />
-        </div>
+        <UrlActions
+          url={url}
+          copyLabel="Copy URL"
+          qrDescription="Scan to open the remote URL in your phone’s browser."
+        />
       </div>
       <code className="block w-full break-all rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs text-foreground">
         {url}
@@ -405,7 +318,7 @@ export function RemoteAccessSection() {
 
         <SettingsRow
           label="Start automatically"
-          description="Create a new remote URL each time Unsloth starts. Stopping remote access now won’t turn this off."
+          description="Create a new remote URL each time Unsloth starts, even if you stop it now."
         >
           <Switch
             checked={status?.autoStart ?? false}
