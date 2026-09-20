@@ -21,6 +21,7 @@ import {
 import {
   LAN_ACCESS_POLL_MS,
   type LanAccessStatus,
+  keylessLanAccessDescription,
   lanAccessAutoStartReadOnly,
   lanAccessBlockMessage,
   lanAccessErrorMessage,
@@ -31,11 +32,7 @@ import {
 import { useSettingsDialogStore } from "@/features/settings/stores/settings-dialog-store";
 import { isTauri } from "@/lib/api-base";
 import { cn } from "@/lib/utils";
-import {
-  Alert02Icon,
-  ArrowRight01Icon,
-  Wifi01Icon,
-} from "@hugeicons/core-free-icons";
+import { Alert02Icon, Wifi01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { SettingsRow } from "./settings-row";
@@ -151,7 +148,7 @@ function LanUrlPanel({ status }: { status: LanAccessStatus | null }) {
   );
 }
 
-function KeylessLinkRow({ status }: { status: LanAccessStatus | null }) {
+function KeylessStatusRow({ status }: { status: LanAccessStatus | null }) {
   const setActiveTab = useSettingsDialogStore((state) => state.setActiveTab);
   const scopeLabel =
     status?.keylessScope === "inference"
@@ -161,31 +158,28 @@ function KeylessLinkRow({ status }: { status: LanAccessStatus | null }) {
         : "Off";
   return (
     <SettingsRow
-      label="Keyless API access"
-      description="Let local apps call the API without a key. Managed in API keys."
+      label="Keyless API"
+      description={
+        <>
+          {keylessLanAccessDescription(status)}{" "}
+          <button
+            type="button"
+            onClick={() => setActiveTab("api-keys")}
+            className="underline decoration-border decoration-dotted underline-offset-2 transition-colors hover:text-foreground hover:decoration-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            Manage in API keys
+          </button>
+        </>
+      }
     >
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="gap-1.5"
-        onClick={() => setActiveTab("api-keys")}
-      >
+      <span className="text-xs font-medium text-muted-foreground">
         {scopeLabel}
-        <span className="text-muted-foreground">·</span>
-        API keys
-        <HugeiconsIcon icon={ArrowRight01Icon} className="size-3.5" />
-      </Button>
+      </span>
     </SettingsRow>
   );
 }
 
-export function LanAccessSection({
-  /** The API keys tab mounts the keyless panel itself, so the cross-link is noise there. */
-  keylessLink = true,
-}: {
-  keylessLink?: boolean;
-}) {
+export function LanAccessSection() {
   const portErrorId = useId();
   const [status, setStatus] = useState<LanAccessStatus | null>(null);
   const [busy, setBusy] = useState<LanAccessOperation | null>(null);
@@ -451,7 +445,7 @@ export function LanAccessSection({
             </div>
           </SettingsRow>
         ) : null}
-        {keylessLink ? <KeylessLinkRow status={status} /> : null}
+        <KeylessStatusRow status={status} />
         <SettingsRow
           label="Start automatically"
           description="Put Unsloth on the network each time it starts, even if you stop it now."

@@ -223,6 +223,7 @@ def shoot_api_keys_keyless(page, scene: dict, report: dict) -> None:
     section = page.locator('section[data-settings-label="Keyless API access"]')
     section.wait_for(timeout=15000)
     page.wait_for_timeout(1500)
+    page.locator(DIALOG).screenshot(path=str(OUT / "api-keys-tab.png"))
     section.scroll_into_view_if_needed()
     page.wait_for_timeout(300)
     section.screenshot(path=str(OUT / "api-keys-keyless.png"))
