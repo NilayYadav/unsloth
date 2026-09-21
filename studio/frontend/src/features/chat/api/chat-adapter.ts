@@ -5226,6 +5226,7 @@ export function createOpenAIStreamAdapter(
       // Both this stream and a recovery follower must persist the marker, or the next reload
       // attaches another follower and blocks the composer for a further deadline.
       let generationStalled = false;
+      let parseThink = true;
       const generationCustom = () =>
         generationRunId
           ? {
@@ -5241,6 +5242,7 @@ export function createOpenAIStreamAdapter(
               ),
               generationLocallyInterrupted: generationStalled,
               serverManaged: true,
+              parseThinkTags: parseThink,
             }
           : {};
       if (activeModel?.isAudio && !activeModel?.hasAudioInput) {
@@ -5367,9 +5369,20 @@ export function createOpenAIStreamAdapter(
       );
       // The parse of everything streamed so far, extended by each delta. The final merge can rewrite
       // the prefix it is handed, which an extend-only parse cannot follow, so it reparses.
-      const segmentedText = createSegmentedAssistantText({
-        trustAppends: !(continuationPartial && repairContinuation),
-      });
+      const trustAppends = !(continuationPartial && repairContinuation);
+      let segmentedText = createSegmentedAssistantText({ trustAppends });
+      // Thinking off leaves <think> as reply text, unless reasoning arrives anyway: then the
+      // reply is reparsed with the tags that wrap it.
+      const setParseThink = (next: boolean): void => {
+        if (next === parseThink) {
+          return;
+        }
+        parseThink = next;
+        segmentedText = createSegmentedAssistantText({
+          trustAppends,
+          parseThink,
+        });
+      };
       // The single place `cumulativeText` grows, so everything derived from it sees the same
       // characters in the same order.
       const appendCumulative = (text: string): void => {
@@ -5751,6 +5764,42 @@ export function createOpenAIStreamAdapter(
         return pinTextThoughtSignature(assembled);
       };
 
+      const {
+        supportsReasoning,
+        reasoningEnabled,
+        reasoningAlwaysOn,
+        reasoningStyle,
+      } = runtime;
+      const externalReasoningCaps: ReturnType<
+        typeof getExternalReasoningCapabilities
+      > =
+        externalSelection && externalProvider
+          ? getExternalReasoningCapabilities(
+              externalProvider.providerType,
+              externalSelection.modelId,
+              {
+                isReasoningProvider: externalProvider.isReasoningModel === true,
+                baseUrl: externalProvider.baseUrl ?? null,
+              },
+            )
+          : {
+              supportsReasoning,
+              reasoningStyle,
+              reasoningAlwaysOn: false,
+              supportsReasoningOff: false,
+              reasoningEffortLevels: ["low", "medium", "high"] as const,
+            };
+      const externalReasoningEnabled =
+        !externalReasoningCaps.supportsReasoningOff ? true : reasoningEnabled;
+      // Decided before the continuation yield below, which an abort during load saves as is.
+      setParseThink(
+        isExternalRequest
+          ? !externalReasoningCaps.supportsReasoning || externalReasoningEnabled
+          : !supportsReasoning ||
+              reasoningEnabled ||
+              reasoningAlwaysOn ||
+              reasoningStyle === "reasoning_effort",
+      );
       // Yielded before the request starts: an abort during load skips the partial-content yield
       // below, saving an empty message.
       if (continuation) {
@@ -5886,9 +5935,6 @@ export function createOpenAIStreamAdapter(
         }
 
         const {
-          supportsReasoning,
-          reasoningEnabled,
-          reasoningStyle,
           reasoningEffort,
           reasoningEffortLevels,
           supportsPreserveThinking,
@@ -5951,26 +5997,6 @@ export function createOpenAIStreamAdapter(
         const externalCapabilities = getProviderCapabilities(
           externalProvider?.providerType,
         );
-        const externalReasoningCaps: ReturnType<
-          typeof getExternalReasoningCapabilities
-        > =
-          externalSelection && externalProvider
-            ? getExternalReasoningCapabilities(
-                externalProvider.providerType,
-                externalSelection.modelId,
-                {
-                  isReasoningProvider:
-                    externalProvider.isReasoningModel === true,
-                  baseUrl: externalProvider.baseUrl ?? null,
-                },
-              )
-            : {
-                supportsReasoning,
-                reasoningStyle,
-                reasoningAlwaysOn: false,
-                supportsReasoningOff: false,
-                reasoningEffortLevels: ["low", "medium", "high"] as const,
-              };
         type RequestReasoningEffort = Extract<
           NonNullable<OpenAIChatCompletionsRequest["reasoning_effort"]>,
           "none" | "minimal" | "low" | "medium" | "high" | "max" | "xhigh"
@@ -5989,8 +6015,6 @@ export function createOpenAIStreamAdapter(
           reasoningEffort,
           reasoningEffortLevels,
         );
-        const externalReasoningEnabled =
-          !externalReasoningCaps.supportsReasoningOff ? true : reasoningEnabled;
         const buildRequestPayload = async (
           forceRefreshPublicKey = false,
         ): Promise<OpenAIChatCompletionsRequest> => {
@@ -7182,8 +7206,11 @@ export function createOpenAIStreamAdapter(
               }
               const rawDelta = chunk.choices?.[0]?.delta?.content;
               // Normalize structured delta.content (mistral magistral).
-              const { text: delta, structuredReasoningContinues } =
-                extractDeltaText(rawDelta);
+              const {
+                text: delta,
+                structuredReasoningContinues,
+                hasStructuredReasoning,
+              } = extractDeltaText(rawDelta);
               const deltaExtraContent = (
                 chunk.choices?.[0]?.delta as
                   | { extra_content?: unknown }
@@ -7666,6 +7693,9 @@ export function createOpenAIStreamAdapter(
                 runtime.setGeneratingStatus(null);
               }
 
+              if (reasoning || hasStructuredReasoning) {
+                setParseThink(true);
+              }
               if (reasoning) {
                 if (!reasoningContentOpen) {
                   reasoningDurationTracker.startGroup();
@@ -7685,7 +7715,8 @@ export function createOpenAIStreamAdapter(
               producedReplyText = true;
               // The trailing ${...} strip runs once on the finished reply, below the loop; nothing on this
               // path reads the buffer, so no arrival can flatten it.
-              const textEndsInsideThink = thinkTags.endsInsideThink();
+              const textEndsInsideThink =
+                parseThink && thinkTags.endsInsideThink();
               const assistantContent = liveAssistantContent();
 
               // Fallback when no server-side reasoning_summary arrives.
