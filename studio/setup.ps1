@@ -7199,6 +7199,19 @@ sys.exit(0 if windows and installed not in windows[0] else 1)
         substep "installed transformers rejects the installed tokenizers -- forcing dependency pass to repair..." "Cyan"
         $SkipPythonDeps = $false
     }
+    # As setup.sh: the pinned Diffusers main build is missing but git works now. Offline the
+    # source build can only fail, so keep the fast path.
+    if ($SkipPythonDeps -and -not $script:OfflineFastPath -and -not (Test-UvOfflineRequested)) {
+        $_diffusersMainMissing = $false
+        try {
+            & python "$PSScriptRoot\install_python_stack.py" --diffusers-main-needs-dependency-pass 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { $_diffusersMainMissing = $true }
+        } catch {}
+        if ($_diffusersMainMissing) {
+            substep "pinned Diffusers main build is missing -- forcing dependency pass to install it..." "Cyan"
+            $SkipPythonDeps = $false
+        }
+    }
     # If the desktop app specifies a minimum required backend version and the installed
     # package is older than that requirement, force the dependency pass to upgrade it.
     if ($env:UNSLOTH_DESKTOP_BACKEND_VERSION) {

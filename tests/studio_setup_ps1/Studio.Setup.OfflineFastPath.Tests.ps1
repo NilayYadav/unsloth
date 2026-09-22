@@ -315,6 +315,7 @@ function substep { param([string]$Message, [string]$Color = "DarkGray") $script:
 function Get-PinnedTorchIndexUrl { return "" }
 function Get-TorchIndexLeaf { param([AllowNull()][string]$Url) return "" }
 function Test-VenvTorchIsXpuSupported { param([string]$VenvPath) return $true }
+function Test-UvOfflineRequested { return $false }
 function Invoke-BoundedPythonProbe {
     param([string]$PythonExe, [string]$Code, [int]$TimeoutSec = 30)
     return [pscustomobject]@{ Ok = $true; Output = ""; Error = ""; TimedOut = $false }
@@ -401,6 +402,110 @@ Invoke-FastPathEscapes
         # The helper only ever clears the flag: a compare that decided to update stays updating.
         Invoke-FullDepsEscape -FullDeps '1' -StartSkipping $false | Should -Be 'False'
         Invoke-FullDepsEscape -FullDeps '0' -StartSkipping $false | Should -Be 'False'
+    }
+}
+
+<#
+    A host with no git at install time keeps the Diffusers release, and once the package is
+    current the version compare skips the whole pass, so installing git and updating never
+    reached the pinned main build. The escape asks install_python_stack.py whether it is owed.
+#>
+Describe 'the pinned Diffusers main build reaches the fast path' {
+    BeforeAll {
+        $escapeSrc = Get-FunctionSource -Path $script:SetupPs1 -Name 'Invoke-FastPathEscapes'
+        if ($escapeSrc -notmatch '--diffusers-main-needs-dependency-pass') {
+            throw "Invoke-FastPathEscapes no longer asks for the pinned Diffusers main build."
+        }
+        $script:DiffusersDir = Join-Path ([System.IO.Path]::GetTempPath()) ("unsloth-diffusers-main-" + [guid]::NewGuid())
+        New-Item -ItemType Directory -Path $script:DiffusersDir -Force | Out-Null
+        $script:DiffusersDriver = Join-Path $script:DiffusersDir 'driver.ps1'
+        $prelude = @'
+param([int]$ProbeRc, [bool]$Offline, [bool]$UvOffline, [bool]$StartSkipping)
+Remove-Item Env:UNSLOTH_STUDIO_FULL_DEPS -ErrorAction SilentlyContinue
+Remove-Item Env:UNSLOTH_DESKTOP_BACKEND_VERSION -ErrorAction SilentlyContinue
+$InstalledVer = "2026.8.15"
+$_PkgName = "unsloth"
+$installedTorchTag = "cu128"
+$NoTorchMode = $false
+$VenvDir = Join-Path $PSScriptRoot "venv"
+$script:IsIntelXpu = $false
+$script:ROCmGfxArch = $null
+$script:OfflineFastPath = $Offline
+$script:Substeps = @()
+$script:Probes = 0
+$SkipPythonDeps = $StartSkipping
+
+function step { param([string]$a, [string]$b, [string]$c) }
+function substep { param([string]$Message, [string]$Color = "DarkGray") $script:Substeps += $Message }
+function Get-PinnedTorchIndexUrl { return "" }
+function Get-TorchIndexLeaf { param([AllowNull()][string]$Url) return "" }
+function Test-VenvTorchIsXpuSupported { param([string]$VenvPath) return $true }
+function Test-UvOfflineRequested { return $UvOffline }
+function Invoke-BoundedPythonProbe {
+    param([string]$PythonExe, [string]$Code, [int]$TimeoutSec = 30)
+    return [pscustomobject]@{ Ok = $true; Output = ""; Error = ""; TimedOut = $false }
+}
+function python {
+    if ($args -contains '--diffusers-main-needs-dependency-pass') {
+        $script:Probes += 1
+        $global:LASTEXITCODE = $ProbeRc
+        return
+    }
+    $global:LASTEXITCODE = 1
+}
+'@
+        $epilogue = @'
+
+Invoke-FastPathEscapes
+"SKIP=$SkipPythonDeps"
+"PROBES=$($script:Probes)"
+"SUBSTEPS=" + ($script:Substeps -join '|')
+'@
+        Set-Content -LiteralPath $script:DiffusersDriver -Encoding utf8 -Value (
+            $prelude + "`n" + $escapeSrc + "`n" + $epilogue)
+
+        function script:Invoke-DiffusersEscape {
+            param([int]$ProbeRc, [bool]$Offline = $false, [bool]$UvOffline = $false, [bool]$StartSkipping = $true)
+            $text = (& $script:DiffusersDriver -ProbeRc $ProbeRc -Offline $Offline `
+                -UvOffline $UvOffline -StartSkipping $StartSkipping | Out-String)
+            if ($text -notmatch '(?m)^SKIP=(\S+)\s*$') { throw "the escapes did not run (output: '$text')" }
+            $skip = $Matches[1]
+            $null = $text -match '(?m)^PROBES=(\d+)\s*$'
+            $probes = [int]$Matches[1]
+            $null = $text -match '(?m)^SUBSTEPS=(.*)$'
+            return [pscustomobject]@{ Skip = $skip; Probes = $probes; Substeps = $Matches[1] }
+        }
+    }
+
+    AfterAll {
+        if ($script:DiffusersDir) {
+            Remove-Item -Recurse -Force -LiteralPath $script:DiffusersDir -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'forces the pass when the probe says the build is owed, and says why' {
+        $r = Invoke-DiffusersEscape -ProbeRc 0
+        $r.Skip | Should -Be 'False'
+        $r.Substeps | Should -Match 'pinned Diffusers main build is missing'
+    }
+
+    It 'keeps the fast path for exit <rc>' -ForEach @(@{ rc = 1 }, @{ rc = 2 }, @{ rc = 137 }) {
+        # 2 is an unknown flag: an older install_python_stack.py beside a newer setup.ps1.
+        (Invoke-DiffusersEscape -ProbeRc $rc).Skip | Should -Be 'True'
+    }
+
+    It 'never probes offline, where the source build can only fail' {
+        foreach ($case in @(@{ Offline = $true; UvOffline = $false }, @{ Offline = $false; UvOffline = $true })) {
+            $r = Invoke-DiffusersEscape -ProbeRc 0 -Offline $case.Offline -UvOffline $case.UvOffline
+            $r.Skip | Should -Be 'True'
+            $r.Probes | Should -Be 0
+        }
+    }
+
+    It 'does not probe once another escape already forced the pass' {
+        $r = Invoke-DiffusersEscape -ProbeRc 0 -StartSkipping $false
+        $r.Skip | Should -Be 'False'
+        $r.Probes | Should -Be 0
     }
 }
 

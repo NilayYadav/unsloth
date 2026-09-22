@@ -2831,6 +2831,25 @@ sys.exit(0 if windows and installed not in windows[0] else 1)
         fi
     fi
     unset _fpe_missing_torch
+    # The pinned Diffusers main build is missing but git works now (it was absent, or the build
+    # failed, on an earlier pass). Offline the source build can only fail, so keep the fast path.
+    if [ "$_SKIP_PYTHON_DEPS" = true ] && [ "${_OFFLINE_FAST_PATH:-false}" != true ] \
+            && ! _uv_offline_requested; then
+        _fpe_diffusers_main=false
+        if command -v timeout >/dev/null 2>&1; then
+            timeout -k 5 60 "$VENV_DIR/bin/python" \
+                "$SCRIPT_DIR/install_python_stack.py" --diffusers-main-needs-dependency-pass \
+                >/dev/null 2>&1 && _fpe_diffusers_main=true
+        elif "$VENV_DIR/bin/python" "$SCRIPT_DIR/install_python_stack.py" \
+                --diffusers-main-needs-dependency-pass >/dev/null 2>&1; then
+            _fpe_diffusers_main=true
+        fi
+        if [ "$_fpe_diffusers_main" = true ]; then
+            substep "pinned Diffusers main build is missing -- forcing dependency pass to install it..."
+            _SKIP_PYTHON_DEPS=false
+        fi
+        unset _fpe_diffusers_main
+    fi
     # If the desktop app specifies a minimum required backend version and the installed
     # package is older than that requirement, force the dependency pass to upgrade it.
     if [ -n "${UNSLOTH_DESKTOP_BACKEND_VERSION:-}" ]; then

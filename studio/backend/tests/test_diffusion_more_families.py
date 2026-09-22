@@ -734,7 +734,7 @@ def test_the_pinned_prebuilt_is_one_that_can_load_qwen_image_21():
 
 def test_a_minimum_that_has_not_shipped_does_not_prescribe_an_impossible_upgrade():
     """``pip install -U 'diffusers>=0.41.0'`` has no candidate while 0.41.0 is unreleased, so the
-    refusal has to name the pinned main build Studio actually installs for this class."""
+    refusal has to point at the pinned main build Studio installs for this class."""
     from core.inference.diffusion_families import (
         _PIPELINE_MIN_DIFFUSERS,
         _UNRELEASED_MIN_DIFFUSERS,
@@ -743,8 +743,12 @@ def test_a_minimum_that_has_not_shipped_does_not_prescribe_an_impossible_upgrade
 
     message = _too_old_message("QwenImage21Pipeline", "qwen-image-2.1", "0.40.0")
     assert "pip install -U 'diffusers>=0.41.0'" not in message
-    assert "diffusers-main.txt" in message
     assert "has not been released yet" in message
+    # The remedy has to work on a packaged install: no repo-relative path, and it names git, the
+    # thing a desktop host most often lacks when the pinned build was skipped.
+    assert "studio/backend/requirements" not in message
+    assert "git" in message
+    assert "unsloth studio update" in message
 
     # A released minimum keeps the ordinary remedy.
     released = _too_old_message("Krea2Pipeline", "krea-2", "0.38.0")

@@ -9533,6 +9533,21 @@ def _has_working_git() -> bool:
     exe = shutil.which("git")
     if exe is None:
         return False
+    # As install.sh: on macOS /usr/bin/git is a Command Line Tools shim, and running it with no
+    # toolchain selected raises the "install developer tools" dialog. The setup fast path asks
+    # this on every update, so answer from the path instead of popping that dialog each time.
+    if IS_MACOS and os.path.realpath(exe) == "/usr/bin/git":
+        try:
+            selected = subprocess.run(
+                ["xcode-select", "-p"],
+                stdout = subprocess.DEVNULL,
+                stderr = subprocess.DEVNULL,
+                timeout = 30,
+            ).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            selected = False
+        if not selected:
+            return False
     try:
         return (
             subprocess.run(
@@ -10497,6 +10512,11 @@ DIFFUSERS_MAIN_ENV = "UNSLOTH_DIFFUSERS_MAIN"
 # for anything older, so 3.9 is a supported install this step can never satisfy.
 DIFFUSERS_MAIN_MIN_PYTHON = (3, 10)
 
+# Why this pass kept the release instead of the pinned main build ("no_git" or "failed"), for
+# the closing report. The mid-pass note scrolls away under the progress bar, and the install
+# still ends "installed", so without this nobody learns a model family is off until it refuses.
+_DIFFUSERS_MAIN_FALLBACK: "str | None" = None
+
 
 def _diffusers_main_requested() -> bool:
     """Whether this install wants the pinned Diffusers main build. Default: yes.
@@ -10563,6 +10583,7 @@ def _diffusers_main_step() -> None:
     fixed before any of this is known. An early return without a _progress leaves the bar short of
     its own total for precisely the users who opted out.
     """
+    global _DIFFUSERS_MAIN_FALLBACK
     if not _diffusers_main_requested():
         _progress("diffusers main (opted out, skipped)")
         return
@@ -10578,6 +10599,7 @@ def _diffusers_main_step() -> None:
         _progress("diffusers main (skipped, no pin file)")
         return
     if not _has_working_git():
+        _DIFFUSERS_MAIN_FALLBACK = "no_git"
         _progress("diffusers main (skipped, no git)")
         _note(
             "No working git, so this install keeps the pinned Diffusers release instead of the "
@@ -10607,6 +10629,7 @@ def _diffusers_main_step() -> None:
         req = req,
         constrain = False,
     ):
+        _DIFFUSERS_MAIN_FALLBACK = "failed"
         _record_step("diffusers-main.txt", "skipped")
         _note(
             "Could not install the pinned Diffusers main build, so this install keeps the pinned "
@@ -10614,6 +10637,41 @@ def _diffusers_main_step() -> None:
             f"will refuse with a message naming the version they want. Set {DIFFUSERS_MAIN_ENV}=0 "
             "to stop trying.",
         )
+
+
+def _diffusers_main_needs_dependency_pass() -> bool:
+    """Whether an up-to-date install should still run the pass to lay down the pinned main build.
+
+    The setup fast path skips the whole pass once the package is current, so a host that had no
+    git at install time kept the release forever: installing git and running `unsloth studio
+    update` answered "up to date" and never reached _diffusers_main_step. Gated on git being
+    usable NOW, so a host that still has none keeps the fast path instead of a pass per update.
+    """
+    if not _diffusers_main_requested() or sys.version_info < DIFFUSERS_MAIN_MIN_PYTHON:
+        return False
+    req = REQ_ROOT / "diffusers-main.txt"
+    if not req.is_file() or not _has_working_git():
+        return False
+    return not _diffusers_main_resident(req)
+
+
+def _report_diffusers_main_fallback() -> None:
+    """Say, after the install, that the pinned main build is missing and how to get it."""
+    if _DIFFUSERS_MAIN_FALLBACK is None:
+        return
+    if _DIFFUSERS_MAIN_FALLBACK == "no_git":
+        cause = "git was not found, so the pinned Diffusers main build was skipped."
+        remedy = "Install git, then run: unsloth studio update"
+    else:
+        cause = "the pinned Diffusers main build could not be installed from github.com."
+        remedy = "Check that github.com is reachable, then run: unsloth studio update"
+    _step(
+        "diffusers",
+        "models that need an unreleased Diffusers (Qwen-Image-2.1) will not load:",
+        _cyan,
+    )
+    _step("", cause, _cyan)
+    _step("", remedy, _cyan)
 
 
 def _recorded_direct_url(dist_name: str) -> "dict | None":
@@ -11727,6 +11785,8 @@ def install_python_stack() -> int:
     if IS_MAC_ARM and not NO_TORCH:
         _report_mlx_stack_health(skipped = _STEP_RESULTS.get("mlx") == "skipped")
 
+    _report_diffusers_main_fallback()
+
     _step(_LABEL, "installed")
     return 0
 
@@ -11752,6 +11812,9 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--missing-torch-needs-dependency-pass"]:
         # Exit 0 forces the dependency pass; exit 1 keeps the fast path.
         sys.exit(0 if _missing_torch_needs_dependency_pass() else 1)
+    if sys.argv[1:] == ["--diffusers-main-needs-dependency-pass"]:
+        # Exit 0 forces the dependency pass; exit 1 keeps the fast path.
+        sys.exit(0 if _diffusers_main_needs_dependency_pass() else 1)
     if any(_arg.startswith("-") for _arg in sys.argv[1:]):
         # Never let a malformed probe call fall through into a multi-gigabyte install.
         _safe_print(f"Unknown argument: {' '.join(sys.argv[1:])}")

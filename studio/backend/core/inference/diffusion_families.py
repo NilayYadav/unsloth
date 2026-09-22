@@ -1299,9 +1299,9 @@ def _too_old_message(pipeline_class: str, family_name: str, installed: str) -> s
         return (
             f"'{family_name}' needs diffusers >= {minimum} ({pipeline_class}), which has not been "
             f"released yet; this environment has diffusers {installed}. Unsloth installs a pinned "
-            "build of diffusers main for this, so re-run the Unsloth installer (and leave "
-            "UNSLOTH_DIFFUSERS_MAIN unset), or install it directly with: pip install -r "
-            "studio/backend/requirements/diffusers-main.txt"
+            "build of diffusers main for this, which needs git and access to github.com. Install "
+            "git if it is missing, leave UNSLOTH_DIFFUSERS_MAIN unset, then run: unsloth studio "
+            "update"
         )
     remedy = f"Upgrade with: pip install -U 'diffusers>={minimum}'."
     if needs_py310:

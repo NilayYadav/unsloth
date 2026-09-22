@@ -610,3 +610,114 @@ def test_the_full_deps_escape_hatch_reaches_both_diffusers_steps(monkeypatch):
     assert installed == [], installed
     assert len(calls) == 1 and "opted out" in calls[0], calls
     assert module._diffusers_main_supersedes_release() is False
+
+
+def _run_step_and_report(module, monkeypatch, *, git: bool, builds: bool, resident: bool = False):
+    monkeypatch.delenv("UNSLOTH_DIFFUSERS_MAIN", raising = False)
+    monkeypatch.setattr(module, "_has_working_git", lambda: git)
+    monkeypatch.setattr(module, "_direct_reference_is_installed", lambda *a, **k: resident)
+    monkeypatch.setattr(module, "_payload_recorded_intact", lambda *a, **k: resident)
+    monkeypatch.setattr(module, "_progress", lambda *a, **k: None)
+    monkeypatch.setattr(module, "_note", lambda *a, **k: None)
+    monkeypatch.setattr(module, "_record_step", lambda *a, **k: None)
+    monkeypatch.setattr(module, "pip_install_try", lambda *a, **k: builds)
+    lines = []
+    monkeypatch.setattr(module, "_step", lambda label, value, *a, **k: lines.append(value))
+    module._diffusers_main_step()
+    module._report_diffusers_main_fallback()
+    return " ".join(lines)
+
+
+def test_a_skipped_main_build_is_reported_after_the_install(monkeypatch):
+    """The mid-pass note scrolls away under the progress bar and the install still ends
+    "installed", so the closing report is what tells a desktop user a model family is off."""
+    no_git = _run_step_and_report(
+        _probe_module("install_python_stack_report1"), monkeypatch, git = False, builds = False
+    )
+    assert "Qwen-Image-2.1" in no_git
+    assert "git was not found" in no_git
+    assert "Install git, then run: unsloth studio update" in no_git
+
+    failed = _run_step_and_report(
+        _probe_module("install_python_stack_report2"), monkeypatch, git = True, builds = False
+    )
+    assert "github.com" in failed and "unsloth studio update" in failed
+
+    for name, kwargs in (
+        ("install_python_stack_report3", {"git": True, "builds": True}),
+        ("install_python_stack_report4", {"git": True, "builds": False, "resident": True}),
+    ):
+        assert _run_step_and_report(_probe_module(name), monkeypatch, **kwargs) == "", kwargs
+
+
+def test_the_fast_path_escape_fires_only_when_git_can_lay_down_the_build(monkeypatch):
+    """Installing git and running `unsloth studio update` must reach the step, which the setup
+    fast path skipped once the package was current. A host that still has no git keeps the fast
+    path, or every update would run a pass that can only skip the step again."""
+    module = _probe_module("install_python_stack_escape")
+    monkeypatch.delenv("UNSLOTH_DIFFUSERS_MAIN", raising = False)
+    monkeypatch.setattr(module, "_payload_recorded_intact", lambda *a, **k: True)
+
+    def needs(git: bool, resident: bool) -> bool:
+        monkeypatch.setattr(module, "_has_working_git", lambda: git)
+        monkeypatch.setattr(module, "_direct_reference_is_installed", lambda *a, **k: resident)
+        return module._diffusers_main_needs_dependency_pass()
+
+    assert needs(git = True, resident = False) is True
+    assert needs(git = True, resident = True) is False
+    assert needs(git = False, resident = False) is False
+
+    monkeypatch.setenv(module.DIFFUSERS_MAIN_ENV, "0")
+    assert needs(git = True, resident = False) is False
+
+
+def test_the_fast_path_probe_is_a_recognised_flag(tmp_path):
+    """setup.sh reads exit 2 (unknown flag) as "keep the fast path", so a typo in either place
+    would silently disable the escape. Opted out, the answer is a deterministic 1."""
+    import os
+    import sys
+
+    env = {**os.environ, "UNSLOTH_DIFFUSERS_MAIN": "0"}
+    result = subprocess.run(
+        [sys.executable, str(STACK), "--diffusers-main-needs-dependency-pass"],
+        capture_output = True,
+        text = True,
+        env = env,
+        timeout = 120,
+    )
+    assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
+
+
+def test_the_git_probe_does_not_run_the_macos_shim_without_a_toolchain(monkeypatch):
+    """The fast-path escape asks for git on every update, and on a Mac with no Command Line Tools
+    running /usr/bin/git pops the install-developer-tools dialog. Answer from the path instead."""
+    module = _probe_module("install_python_stack_git_shim")
+    monkeypatch.setattr(module, "IS_MACOS", True)
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/git")
+    ran = []
+
+    def fake_run(cmd, *a, **k):
+        ran.append(pathlib.Path(cmd[0]).name)
+        return subprocess.CompletedProcess(cmd, 0 if ran[-1] == "git" else 2)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    assert module._has_working_git() is False
+    assert ran == ["xcode-select"], ran
+
+    ran.clear()
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda cmd, *a, **k: (
+            ran.append(pathlib.Path(cmd[0]).name),
+            subprocess.CompletedProcess(cmd, 0),
+        )[1],
+    )
+    assert module._has_working_git() is True
+    assert ran == ["xcode-select", "git"], ran
+
+    # A Homebrew git is a real binary: no toolchain question.
+    ran.clear()
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/opt/homebrew/bin/git")
+    assert module._has_working_git() is True
+    assert ran == ["git"], ran
