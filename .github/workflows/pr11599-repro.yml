@@ -1,0 +1,46 @@
+name: "PR 11599 repro: delete GGUF quant frees shared blob"
+on:
+  push:
+    branches: ["pr11599-repro-*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: "pr11599-repro-${{ github.ref }}"
+  cancel-in-progress: true
+jobs:
+  probe:
+    name: "delete Q2_K (${{ matrix.os }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Install Studio backend deps and huggingface_hub 1.32
+        shell: bash
+        run: |
+          python -m pip install -q -r studio/backend/requirements/studio.txt
+          python -m pip install -q "huggingface_hub==1.32.0"
+      - name: deletion.py under test
+        shell: bash
+        run: git log -1 --format='%H %s' -- studio/backend/hub/services/models/deletion.py; sha256sum studio/backend/hub/services/models/deletion.py || shasum -a 256 studio/backend/hub/services/models/deletion.py
+      - name: Real download, Studio delete, measure disk
+        shell: bash
+        env:
+          FACTS_OUT: facts-${{ matrix.os }}.json
+          PYTHONUTF8: "1"
+        run: python .github/pr11599/probe.py
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: facts-${{ matrix.os }}
+          path: facts-${{ matrix.os }}.json
+          if-no-files-found: ignore
