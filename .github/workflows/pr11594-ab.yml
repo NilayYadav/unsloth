@@ -1,0 +1,58 @@
+name: "PR 11594 Xet stall watchdog A/B"
+
+on:
+  push:
+    branches: ["pr11594-ab-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr11594-ab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: "${{ matrix.os }} / ${{ matrix.scenario }}"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-latest]
+        scenario: [frozen-sensors, force-stall]
+        include:
+          - scenario: frozen-sensors
+            expect: survives
+          - scenario: force-stall
+            expect: killed
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install backend download deps
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r studio/backend/requirements/studio.txt
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple torch
+          else
+            pip install torch
+          fi
+          pip install 'transformers>=4.51,<5.5' unsloth_zoo psutil
+          python -c "from importlib.metadata import version as v; print('hf_hub', v('huggingface_hub'), 'hf_xet', v('hf_xet'), 'zoo', v('unsloth_zoo'))"
+          echo "commit under test: $(git rev-parse HEAD)"
+          ls studio/backend/hub/utils/download_heartbeat.py 2>/dev/null && echo "fix present" || echo "fix absent"
+      - name: Probe
+        shell: bash
+        env:
+          HF_HOME: ${{ runner.temp }}/hf-${{ matrix.scenario }}
+          UNSLOTH_XET_STALL_TIMEOUT: "5"
+          PROBE_EXPECT: ${{ matrix.expect }}
+          PROBE_TIMEOUT: "900"
+          PROBE_REPO: unsloth/Qwen3-1.7B
+          UNSLOTH_ZOO_DISABLE_GPU_INIT: ${{ runner.os == 'Linux' && '1' || '' }}
+        run: python .github/pr11594_probe.py ${{ matrix.scenario }}
