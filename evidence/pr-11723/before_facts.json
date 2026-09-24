@@ -1,0 +1,100 @@
+{
+  "label": "before",
+  "sha": "5e86ffc4357bf448f405838cfb10a0fb8c694c51",
+  "branch": "pr11723-ui-before",
+  "command": "yes \"$(printf '%01023d' 0 | tr 0 x)\" | head -n 1572864; echo LAST-LINE-MARKER",
+  "expected_total_chars": 1610612753,
+  "tool_timeout_minutes": 15,
+  "viewport": [
+    1366,
+    800
+  ],
+  "host_mem_total_mib": 15990,
+  "backend_pid_is_launcher": true,
+  "backend_cmd": "/home/runner/work/unsloth/unsloth/.studio-live/home/unsloth_studio/bin/python /home/runner/work/unsloth/unsloth/.studio-live/home/bin/unsloth studio -H",
+  "provider_registered": true,
+  "code_pill_active": "true",
+  "seeded_tool_call_timeout_minutes": "15",
+  "approvals_clicked": 0,
+  "turn_seconds": 12.8,
+  "tool_cards_rendered": 1,
+  "card_trigger_text": "Used tool: $ yes \"$(printf '%01023d' 0 | tr 0 x)\" | head -n 1572864; echo",
+  "ui_answer_text": "Studio handed me a 15,679-char tool message with ... (truncated to 16000 chars for the model; showing lines 1-15 of 1572866, 1610612753 chars total. LAST-LINE-MARKER is absent in it. Test harness: Studio backend RSS rose +4,054 MiB during this call (379 -> 4,433 MiB).",
+  "screenshot": "before_chat.png",
+  "card_output_chars": 200212,
+  "card_shows_stream_cap_notice": true,
+  "card_shows_truncation_notice": false,
+  "card_screenshot": "before_card_open.png",
+  "provider_completions": 2,
+  "terminal_offered_to_model": true,
+  "tool_message_len": 15679,
+  "tool_message_notice": "... (truncated to 16000 chars for the model; showing lines 1-15 of 1572866, 1610612753 chars total",
+  "tool_message_tail": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\n... (truncated to 16000 chars for the model; showing lines 1-15 of 1572866, 1610612753 chars total. The first 8388608 bytes of it are saved to .unsloth_tool_output/28e3da77eaca.txt, and any files the code wrote persist in the working directory -- continue with:\n  sed -n '16,30p' .unsloth_tool_output/28e3da77eaca.txt)",
+  "tool_message_has_chars_total": true,
+  "tool_message_has_last_line_marker": false,
+  "tool_message_reports_expected_total": true,
+  "rss_at_answer_request": {
+    "base_mib": 378.8,
+    "peak_mib": 4433.3,
+    "delta_mib": 4054.5,
+    "samples": 100
+  },
+  "stand_in_answer": "Studio handed me a 15,679-char tool message with `... (truncated to 16000 chars for the model; showing lines 1-15 of 1572866, 1610612753 chars total`. LAST-LINE-MARKER is absent in it. Test harness: Studio backend RSS rose +4,054 MiB during this call (379 -> 4,433 MiB).",
+  "backend_rss_turn": {
+    "base_mib": 378.8,
+    "peak_mib": 4433.3,
+    "delta_mib": 4054.5,
+    "samples": 121
+  },
+  "backend_rss_after_turn_mib": 391.8,
+  "rss_marks_s": {
+    "send": 7.94,
+    "answer_request": 18.51,
+    "done": 20.76,
+    "settled": 31.52
+  },
+  "process_peaks_mib": [
+    {
+      "pid": 4866,
+      "name": "unsloth",
+      "cmd": "/home/runner/work/unsloth/unsloth/.studio-live/home/unsloth_studio/bin/python /home/runner/work/unsloth/unsloth/.studio-live/home/bin/unsloth studio",
+      "first_mib": 279.0,
+      "peak_mib": 4493.3
+    },
+    {
+      "pid": 5043,
+      "name": "python",
+      "cmd": "/home/runner/work/unsloth/unsloth/.studio-live/home/unsloth_studio/bin/python /home/runner/work/unsloth/unsloth/studio/install_llama_prebuilt.py --resolve-backe",
+      "first_mib": 34.7,
+      "peak_mib": 42.9
+    },
+    {
+      "pid": 5044,
+      "name": "python",
+      "cmd": "/home/runner/work/unsloth/unsloth/.studio-live/home/unsloth_studio/bin/python -I /home/runner/work/unsloth/unsloth/studio/nvidia_probe.py",
+      "first_mib": 16.7,
+      "peak_mib": 16.7
+    },
+    {
+      "pid": 5048,
+      "name": "unsloth",
+      "cmd": "",
+      "first_mib": 0.0,
+      "peak_mib": 3.5
+    },
+    {
+      "pid": 5052,
+      "name": "head",
+      "cmd": "head -n 1572864",
+      "first_mib": 1.9,
+      "peak_mib": 1.9
+    },
+    {
+      "pid": 5051,
+      "name": "yes",
+      "cmd": "yes xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "first_mib": 1.8,
+      "peak_mib": 1.8
+    }
+  ]
+}
