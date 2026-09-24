@@ -24,7 +24,6 @@ import urllib.request
 from pathlib import Path
 
 import httpx
-from studio_test_kit.auth import login
 
 NOMIC = ("nomic-ai/nomic-embed-text-v1.5-GGUF", "Q4_K_M", 768)
 BGE = ("gpustack/bge-m3-GGUF", "Q4_K_M", 1024)
@@ -138,6 +137,7 @@ def load(c: Client, repo: str, variant: str) -> dict:
     if code != 200:
         raise SystemExit(f"FAIL load {repo}: HTTP {code} {json.dumps(body)[:800]}")
     end = time.time() + 1500
+    st: dict = {}
     while time.time() < end:
         code, st = c.call("GET", "/api/inference/status")
         if code == 200 and not st.get("loading") and st.get("is_gguf") and repo in json.dumps(st):
@@ -149,6 +149,7 @@ def load(c: Client, repo: str, variant: str) -> dict:
     argv = servers[-1]["argv"]
     return {
         "repo": repo, "variant": variant, "load_seconds": round(time.time() - t0),
+        "model": st.get("active_model") or repo,
         "estimate": estimate, "pid": servers[-1]["pid"],
         "launch": {"ctx": flag(argv, "-c", "--ctx-size"), "batch": flag(argv, "-b", "--batch-size"),
                    "ubatch": flag(argv, "-ub", "--ubatch-size"), "embedding": "--embedding" in argv,
@@ -225,9 +226,10 @@ async def main() -> None:
     try:
         wait_health(base)
         pw = bootstrap_password(home)
-        auth = await login(base, "unsloth", pw)
-        token = auth.access_token
-        if auth.must_change_password:
+        r = httpx.post(f"{base}/api/auth/login", json={"username": "unsloth", "password": pw}, timeout=30)
+        r.raise_for_status()
+        token = r.json()["access_token"]
+        if r.json().get("must_change_password"):
             r = httpx.post(f"{base}/api/auth/change-password", headers={"Authorization": f"Bearer {token}"},
                            json={"current_password": pw, "new_password": "UnslothStudioCI2026!"}, timeout=30)
             r.raise_for_status()
@@ -235,15 +237,15 @@ async def main() -> None:
         c = Client(base, token)
 
         nomic = load(c, NOMIC[0], NOMIC[1])
-        nomic["embeddings"] = {k: embed(c, NOMIC[0], v, nomic["pid"]) for k, v in INPUTS.items()}
+        nomic["embeddings"] = {k: embed(c, nomic["model"], v, nomic["pid"]) for k, v in INPUTS.items()}
         nomic["rss_mib_after"] = rss_mib(nomic["pid"])
         facts["nomic"] = nomic
         log("NOMIC " + json.dumps(nomic))
 
         try:
             bge = load(c, BGE[0], BGE[1])
-            bge["embeddings"] = {"short": embed(c, BGE[0], INPUTS["short"], bge["pid"]),
-                                 "very_long": embed(c, BGE[0], BGE_INPUT, bge["pid"])}
+            bge["embeddings"] = {"short": embed(c, bge["model"], INPUTS["short"], bge["pid"]),
+                                 "very_long": embed(c, bge["model"], BGE_INPUT, bge["pid"])}
             bge["rss_mib_after"] = rss_mib(bge["pid"])
             facts["bge_m3"] = bge
             log("BGE " + json.dumps(bge))
