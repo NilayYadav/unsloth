@@ -60,6 +60,7 @@ import { useIsCompact } from "@/hooks/use-mobile";
 import { useT } from "@/i18n";
 import { ChevronDownStandardIcon } from "@/lib/chevron-icons";
 import { toast } from "@/lib/toast";
+import { watchChatSettingsInset } from "@/lib/toast-offset";
 import { cn } from "@/lib/utils";
 import { Edit03Icon, LayoutAlignRightIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -513,6 +514,15 @@ export function ChatSettingsPanel({
   const activeNativePathToken = useChatRuntimeStore(
     (s) => s.activeNativePathToken,
   );
+  // Toasts and the corner rail read this to stay off the open panel.
+  useEffect(() => {
+    if (!open || isCompact) return;
+    return watchChatSettingsInset(
+      document.documentElement,
+      asideRef.current,
+      settingsWidth * settingsScale,
+    );
+  }, [open, isCompact, settingsWidth, settingsScale]);
   const currentCheckpoint = params.checkpoint;
   const activeModelIsLocal = useChatRuntimeStore(
     (s) => s.activeModelIsLocal,
