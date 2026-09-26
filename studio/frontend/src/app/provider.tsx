@@ -46,11 +46,7 @@ import { useTauriUpdate } from "@/hooks/use-tauri-update";
 import { useUiSpaceScale } from "@/hooks/use-ui-space-scale";
 import { isTauri } from "@/lib/api-base";
 import { followDesktopUpdateScreen } from "@/lib/desktop-update-activity";
-import {
-  CHAT_SETTINGS_INSET_VAR,
-  getToastOffsets,
-  insetPastChatSettings,
-} from "@/lib/toast-offset";
+import { getToastOffsets } from "@/lib/toast-offset";
 import { Z_LAYER } from "@/lib/z-layers";
 import { useRouterState } from "@tanstack/react-router";
 import { setDesktopShellReady } from "./desktop-shell-ready";
@@ -107,9 +103,6 @@ const STACK_SHADOW_GUTTER_TOP = 16;
 const STACK_SHADOW_GUTTER_LEFT = 28;
 // The cards' own inset from the right edge, not a gutter: the rail is flush there.
 const STACK_CARD_INSET_RIGHT = 16;
-// That inset plus the open Run settings panel, so the stack lands in the chat area. The rail stays
-// flush with the corner: only its padding grows.
-const STACK_CARD_INSET_RIGHT_PAST_PANEL = `calc(${STACK_CARD_INSET_RIGHT}px + var(${CHAT_SETTINGS_INSET_VAR}, 0px))`;
 
 // macos page zoom does not change dpr; windows already includes zoom in its dpr.
 function logicalPerCssPx(monitorScale: number): number {
@@ -509,7 +502,7 @@ function TauriUpdateLayer({
         paddingTop: STACK_SHADOW_GUTTER_TOP,
         paddingBottom: STACK_SHADOW_GUTTER_BOTTOM,
         paddingLeft: STACK_SHADOW_GUTTER_LEFT,
-        paddingRight: STACK_CARD_INSET_RIGHT_PAST_PANEL,
+        paddingRight: STACK_CARD_INSET_RIGHT,
         zIndex: Z_LAYER.OVERLAY_STACK,
       }}
     >
@@ -871,7 +864,7 @@ function TauriWrapper({ children }: { children: ReactNode }) {
             paddingTop: STACK_SHADOW_GUTTER_TOP,
             paddingBottom: STACK_SHADOW_GUTTER_BOTTOM,
             paddingLeft: STACK_SHADOW_GUTTER_LEFT,
-            paddingRight: STACK_CARD_INSET_RIGHT_PAST_PANEL,
+            paddingRight: STACK_CARD_INSET_RIGHT,
             zIndex: Z_LAYER.OVERLAY_STACK,
           }}
         >
@@ -1070,7 +1063,7 @@ export function AppProvider({ children }: AppProviderProps) {
           visibleToasts={2}
           expand={true}
           closeButton={true}
-          offset={insetPastChatSettings(toastOffsets.default)}
+          offset={toastOffsets.default}
           mobileOffset={toastOffsets.mobile}
         />
       </TooltipProvider>
