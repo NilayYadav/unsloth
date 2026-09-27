@@ -57,7 +57,6 @@ import {
   type AccountSetupCode,
   type StudioAccount,
 } from "../api/accounts";
-import { ManagedProviderUrlsSection } from "../components/managed-provider-urls-section";
 
 export function AccountsTab() {
   const owner = useIsAccountOwner();
@@ -445,8 +444,6 @@ function OwnerAccountsTab() {
             </p>
           )}
       </section>
-
-      <ManagedProviderUrlsSection />
 
       <Dialog
         open={editorOpen}
