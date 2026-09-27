@@ -1395,16 +1395,42 @@ def get_systemone_settings(
     return _systemone_response()
 
 
-@_shared_settings_router.get("/auto-router")
-async def get_auto_router_settings(current_subject: str = Depends(get_current_subject)):
-    from core.inference.auto_router import RouterProfile, get_profile
-    from hub.services.models import account_access
-    from routes.inference import _openai_catalog_objects
+def _validation_message(exc: ValidationError) -> str:
+    return "; ".join(str(error["msg"]).removeprefix("Value error, ") for error in exc.errors())
 
-    profile = get_profile()
-    if not account_access.managed_account():
-        return profile
-    available = {entry["id"].casefold() for entry in await _openai_catalog_objects()}
+
+def _auto_router_laya_status(profile) -> str:
+    from core.inference import auto_router
+
+    if not auto_router.needs_laya(profile):
+        return "not_needed"
+    if auto_router._laya_agent is not None:
+        return "ready"
+    loader = auto_router._laya_loader
+    if loader is not None and loader.is_alive():
+        return "loading"
+    if time.monotonic() < auto_router._laya_retry_at:
+        return "unavailable"
+    auto_router.warm_laya()
+    return "ready" if auto_router._laya_agent is not None else "loading"
+
+
+async def _auto_router_capabilities(model_ids: list[str]) -> list[dict]:
+    from core.inference.auto_router_capabilities import detect_capabilities
+
+    semaphore = asyncio.Semaphore(4)
+
+    async def probe(model_id: str) -> dict:
+        async with semaphore:
+            return await asyncio.to_thread(detect_capabilities, model_id)
+
+    return await asyncio.gather(*(probe(model_id) for model_id in model_ids))
+
+
+def _visible_auto_router_profile(profile, catalog: list[dict]):
+    from core.inference.auto_router import RouterProfile
+
+    available = {entry["id"].casefold() for entry in catalog}
     models = [model for model in profile.models if model.id.casefold() in available]
     if profile.default_model not in {model.id for model in models}:
         return RouterProfile()
@@ -1412,6 +1438,48 @@ async def get_auto_router_settings(current_subject: str = Depends(get_current_su
         models = models, default_model = profile.default_model,
         rules = [rule for rule in profile.rules if rule.model in {model.id for model in models}],
     )
+
+
+@_shared_settings_router.get("/auto-router")
+async def get_auto_router_settings(current_subject: str = Depends(get_current_subject)):
+    from core.inference.auto_router import get_profile
+    from hub.services.models import account_access
+    from routes.inference import _openai_catalog_objects
+
+    profile = get_profile()
+    if account_access.managed_account():
+        profile = _visible_auto_router_profile(profile, await _openai_catalog_objects())
+    return {**profile.model_dump(), "laya": _auto_router_laya_status(profile)}
+
+
+@_owner_settings_router.get("/auto-router/candidates")
+async def get_auto_router_candidates(current_subject: str = Depends(get_current_subject)):
+    from core.inference.auto_router_capabilities import suggest_tasks
+    from routes.inference import _openai_catalog_objects
+
+    entries = [
+        entry
+        for entry in await _openai_catalog_objects()
+        if entry.get("task") is None and entry.get("id") and entry["id"] != "auto"
+    ]
+    capabilities = await _auto_router_capabilities([entry["id"] for entry in entries])
+    models = []
+    for entry, caps in zip(entries, capabilities):
+        context_length = caps["context_length"]
+        if context_length is None:
+            for key in ("native_context_length", "max_context_length"):
+                if isinstance(entry.get(key), int) and entry[key] >= 256:
+                    context_length = entry[key]
+                    break
+        models.append({
+            "id": entry["id"],
+            "name": entry.get("display_name") or entry["id"],
+            "vision": caps["vision"],
+            "tools": caps["tools"],
+            "context_length": context_length,
+            "tasks": suggest_tasks(entry["id"], caps["vision"]),
+        })
+    return {"models": models}
 
 
 @_owner_settings_router.put("/auto-router")
@@ -1424,7 +1492,7 @@ async def update_auto_router_settings(
     try:
         profile = RouterProfile.model_validate(payload)
     except ValidationError as exc:
-        raise HTTPException(status_code = 400, detail = str(exc)) from None
+        raise HTTPException(status_code = 400, detail = _validation_message(exc)) from None
     available = {
         entry["id"].casefold()
         for entry in await _openai_catalog_objects()
@@ -1433,7 +1501,11 @@ async def update_auto_router_settings(
     missing = [model.id for model in profile.models if model.id.casefold() not in available]
     if missing:
         raise HTTPException(status_code = 400, detail = f"Download these models first: {', '.join(missing)}")
-    return save_profile(profile)
+    unsized = [model for model in profile.models if model.context_length is None]
+    for model, caps in zip(unsized, await _auto_router_capabilities([model.id for model in unsized])):
+        model.context_length = caps["context_length"]
+    profile = save_profile(profile)
+    return {**profile.model_dump(), "laya": _auto_router_laya_status(profile)}
 
 
 @_owner_settings_router.put("/systemone", response_model = SystemOneSettingsResponse)

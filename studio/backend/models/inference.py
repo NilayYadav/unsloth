@@ -59,6 +59,7 @@ class LoadRequest(BaseModel):
     # `()` is both the default and auto-switch's deliberate "do not widen", so only this
     # marker separates unset from explicitly empty.
     _gguf_companion_roots_set: bool = PrivateAttr(default = False)
+    _replace_if_short: bool = PrivateAttr(default = False)
     load_request_id: Optional[str] = Field(
         None,
         min_length = 1,

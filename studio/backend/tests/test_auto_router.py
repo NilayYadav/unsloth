@@ -137,3 +137,33 @@ def test_laya_unavailable_keeps_the_loaded_model(monkeypatch):
     monkeypatch.setattr(auto_router, "_classify", unavailable)
     assert route(prompt="Write a Python function", current="coder").model == "coder"
     assert route(prompt="Write a Python function").reason == "default while Laya is unavailable"
+
+
+def test_prefers_a_loaded_model_that_serves_the_task(monkeypatch):
+    monkeypatch.setattr(auto_router, "_classify", lambda prompt, choices: ("code", 0.8))
+    pool = RouterProfile.model_validate(
+        {
+            "models": [
+                {"id": "coder-a", "tasks": ["code"]},
+                {"id": "coder-b", "tasks": ["code"]},
+                {"id": "general", "tasks": ["general"]},
+            ],
+            "default_model": "general",
+        }
+    )
+    decision = choose_model(
+        pool, prompt="Write a Python function", image=False, tools=False,
+        estimated_tokens=20, current_model=None, resident=frozenset({"coder-b", "general"}),
+    )
+    assert decision.model == "coder-b"
+
+
+def test_fallbacks_prefer_loaded_then_default_and_skip_incapable_models(monkeypatch):
+    monkeypatch.setattr(auto_router, "_classify", lambda prompt, choices: ("code", 0.8))
+    decision = route(prompt="Write a Python function", tools=True, current="general")
+    assert decision.model == "coder"
+    assert decision.fallbacks == ("general",)
+
+
+def test_pinned_choice_has_no_fallbacks():
+    assert route(pin="coder").fallbacks == ()

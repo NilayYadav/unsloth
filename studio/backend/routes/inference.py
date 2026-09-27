@@ -8723,13 +8723,39 @@ def _switch_model_for_payload(payload) -> str:
     return payload.model if "model" in payload.model_fields_set else _RELOAD_ONLY_MODEL
 
 
+def _message_role(message):
+    return message.get("role") if isinstance(message, dict) else getattr(message, "role", None)
+
+
+def _message_content(message):
+    return message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+
+
+def _auto_router_session_id(request: Request, payload, messages) -> Optional[str]:
+    session_id = request.headers.get("x-unsloth-router-session") or getattr(payload, "thread_id", None)
+    if isinstance(session_id, str) and 0 < len(session_id) <= 128:
+        return session_id
+    first_user = next((m for m in messages if _message_role(m) == "user"), None)
+    if first_user is None:
+        return None
+    system = getattr(payload, "system", None) or next(
+        (_message_content(m) for m in messages if _message_role(m) in ("system", "developer")), None
+    )
+    seed = json.dumps(
+        [_monitor_content_text(system), _monitor_content_text(_message_content(first_user))],
+        ensure_ascii = False,
+    )
+    return "conversation:" + _hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
+
+
 async def _resolve_auto_model(
-    payload, request: Request, messages, *, image: bool = False, subject: str = ""
+    payload, request: Request, messages, *, image: bool = False, subject: str = "",
+    count_only: bool = False,
 ) -> None:
     if getattr(payload, "model", None) != "auto":
         return
     from core.inference.auto_router import (
-        RouterProfile, choose_model, get_profile, session_model,
+        RouterDecision, RouterProfile, choose_model, get_profile, remember_session, session_model,
     )
 
     profile = await asyncio.to_thread(get_profile)
@@ -8745,53 +8771,55 @@ async def _resolve_auto_model(
         raise HTTPException(status_code = 400, detail = "Auto's default model is no longer available. Update Router settings.")
     profile = RouterProfile(models = models, default_model = profile.default_model,
                             rules = [r for r in profile.rules if r.model in {m.id for m in models}])
-    resident = await asyncio.to_thread(_openai_model_objects)
-    resident_ids = {entry["id"] for entry in resident}
-    current = next((model.id for model in models if model.id in resident_ids), None)
-    session_id = request.headers.get("x-unsloth-router-session") or getattr(
-        payload, "thread_id", None
+    loaded = {entry["id"].casefold() for entry in await asyncio.to_thread(_openai_model_objects)}
+    resident = frozenset(model.id for model in models if model.id.casefold() in loaded)
+    current = next((model.id for model in models if model.id in resident), None)
+    session_id = _auto_router_session_id(request, payload, messages)
+    remembered = session_model(subject, session_id) if session_id else None
+    if remembered in {model.id for model in models}:
+        current = remembered
+    extra = getattr(payload, "model_extra", None)
+    body_pin = extra.pop("router_pin", None) if isinstance(extra, dict) else None
+    pinned = request.headers.get("x-unsloth-router-pin") or (
+        body_pin if isinstance(body_pin, str) and body_pin else None
     )
-    if isinstance(session_id, str) and session_id and len(session_id) <= 128:
-        current = session_model(subject, session_id) or current
-    prompt = _monitor_prompt_from_messages(messages)
-    last_user = next(
-        (m for m in reversed(messages) if (m.get("role") if isinstance(m, dict) else m.role) == "user"),
-        None,
-    )
-    if last_user is not None:
-        prompt = _monitor_content_text(last_user.get("content") if isinstance(last_user, dict) else last_user.content) or prompt
-    pinned = request.headers.get("x-unsloth-router-pin")
-    last = messages[-1] if messages else None
-    last_role = last.get("role") if isinstance(last, dict) else getattr(last, "role", None)
-    last_content = last.get("content") if isinstance(last, dict) else getattr(last, "content", None)
-    tool_turn = last_role in ("tool", "function") or (
-        last_role == "user"
-        and isinstance(last_content, list)
-        and any(
-            (part.get("type") if isinstance(part, dict) else getattr(part, "type", None)) == "tool_result"
-            for part in last_content
+    if count_only:
+        decision = RouterDecision(pinned or current or profile.default_model, "counting with the serving model")
+    else:
+        prompt = _monitor_prompt_from_messages(messages)
+        last_user = next((m for m in reversed(messages) if _message_role(m) == "user"), None)
+        if last_user is not None:
+            prompt = _monitor_content_text(_message_content(last_user)) or prompt
+        last = messages[-1] if messages else None
+        last_content = _message_content(last) if last is not None else None
+        tool_turn = _message_role(last) in ("tool", "function") or (
+            _message_role(last) == "user"
+            and isinstance(last_content, list)
+            and any(
+                (part.get("type") if isinstance(part, dict) else getattr(part, "type", None)) == "tool_result"
+                for part in last_content
+            )
         )
-    )
-    follow_up = sum(
-        (m.get("role") if isinstance(m, dict) else m.role) == "user" for m in messages
-    ) > 1
-    estimated_tokens = _estimate_messages_tokens_without_media(
-        [m if isinstance(m, dict) else m.model_dump(exclude_none = True) for m in messages]
-    )
-    try:
-        decision = await asyncio.to_thread(
-            choose_model, profile, prompt = prompt, image = image,
-            tools = bool(getattr(payload, "tools", None)) or getattr(payload, "enable_tools", None) is True,
-            estimated_tokens = estimated_tokens,
-            current_model = current, pinned_model = pinned, follow_up = follow_up,
-            tool_turn = tool_turn,
+        follow_up = sum(_message_role(m) == "user" for m in messages) > 1
+        estimated_tokens = _estimate_messages_tokens_without_media(
+            [m if isinstance(m, dict) else m.model_dump(exclude_none = True) for m in messages]
         )
-    except ValueError as exc:
-        raise HTTPException(status_code = 400, detail = str(exc)) from None
+        try:
+            decision = await asyncio.to_thread(
+                choose_model, profile, prompt = prompt, image = image,
+                tools = bool(getattr(payload, "tools", None)) or getattr(payload, "enable_tools", None) is True,
+                estimated_tokens = estimated_tokens,
+                current_model = current, pinned_model = pinned, follow_up = follow_up,
+                tool_turn = tool_turn, resident = resident,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code = 400, detail = str(exc)) from None
+        if session_id:
+            remember_session(subject, session_id, decision.model)
     payload.model = decision.model
     request.state.auto_router_decision = decision
-    if isinstance(session_id, str) and session_id and len(session_id) <= 128:
-        request.state.auto_router_session = (subject, session_id)
+    request.state.auto_router_payload = payload
+    request.state.auto_router_session = (subject, session_id) if session_id and not count_only else None
 
 
 def _target_is_vision(
@@ -10482,11 +10510,41 @@ def _own_local_model_for_alias(alias: str) -> Optional[str]:
     return None
 
 
+async def _switch_with_auto_fallback(
+    decision, fastapi_request: Request, current_subject: str, switch_kwargs: dict
+) -> None:
+    from dataclasses import replace
+
+    from core.inference.auto_router import remember_session
+
+    state = fastapi_request.state
+    candidates = (decision.model, *decision.fallbacks[:2])
+    for candidate in candidates:
+        try:
+            await _maybe_auto_switch_model(
+                candidate, fastapi_request, current_subject, alongside = True, **switch_kwargs
+            )
+        except HTTPException as exc:
+            if exc.status_code < 404 or exc.status_code == 429 or candidate == candidates[-1]:
+                raise
+            logger.warning("Auto could not load %s (%s); trying the next model", candidate, exc.status_code)
+            continue
+        if candidate != decision.model:
+            state.auto_router_decision = replace(
+                decision, model = candidate, reason = f"{decision.model} could not load, so {candidate} answered"
+            )
+            state.auto_router_payload.model = candidate
+            if state.auto_router_session:
+                remember_session(*state.auto_router_session, candidate)
+        return
+
+
 async def _maybe_auto_switch_model(
     requested_model: Optional[str],
     fastapi_request: Request,
     current_subject: str,
     *,
+    alongside: Optional[bool] = None,
     require_vision: bool = False,
     require_image: bool = True,
     modality_label: str = "image or audio",
@@ -10527,6 +10585,21 @@ async def _maybe_auto_switch_model(
     :func:`_preflight_audio_for_switch`. ``image_preflight`` does the same for
     non-GGUF image count and byte validation.
     """
+    if alongside is None:
+        decision = getattr(getattr(fastapi_request, "state", None), "auto_router_decision", None)
+        alongside = decision is not None
+        if alongside and requested_model == decision.model and decision.fallbacks:
+            return await _switch_with_auto_fallback(
+                decision, fastapi_request, current_subject,
+                dict(
+                    require_vision = require_vision, require_image = require_image,
+                    modality_label = modality_label, claim_resident = claim_resident,
+                    require_audio_input = require_audio_input, require_video = require_video,
+                    gguf_only = gguf_only, audio_preflight = audio_preflight,
+                    image_preflight = image_preflight, require_speech = require_speech,
+                    speech_budget = speech_budget, tool_images_only = tool_images_only,
+                ),
+            )
     # A text-only GGUF reads tool-result images as a note, so only audio or video needs its mmproj.
     gguf_requires_vision = (
         (require_audio_input or require_video) if tool_images_only else require_vision
@@ -10625,9 +10698,7 @@ async def _maybe_auto_switch_model(
             await _restore_evicted(stashed, fastapi_request, current_subject)
         if await _route_to_extra_slot(requested_model) is not None:
             return
-    auto_switch_on = get_openai_auto_switch_enabled() or bool(
-        getattr(fastapi_request.state, "auto_router_decision", None)
-    )
+    auto_switch_on = get_openai_auto_switch_enabled() or alongside
 
     def _refuse_non_gguf_endpoint() -> None:
         """Refuse a switch target this endpoint cannot serve.
@@ -10678,6 +10749,8 @@ async def _maybe_auto_switch_model(
         if not idle_unload_is_configured():
             await _reject_unservable_model(requested_model, fastapi_request)
             return
+
+    alongside_load: dict = {"allowed": alongside, "request": None}
 
     async def _resolve_and_switch() -> None:
         from core.inference.openai_auto_download import looks_like_quant, split_model_ref
@@ -11116,6 +11189,18 @@ async def _maybe_auto_switch_model(
                                 saved_gpu_ids,
                                 override_id,
                             )
+                        if alongside_load["allowed"] and (
+                            _llama_cpp_backend.is_active
+                            or getattr(_peek_inference_backend(), "active_model_name", None)
+                        ):
+                            load_request = LoadRequest(**load_kwargs, alongside = True)
+                            load_request._gguf_companion_roots = gguf_companion_roots
+                            load_request._gguf_companion_roots_set = True
+                            load_request._replace_if_short = True
+                            alongside_load.update(
+                                request = load_request, advertised = override_id, gguf = target_is_gguf
+                            )
+                            return
                         # Reuse the load impl so its dedup, tensor fallback, and threading
                         # apply. Call the impl directly: we already hold the lifecycle gate
                         # the /load route would otherwise take, so the route would deadlock.
@@ -11204,6 +11289,27 @@ async def _maybe_auto_switch_model(
 
     try:
         await _resolve_and_switch()
+        if alongside_load["request"] is not None:
+            try:
+                await load_model_gated(
+                    alongside_load["request"], fastapi_request, current_subject,
+                    current_request_counted = True,
+                )
+            except HTTPException as exc:
+                if exc.status_code != 409:
+                    raise
+                # Does not fit next to the loaded models: replace the primary instead.
+                alongside_load.update(allowed = False, request = None)
+                await _resolve_and_switch()
+            else:
+                loaded_backend = (
+                    get_llama_cpp_backend()
+                    if alongside_load["gguf"]
+                    else await asyncio.to_thread(get_inference_backend)
+                )
+                loaded_backend._openai_advertised_id = alongside_load["advertised"]
+                loaded_backend._loaded_by_user_action = False
+                await _route_to_extra_slot(requested_model)
     except HTTPException as exc:
         path = getattr(getattr(fastapi_request, "url", None), "path", None)
         if (
@@ -16702,7 +16808,7 @@ async def load_model_gated(
                                 await asyncio.to_thread(_drop_extra_slot, victim, True)
                                 dropped += 1
                         if not dropped:
-                            if not exc.capped:
+                            if not exc.capped or request._replace_if_short:
                                 raise HTTPException(status_code = 409, detail = str(exc)) from exc
                             # Nothing left to make room with: take the smaller context, as a lone model would.
                             request = request.model_copy(update = {"force_alongside": True})
@@ -26273,12 +26379,36 @@ async def openai_chat_completions(
             status_code = 403,
             detail = "External providers can only be used from the Unsloth UI or with an API key.",
         )
-    return await produce_openai_chat_completions(
+    response = await produce_openai_chat_completions(
         payload,
         request,
         current_subject,
         cancel_on_disconnect = True,
     )
+    return with_router_decision_frame(response, request)
+
+
+def with_router_decision_frame(response, request: Request):
+    decision = getattr(getattr(request, "state", None), "auto_router_decision", None)
+    iterator = getattr(response, "body_iterator", None)
+    if decision is None or iterator is None or not _ui_stream_events_enabled(request):
+        return response
+    frame = json.dumps(
+        {"type": "router_decision", "model": decision.model, "reason": decision.reason, "task": decision.task}
+    )
+
+    async def with_decision():
+        try:
+            yield f"data: {frame}\n\n"
+            async for chunk in iterator:
+                yield chunk
+        finally:
+            close = getattr(iterator, "aclose", None)
+            if close is not None:
+                await close()
+
+    response.body_iterator = with_decision()
+    return response
 
 
 async def produce_openai_chat_completions(
@@ -36238,6 +36368,10 @@ async def chat_count_tokens(
     # narrowing it means trusting a kind/model field to decide whether to work next to a decode, and
     # being wrong there costs inference time while over-refusing only costs a redraw.
     # Routed first, so every check below looks at the model being counted.
+    if request is not None:
+        await _resolve_auto_model(
+            payload, request, payload.messages, subject = current_subject, count_only = True
+        )
     await _route_to_extra_slot(payload.model)
     if _routed_generation_count() > 0:
         raise HTTPException(
@@ -36532,9 +36666,7 @@ async def anthropic_count_tokens(
     # Carry the vision guard too: an image count naming a text-only GGUF must not
     # evict a loaded vision model for a swap that can't serve the request.
     await _resolve_auto_model(
-        payload, request, payload.messages,
-        image = _anthropic_request_has_image(payload, tool_results = False),
-        subject = current_subject,
+        payload, request, payload.messages, subject = current_subject, count_only = True
     )
     await _maybe_auto_switch_model(
         _switch_model_for_payload(payload),
@@ -36758,6 +36890,11 @@ async def anthropic_messages(
     JSON).
     """
     _admit_tool_access(payload)
+    await _resolve_auto_model(
+        payload, request, payload.messages,
+        image = _anthropic_request_has_image(payload, tool_results = False),
+        subject = current_subject,
+    )
     await _route_to_extra_slot(_switch_model_for_payload(payload))
     llama_backend = get_llama_cpp_backend()
 
@@ -36885,10 +37022,6 @@ async def anthropic_messages(
     # require_vision rejects a swap to a text-only target before it runs, so an
     # image request can't evict the resident vision model only to hit the vision
     # guard (_normalize_anthropic_openai_images) below after the load.
-    await _resolve_auto_model(
-        payload, request, payload.messages,
-        image = _anthropic_top_level_image, subject = current_subject,
-    )
     await _maybe_auto_switch_model(
         _switch_model_for_payload(payload),
         request,

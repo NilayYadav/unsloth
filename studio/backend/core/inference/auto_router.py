@@ -7,7 +7,7 @@ import logging
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -77,6 +77,7 @@ class RouterDecision:
     model: str
     reason: str
     task: str | None = None
+    fallbacks: tuple[str, ...] = ()
 
 
 def get_profile() -> RouterProfile:
@@ -90,12 +91,22 @@ def save_profile(profile: RouterProfile) -> RouterProfile:
     from storage.studio_db import upsert_app_settings
 
     run_as(OWNER, upsert_app_settings, {SETTING_KEY: profile.model_dump()})
-    if len({task for model in profile.models for task in model.tasks if task in CRITERIA}) > 1:
+    if needs_laya(profile):
         warm_laya()
     return profile
 
 
+def needs_laya(profile: RouterProfile) -> bool:
+    return len({task for model in profile.models for task in model.tasks if task in CRITERIA}) > 1
+
+
+def warm_if_configured() -> None:
+    if needs_laya(get_profile()):
+        warm_laya()
+
+
 _laya_lock = threading.Lock()
+_predict_lock = threading.Lock()
 _laya_agent: Any = None
 _laya_loader: threading.Thread | None = None
 _laya_retry_at = 0.0
@@ -160,7 +171,7 @@ def _classify(prompt: str, choices: list[str]) -> tuple[str, float]:
         warm_laya()
         raise RuntimeError("Laya is loading")
 
-    with _laya_lock:
+    with _predict_lock:
         question = {
             "task": {
                 "type": "choice",
@@ -175,6 +186,15 @@ def _classify(prompt: str, choices: list[str]) -> tuple[str, float]:
     return task, float(result["probabilities"][choice])
 
 
+def _prefer(ids: list[str], resident: frozenset[str], default: str | None) -> str:
+    loaded = [model for model in ids if model in resident]
+    if default in loaded:
+        return default
+    if loaded:
+        return loaded[0]
+    return default if default in ids else ids[0]
+
+
 def choose_model(
     profile: RouterProfile,
     *,
@@ -186,6 +206,7 @@ def choose_model(
     pinned_model: str | None = None,
     follow_up: bool = False,
     tool_turn: bool = False,
+    resident: frozenset[str] = frozenset(),
 ) -> RouterDecision:
     if not profile.models:
         raise ValueError("Auto has no models. Add downloaded models in Router settings.")
@@ -199,6 +220,34 @@ def choose_model(
         model for model in capable
         if model.context_length is None or estimated_tokens <= model.context_length
     ]
+    decision = _decide(
+        profile, eligible, capable, prompt=prompt, image=image, tools=tools,
+        estimated_tokens=estimated_tokens, current_model=current_model, pinned_model=pinned_model,
+        follow_up=follow_up, tool_turn=tool_turn, resident=resident,
+    )
+    if pinned_model:
+        return decision
+    ids = [model.id for model in eligible]
+    order = [current_model, *[m for m in ids if m in resident], profile.default_model, *ids]
+    fallbacks = tuple(dict.fromkeys(m for m in order if m in ids and m != decision.model))
+    return replace(decision, fallbacks=fallbacks)
+
+
+def _decide(
+    profile: RouterProfile,
+    eligible: list[RouterModel],
+    capable: list[RouterModel],
+    *,
+    prompt: str,
+    image: bool,
+    tools: bool,
+    estimated_tokens: int,
+    current_model: str | None,
+    pinned_model: str | None,
+    follow_up: bool,
+    tool_turn: bool,
+    resident: frozenset[str],
+) -> RouterDecision:
     if not eligible:
         if image and not any(model.vision for model in profile.models):
             raise ValueError("No Auto model accepts images. Mark a vision model as 'Accepts images' in Router settings.")
@@ -218,13 +267,11 @@ def choose_model(
     if tool_turn and current_model in by_id:
         return RouterDecision(current_model, "continuing a tool call")
     if image:
-        vision = [model for model in eligible if model.vision]
-        if current_model in {model.id for model in vision}:
+        vision = [model.id for model in eligible if model.vision]
+        if current_model in vision:
             return RouterDecision(current_model, "vision model already serving", "vision")
-        for model in vision:
-            if model.id == profile.default_model:
-                return RouterDecision(model.id, "image requires a vision model", "vision")
-        return RouterDecision(vision[0].id, "image requires a vision model", "vision")
+        chosen = _prefer(vision, resident, profile.default_model)
+        return RouterDecision(chosen, "image requires a vision model", "vision")
     for rule in profile.rules:
         if rule.model in by_id and rule.contains.casefold() in prompt.casefold():
             return RouterDecision(rule.model, "matched a user rule")
@@ -255,8 +302,7 @@ def choose_model(
     ):
         return RouterDecision(current_model, "continuing with current model", task)
     if matches and not no_signal:
-        preferred = profile.default_model if profile.default_model in matches else matches[0]
-        return RouterDecision(preferred, f"{task} task", task)
+        return RouterDecision(_prefer(matches, resident, profile.default_model), f"{task} task", task)
     if profile.default_model in by_id:
         return RouterDecision(
             profile.default_model,

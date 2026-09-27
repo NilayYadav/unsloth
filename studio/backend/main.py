@@ -687,6 +687,15 @@ def _post_warm_background_work(generation: Optional[int] = None) -> None:
         import structlog as _structlog
         _structlog.get_logger(__name__).debug("diffusers prewarm skipped: %s", _prewarm_exc)
 
+    if _post_warm_retired(generation):
+        return
+    try:
+        from core.inference.auto_router import warm_if_configured
+
+        warm_if_configured()
+    except Exception:  # noqa: BLE001 -- Auto falls back to the loaded or default model without Laya
+        pass
+
 
 def clear_compiled_cache_unless_shared(app: FastAPI) -> None:
     """Clear the compiled cache unless a sibling backend of this install is live. The decision lives in
@@ -1640,11 +1649,6 @@ class AutoRouterResponseMiddleware:
             if message["type"] == "http.response.start":
                 decision = scope.get("state", {}).get("auto_router_decision")
                 if decision is not None and message["status"] < 400:
-                    session = scope["state"].get("auto_router_session")
-                    if session is not None:
-                        from core.inference.auto_router import remember_session
-
-                        remember_session(*session, decision.model)
                     message["headers"] = [
                         *message.get("headers", []),
                         (b"x-unsloth-router-model", decision.model.encode("utf-8")),

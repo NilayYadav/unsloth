@@ -747,7 +747,10 @@ class ChatGenerationSupervisor:
                     )
                     return
 
-                from routes.inference import produce_openai_chat_completions
+                from routes.inference import (
+                    produce_openai_chat_completions,
+                    with_router_decision_frame,
+                )
 
                 request_payload = dict(run["requestPayload"])
                 timezone_headers = request_payload.pop(db.TIMEZONE_HEADERS_FIELD, None)
@@ -755,11 +758,12 @@ class ChatGenerationSupervisor:
                 # Switching, idle reload and auto-download all happen in the call below, and llama.cpp's first-token
                 # budget only starts after it. One touch afterwards cannot cover a preparation longer than the lease
                 # itself.
-                response = await produce_openai_chat_completions(
-                    payload,
-                    _background_request(self.app, run_id, cancel_event, timezone_headers),
-                    owner,
-                    cancel_on_disconnect = False,
+                background = _background_request(self.app, run_id, cancel_event, timezone_headers)
+                response = with_router_decision_frame(
+                    await produce_openai_chat_completions(
+                        payload, background, owner, cancel_on_disconnect = False
+                    ),
+                    background,
                 )
             await self._try_touch_progress(run_id)
             if int(getattr(response, "status_code", 200)) >= 400:
