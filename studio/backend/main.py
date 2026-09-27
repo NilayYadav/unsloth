@@ -1613,6 +1613,8 @@ app.add_middleware(
     expose_headers = [
         "X-Unsloth-Conflict-Kind",
         "X-Unsloth-Refusal",
+        "X-Unsloth-Router-Model",
+        "X-Unsloth-Router-Reason",
         *_hub_endpoint_proxy.EXPOSED_HEADERS,
     ],
     # is_allowed_origin closes the moment the tunnel URL clears, but a preflight already cached by the browser
@@ -1624,6 +1626,36 @@ app.add_middleware(
 from utils.keyless_api_access import KeylessToolPolicyMiddleware  # noqa: E402
 
 app.add_middleware(KeylessToolPolicyMiddleware)
+
+
+class AutoRouterResponseMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def send_with_router(message):
+            if message["type"] == "http.response.start":
+                decision = scope.get("state", {}).get("auto_router_decision")
+                if decision is not None and message["status"] < 400:
+                    session = scope["state"].get("auto_router_session")
+                    if session is not None:
+                        from core.inference.auto_router import remember_session
+
+                        remember_session(*session, decision.model)
+                    message["headers"] = [
+                        *message.get("headers", []),
+                        (b"x-unsloth-router-model", decision.model.encode("utf-8")),
+                        (b"x-unsloth-router-reason", decision.reason.encode("utf-8")),
+                    ]
+            await send(message)
+
+        await self.app(scope, receive, send_with_router)
+
+
+app.add_middleware(AutoRouterResponseMiddleware)
 
 from utils.remote_access_settings import RemoteAccessStopResponseMiddleware  # noqa: E402
 

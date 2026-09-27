@@ -97,6 +97,7 @@ from core.inference import context_refusal
 from core.inference.context_window import (
     estimate_message_tokens as _estimate_message_tokens,
     estimate_messages_tokens as _estimate_messages_tokens,
+    estimate_messages_tokens_without_unpriced_media as _estimate_messages_tokens_without_media,
     estimate_messages_tokens_dense,
     truncate_oldest_messages as _truncate_oldest_messages,
 )
@@ -8414,6 +8415,65 @@ def _switch_model_for_payload(payload) -> str:
     return payload.model if "model" in payload.model_fields_set else _RELOAD_ONLY_MODEL
 
 
+async def _resolve_auto_model(
+    payload, request: Request, messages, *, image: bool = False, subject: str = ""
+) -> None:
+    if getattr(payload, "model", None) != "auto":
+        return
+    from core.inference.auto_router import (
+        RouterProfile, choose_model, get_profile, session_model,
+    )
+
+    profile = await asyncio.to_thread(get_profile)
+    if account_access.managed_account():
+        catalog = await _openai_catalog_objects()
+        available = {entry["id"].casefold() for entry in catalog if entry.get("task") is None}
+        models = [model for model in profile.models if model.id.casefold() in available]
+    else:
+        models = profile.models
+    if not models:
+        raise HTTPException(status_code = 400, detail = "Auto has no downloaded models available.")
+    if profile.default_model not in {model.id for model in models}:
+        raise HTTPException(status_code = 400, detail = "Auto's default model is no longer available. Update Router settings.")
+    profile = RouterProfile(models = models, default_model = profile.default_model,
+                            rules = [r for r in profile.rules if r.model in {m.id for m in models}])
+    resident = await asyncio.to_thread(_openai_model_objects)
+    resident_ids = {entry["id"] for entry in resident}
+    current = next((model.id for model in models if model.id in resident_ids), None)
+    session_id = request.headers.get("x-unsloth-router-session") or getattr(
+        payload, "thread_id", None
+    )
+    if isinstance(session_id, str) and session_id and len(session_id) <= 128:
+        current = session_model(subject, session_id) or current
+    prompt = _monitor_prompt_from_messages(messages)
+    last_user = next(
+        (m for m in reversed(messages) if (m.get("role") if isinstance(m, dict) else m.role) == "user"),
+        None,
+    )
+    if last_user is not None:
+        prompt = _monitor_content_text(last_user.get("content") if isinstance(last_user, dict) else last_user.content) or prompt
+    pinned = request.headers.get("x-unsloth-router-pin")
+    follow_up = sum(
+        (m.get("role") if isinstance(m, dict) else m.role) == "user" for m in messages
+    ) > 1
+    estimated_tokens = _estimate_messages_tokens_without_media(
+        [m if isinstance(m, dict) else m.model_dump(exclude_none = True) for m in messages]
+    )
+    try:
+        decision = await asyncio.to_thread(
+            choose_model, profile, prompt = prompt, image = image,
+            tools = bool(getattr(payload, "tools", None)) or getattr(payload, "enable_tools", None) is True,
+            estimated_tokens = estimated_tokens,
+            current_model = current, pinned_model = pinned, follow_up = follow_up,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code = 400, detail = str(exc)) from None
+    payload.model = decision.model
+    request.state.auto_router_decision = decision
+    if isinstance(session_id, str) and session_id and len(session_id) <= 128:
+        request.state.auto_router_session = (subject, session_id)
+
+
 def _target_is_vision(
     load_path: str,
     gguf_variant: Optional[str] = None,
@@ -10235,7 +10295,9 @@ async def _maybe_auto_switch_model(
     scope = getattr(fastapi_request, "scope", None)
     if isinstance(scope, dict) and scope.get(_DISABLE_OPENAI_AUTO_SWITCH_SCOPE_KEY):
         return
-    auto_switch_on = get_openai_auto_switch_enabled()
+    auto_switch_on = get_openai_auto_switch_enabled() or bool(
+        getattr(fastapi_request.state, "auto_router_decision", None)
+    )
 
     def _refuse_non_gguf_endpoint() -> None:
         """Refuse a switch target this endpoint cannot serve.
@@ -10852,6 +10914,17 @@ async def _auto_switch_from_request_body(
         # a reload-only sentinel so the idle-stash reload still runs (an idle-freed
         # model is restored) without the resolver ever matching a real name.
         model = body.get("model") or _RELOAD_ONLY_MODEL
+        if model == "auto" and request.url.path.endswith("/completions"):
+            from types import SimpleNamespace
+
+            prompt = body.get("prompt", "")
+            routed_payload = SimpleNamespace(model = "auto", tools = None)
+            await _resolve_auto_model(
+                routed_payload, request,
+                [{"role": "user", "content": prompt if isinstance(prompt, str) else str(prompt)}],
+                subject = current_subject,
+            )
+            model = body["model"] = routed_payload.model
     else:
         model = None
     # Serves the GGUF-only /v1/completions and /v1/embeddings routes, which still 503 "No
@@ -26082,6 +26155,9 @@ async def produce_openai_chat_completions(
     # passthrough), so claiming here could strand a preview-owned model for a request that
     # never generates. The middleware instead claims the slot on a successful 2xx non-preview
     # response.
+    await _resolve_auto_model(
+        payload, request, payload.messages, image = _needs_vision, subject = current_subject
+    )
     await _maybe_auto_switch_model(
         _switch_model_for_payload(payload),
         request,
@@ -31525,7 +31601,15 @@ async def openai_list_models(current_subject: str = Depends(get_current_subject)
     locally available (downloaded/cached) models -- not only what is resident in
     memory. Each entry carries a clean public id and a ``loaded`` flag.
     """
-    return {"object": "list", "data": await _openai_catalog_objects()}
+    data = await _openai_catalog_objects()
+    from core.inference.auto_router import get_profile
+
+    profile = await asyncio.to_thread(get_profile)
+    available = {entry["id"].casefold() for entry in data}
+    if profile.models and profile.default_model and profile.default_model.casefold() in available:
+        data.insert(0, {"id": "auto", "object": "model", "created": int(time.time()),
+                        "owned_by": _OWNED_BY, "loaded": False})
+    return {"object": "list", "data": data}
 
 
 @router.get("/models/{model_id:path}")
@@ -31539,6 +31623,15 @@ async def openai_retrieve_model(model_id: str, current_subject: str = Depends(ge
     with slashes intact.
     """
     from core.inference.model_ids import model_id_matches
+
+    if model_id == "auto":
+        from core.inference.auto_router import get_profile
+
+        profile = await asyncio.to_thread(get_profile)
+        available = {entry["id"].casefold() for entry in await _openai_catalog_objects()}
+        if profile.models and profile.default_model and profile.default_model.casefold() in available:
+            return {"id": "auto", "object": "model", "created": int(time.time()),
+                    "owned_by": _OWNED_BY, "loaded": False}
 
     # Loaded models resolve without a catalog scan (the common case); only build
     # the full catalog -- which may hit the filesystem -- for unloaded ids. Match
@@ -34807,6 +34900,9 @@ async def openai_responses(
         # streaming preflights here; non-streaming delegates its complete preflight to chat.
         _responses_has_image = _messages_have_image(m for m in messages if m.role != "tool")
         _responses_image_b64s = _local_image_payloads_from_messages(messages)
+        await _resolve_auto_model(
+            payload, request, messages, image = _responses_has_image, subject = current_subject
+        )
         await _maybe_auto_switch_model(
             _switch_model_for_payload(payload),
             request,
@@ -35993,6 +36089,11 @@ async def anthropic_count_tokens(
     # Count with the requested model's tokenizer, like the sibling /messages.
     # Carry the vision guard too: an image count naming a text-only GGUF must not
     # evict a loaded vision model for a swap that can't serve the request.
+    await _resolve_auto_model(
+        payload, request, payload.messages,
+        image = _anthropic_request_has_image(payload, tool_results = False),
+        subject = current_subject,
+    )
     await _maybe_auto_switch_model(
         _switch_model_for_payload(payload),
         request,
@@ -36342,6 +36443,10 @@ async def anthropic_messages(
     # require_vision rejects a swap to a text-only target before it runs, so an
     # image request can't evict the resident vision model only to hit the vision
     # guard (_normalize_anthropic_openai_images) below after the load.
+    await _resolve_auto_model(
+        payload, request, payload.messages,
+        image = _anthropic_top_level_image, subject = current_subject,
+    )
     await _maybe_auto_switch_model(
         _switch_model_for_payload(payload),
         request,

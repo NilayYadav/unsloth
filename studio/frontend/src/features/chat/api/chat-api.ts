@@ -2,6 +2,7 @@
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { authFetch, getAuthSessionEpoch } from "@/features/auth";
+import { autoRouterThread, recordAutoRouterChoice } from "../stores/auto-router-selection";
 import { prepareHfTokenForUse } from "@/features/hf-auth";
 // These helpers are deliberately API-layer-only, not part of their features' public barrels.
 // eslint-disable-next-line no-restricted-imports
@@ -1621,7 +1622,9 @@ export async function* streamChatCompletions(
   /** The window this request is served by, when the caller knows it. Used only to tell a user-chosen
    *  Max Tokens apart from the backend's stand-in for "Max", which is the whole context length. */
   loadedContextLength?: number | null,
+  routerSessionId?: string | null,
 ): AsyncGenerator<OpenAIChatChunk> {
+  const routerPin = payload.model === "auto" ? autoRouterThread(routerSessionId).pin : null;
   const response = await authFetch("/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -1629,6 +1632,8 @@ export async function* streamChatCompletions(
       // Opt into Unsloth's UI control frames (tool cards, statuses, reasoning timing). The
       // endpoint defaults to a clean OpenAI stream for external clients.
       "X-Unsloth-Events": "1",
+      ...(routerPin ? { "X-Unsloth-Router-Pin": routerPin } : {}),
+      ...(payload.model === "auto" && routerSessionId ? { "X-Unsloth-Router-Session": routerSessionId } : {}),
     },
     body: JSON.stringify(payload),
     signal,
@@ -1637,6 +1642,11 @@ export async function* streamChatCompletions(
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(parseErrorText(response.status, body));
+  }
+
+  if (payload.model === "auto") {
+    const model = response.headers.get("X-Unsloth-Router-Model");
+    if (model) recordAutoRouterChoice(routerSessionId, model, response.headers.get("X-Unsloth-Router-Reason"));
   }
 
   if (!response.body) {

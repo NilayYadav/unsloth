@@ -65,6 +65,7 @@ import { classifiedAttachmentFiles, isVideoFile } from "@/lib/video-utils";
 import { isDownloadCancelled } from "@/lib/native-files";
 import { isMultimodalResponse } from "./types/api";
 import { getImageInputUnavailableReason } from "./utils/image-input-support";
+import { useAutoRouterSelection } from "./stores/auto-router-selection";
 import {
   CHAT_IMAGE_ACCEPT,
   isChatImageFile,
@@ -665,6 +666,7 @@ export function SharedComposer({
   const modelLoaded = useChatRuntimeStore(
     (s) => !!s.params.checkpoint && !s.modelLoading,
   );
+  const autoRouterEnabled = useAutoRouterSelection().enabled;
   const lastModelLoadError = useChatRuntimeStore((s) => s.lastModelLoadError);
   const loadedIsMultimodal = useChatRuntimeStore((s) => s.loadedIsMultimodal);
   const loadedVisionDisabledByUser = useChatRuntimeStore(
@@ -749,7 +751,7 @@ export function SharedComposer({
     externalSelection != null
       ? externalProviders.find((p) => p.id === externalSelection.providerId)
       : undefined;
-  const imageUnavailableReason = getImageInputUnavailableReason({
+  const imageUnavailableReason = autoRouterEnabled ? null : getImageInputUnavailableReason({
     activeModel,
     isExternalModel,
     externalSupportsVision: providerModelSupportsVision(

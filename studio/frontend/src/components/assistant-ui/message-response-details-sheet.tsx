@@ -32,6 +32,7 @@ type ResponseDetailsMetadata = {
   modelId?: string;
   modelLabel?: string;
   responseModelId?: string;
+  routerReason?: string;
   providerId?: string;
   providerName?: string;
   providerType?: string;
@@ -415,6 +416,7 @@ export const MessageResponseDetailsSheet: FC<{
 
           <DetailSection title="Response">
             <DetailRow label="Model" value={modelLabel} />
+            <DetailRow label="Auto choice" value={responseDetails?.routerReason} />
             <DetailRow
               label="Requested"
               value={

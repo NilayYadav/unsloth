@@ -16,6 +16,7 @@ import {
   serverTuningLoadPayload,
 } from "../lib/server-tuning-fields";
 import { authFetch, getAuthToken } from "@/features/auth";
+import { autoRouterSelection, autoRouterThread, recordAutoRouterChoice } from "../stores/auto-router-selection";
 import { withSandboxAttachmentPaths } from "../sandbox-attachments";
 import { prepareHfTokenForUse } from "@/features/hf-auth";
 import { DOWNLOAD_KIND } from "@/features/hub/download-manager/constants";
@@ -434,6 +435,7 @@ interface ResponseDetailsMetadata {
   modelId: string;
   modelLabel: string;
   responseModelId: string;
+  routerReason?: string;
   providerId?: string;
   providerName: string;
   providerType: string;
@@ -4291,7 +4293,7 @@ export function createOpenAIStreamAdapter(
             throw error;
           }
         }
-        if (!runtime.params.checkpoint) {
+        if (!runtime.params.checkpoint && !autoRouterSelection().enabled) {
           let resolution: Awaited<
             ReturnType<typeof resolveQueuedEmptyLocalModel>
           >;
@@ -4379,7 +4381,7 @@ export function createOpenAIStreamAdapter(
           params.checkpoint,
           runtime.activeGgufVariant,
         );
-        const selectedCheckpoint = params.checkpoint.trim();
+        const selectedCheckpoint = autoRouterSelection().enabled ? "auto" : params.checkpoint.trim();
         const researchExternalSelection =
           parseExternalModelId(selectedCheckpoint);
         const researchExternalProvider = researchExternalSelection
@@ -4664,7 +4666,7 @@ export function createOpenAIStreamAdapter(
         }
       }
 
-      if (!runtime.params.checkpoint) {
+      if (!runtime.params.checkpoint && !autoRouterSelection().enabled) {
         let resolution: Awaited<
           ReturnType<typeof resolveQueuedEmptyLocalModel>
         >;
@@ -4805,7 +4807,7 @@ export function createOpenAIStreamAdapter(
         ? await projectHasSources(ragProjectId)
         : false;
       const externalSelection = parseExternalModelId(params.checkpoint);
-      const isExternalRequest = externalSelection !== null;
+      const isExternalRequest = externalSelection !== null && !autoRouterSelection().enabled;
       if (
         isExternalRequest &&
         !useExternalProvidersStore.getState().connectionsEnabled
@@ -5176,7 +5178,7 @@ export function createOpenAIStreamAdapter(
       };
       // Block when ANY image is in the outbound payload and the loaded model cannot process images;
       // switching models means starting a new chat.
-      if (imageBase64) {
+      if (imageBase64 && !autoRouterSelection().enabled) {
         const activeModel = runtime.models.find(
           (m) => m.id === params.checkpoint,
         );
@@ -5389,6 +5391,7 @@ export function createOpenAIStreamAdapter(
       let firstTokenSettled = false;
       const streamStartTime = Date.now();
       let responseModelId = externalSelection?.modelId ?? params.checkpoint;
+      const autoRequested = autoRouterSelection().enabled;
       let firstTokenTime: number | undefined;
       let totalChunks = 0;
       let resolveFirstToken: (() => void) | null = null;
@@ -6092,7 +6095,7 @@ export function createOpenAIStreamAdapter(
         const buildResponseDetails = (
           finishedAt: number,
         ): ResponseDetailsMetadata => ({
-          modelId: params.checkpoint,
+          modelId: autoRequested ? "auto" : params.checkpoint,
           modelLabel:
             (isExternalRequest || responseModelId !== params.checkpoint
               ? responseModelId
@@ -6101,6 +6104,9 @@ export function createOpenAIStreamAdapter(
             "Unknown model",
           responseModelId:
             responseModelId || externalSelection?.modelId || params.checkpoint,
+          ...(autoRequested && autoRouterThread(resolvedThreadId).lastReason
+            ? { routerReason: autoRouterThread(resolvedThreadId).lastReason! }
+            : {}),
           ...(externalProvider?.id ? { providerId: externalProvider.id } : {}),
           providerName:
             externalProvider?.name ??
@@ -6477,7 +6483,7 @@ export function createOpenAIStreamAdapter(
           }
 
           return {
-            model: params.checkpoint,
+            model: autoRouterSelection().enabled ? "auto" : params.checkpoint,
             messages: outboundMessages,
             stream: true,
             ...(continuation ? { continue_final_message: true } : {}),
@@ -6627,7 +6633,7 @@ export function createOpenAIStreamAdapter(
               // Keyed on `enabled_tools`, never on `requestPayload.tools`: see durable-gate.ts. Keying this on
               // `tools` read as "no tools" on the local path and as "browser tools" for every passthrough turn that
               // carried a schema catalog, silently forcing those turns back onto the cancel-on-disconnect path.
-              if (turnRequiresLegacyStream(requestPayload)) {
+              if (requestPayload.model === "auto" || turnRequiresLegacyStream(requestPayload)) {
                 // Only a tool chain the BROWSER must execute still needs the live tab: there is no server-side
                 // executor to run it while you're away. Everything else is durable like plain text - an auto/bypass
                 // loop runs to completion while you're away, and a confirm ("ask") call parks on its approval_id
@@ -6777,6 +6783,7 @@ export function createOpenAIStreamAdapter(
                       : (runtime.loadedCustomContextLength ??
                         runtime.loadedContextLength ??
                         (params.maxSeqLength || null)),
+                    resolvedThreadId,
                   );
             // Per run, not per module: two turns must not share a cycle.
             const canPublish = createStreamPublishGate();
@@ -6785,6 +6792,9 @@ export function createOpenAIStreamAdapter(
               const chunkModel = (chunk as { model?: unknown }).model;
               if (typeof chunkModel === "string" && chunkModel.length > 0) {
                 responseModelId = chunkModel;
+                if (requestPayload.model === "auto") {
+                  recordAutoRouterChoice(resolvedThreadId, chunkModel, autoRouterThread(resolvedThreadId).lastReason);
+                }
               }
 
               const toolStatusText = (

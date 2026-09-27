@@ -26,6 +26,8 @@ import {
 } from "@/features/model-picker";
 import { ProjectComposer, Thread } from "@/components/assistant-ui/thread";
 import { usePlatformStore } from "@/config/env";
+import { useT } from "@/i18n";
+import { loadAutoRouterSettings } from "@/features/settings/api/auto-router";
 import { CopyableErrorChip } from "@/components/ui/copyable-error-chip";
 import {
   DropdownMenuItem,
@@ -178,6 +180,7 @@ import {
 } from "./hooks/use-chat-sidebar-items";
 import { usePinnedChatsStore } from "./stores/pinned-chats-store";
 import { usePinnedProjectsStore } from "./stores/pinned-projects-store";
+import { setAutoRouterEnabled, setAutoRouterPin, useAutoRouterSelection } from "./stores/auto-router-selection";
 import {
   clearTrainingCompareHandoff,
   getTrainingCompareHandoff,
@@ -2174,6 +2177,8 @@ export function ChatPage({
   search,
   active,
 }: { search: ChatSearch; active: boolean }): ReactElement {
+  const t = useT();
+  const autoRouterState = useAutoRouterSelection();
   const showContextWindowUsage = useChatPreferencesStore(
     (s) => s.showContextWindowUsage,
   );
@@ -2326,6 +2331,14 @@ export function ChatPage({
   const clearCheckpoint = useChatRuntimeStore((state) => state.clearCheckpoint);
   const resetArtifacts = useChatArtifactsStore((state) => state.resetArtifacts);
   const activeThreadId = useChatRuntimeStore((state) => state.activeThreadId);
+  const autoRouter = {
+    enabled: autoRouterState.enabled,
+    ...(autoRouterState.threads[activeThreadId || "__default"] || {
+      pin: null,
+      lastModel: null,
+      lastReason: null,
+    }),
+  };
   const latestResearchRunId = useResearchRunStore((state) =>
     activeThreadId ? state.latestRunByThreadId[activeThreadId] : undefined,
   );
@@ -3221,6 +3234,7 @@ export function ChatPage({
       const currentCheckpoint = store.params.checkpoint;
       const currentVariant = store.activeGgufVariant;
       if (!value) return;
+      setAutoRouterEnabled(false);
       setPendingHubAutoLoad(null);
       const isExternalSelection =
         meta?.source === "external" || isExternalModelId(value);
@@ -4141,7 +4155,7 @@ export function ChatPage({
                 />
               </Button>
             )}
-            {view.mode !== "compare" && (
+            {view.mode !== "compare" && !autoRouter.enabled && (
               <ModelSelector
                 models={models}
                 loraModels={loraModels}
@@ -4175,8 +4189,49 @@ export function ChatPage({
                 triggerDataTour="chat-model-selector"
                 contentDataTour="chat-model-selector-popover"
                 showCloudIndicator={isExternalModel}
-                className="max-w-[62vw] !pr-3 md:max-w-none !h-[var(--studio-chat-control-height,34px)]"
+                className={cn(autoRouter.enabled ? "max-w-[42vw]" : "max-w-[62vw]", "!pr-3 md:max-w-none !h-[var(--studio-chat-control-height,34px)]")}
               />
+            )}
+            {view.mode !== "compare" && (
+              <Button
+                type="button"
+                variant={autoRouter.enabled ? "secondary" : "ghost"}
+                size="sm"
+                aria-pressed={autoRouter.enabled}
+                className="h-[var(--studio-chat-control-height,34px)]"
+                onClick={() => {
+                  if (autoRouter.enabled) {
+                    setAutoRouterEnabled(false);
+                    return;
+                  }
+                  void loadAutoRouterSettings().then(
+                    (settings) => {
+                      if (settings.models.length === 0) {
+                        toast.info(t("settings.apiKeys.autoRouter.configuredRequired"));
+                        return;
+                      }
+                      setAutoRouterEnabled(true);
+                    },
+                    (error) => toast.error(error instanceof Error ? error.message : t("settings.apiKeys.autoRouter.loadError")),
+                  );
+                }}
+              >
+                {t("settings.apiKeys.autoRouter.auto")}
+              </Button>
+            )}
+            {view.mode !== "compare" && autoRouter.enabled && autoRouter.lastModel && (
+              <div className="pointer-events-auto flex max-w-64 items-center gap-1 text-xs text-muted-foreground" title={autoRouter.lastReason || undefined}>
+                <span className="hidden truncate sm:block">{autoRouter.lastModel}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`${autoRouter.pin === autoRouter.lastModel ? t("settings.apiKeys.autoRouter.unpin") : t("settings.apiKeys.autoRouter.pin")} ${autoRouter.lastModel}`}
+                  onClick={() => setAutoRouterPin(activeThreadId, autoRouter.pin === autoRouter.lastModel ? null : autoRouter.lastModel)}
+                >
+                  {autoRouter.pin === autoRouter.lastModel ? t("settings.apiKeys.autoRouter.unpin") : t("settings.apiKeys.autoRouter.pin")}
+                </Button>
+              </div>
             )}
             {view.mode !== "compare" && currentProjectId && (
               <nav

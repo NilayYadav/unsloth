@@ -1395,6 +1395,47 @@ def get_systemone_settings(
     return _systemone_response()
 
 
+@_shared_settings_router.get("/auto-router")
+async def get_auto_router_settings(current_subject: str = Depends(get_current_subject)):
+    from core.inference.auto_router import RouterProfile, get_profile
+    from hub.services.models import account_access
+    from routes.inference import _openai_catalog_objects
+
+    profile = get_profile()
+    if not account_access.managed_account():
+        return profile
+    available = {entry["id"].casefold() for entry in await _openai_catalog_objects()}
+    models = [model for model in profile.models if model.id.casefold() in available]
+    if profile.default_model not in {model.id for model in models}:
+        return RouterProfile()
+    return RouterProfile(
+        models = models, default_model = profile.default_model,
+        rules = [rule for rule in profile.rules if rule.model in {model.id for model in models}],
+    )
+
+
+@_owner_settings_router.put("/auto-router")
+async def update_auto_router_settings(
+    payload: dict, current_subject: str = Depends(get_current_subject)
+):
+    from core.inference.auto_router import RouterProfile, save_profile
+    from routes.inference import _openai_catalog_objects
+
+    try:
+        profile = RouterProfile.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code = 400, detail = str(exc)) from None
+    available = {
+        entry["id"].casefold()
+        for entry in await _openai_catalog_objects()
+        if entry.get("task") is None
+    }
+    missing = [model.id for model in profile.models if model.id.casefold() not in available]
+    if missing:
+        raise HTTPException(status_code = 400, detail = f"Download these models first: {', '.join(missing)}")
+    return save_profile(profile)
+
+
 @_owner_settings_router.put("/systemone", response_model = SystemOneSettingsResponse)
 def update_systemone_settings(
     payload: SystemOneSettingsPayload, current_subject: str = Depends(get_current_subject)
