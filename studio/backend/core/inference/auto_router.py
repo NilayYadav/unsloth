@@ -185,6 +185,7 @@ def choose_model(
     current_model: str | None,
     pinned_model: str | None = None,
     follow_up: bool = False,
+    tool_turn: bool = False,
 ) -> RouterDecision:
     if not profile.models:
         raise ValueError("Auto has no models. Add downloaded models in Router settings.")
@@ -214,6 +215,8 @@ def choose_model(
         if pinned_model not in by_id:
             raise ValueError("The pinned model cannot handle this request.")
         return RouterDecision(pinned_model, "pinned by user")
+    if tool_turn and current_model in by_id:
+        return RouterDecision(current_model, "continuing a tool call")
     if image:
         vision = [model for model in eligible if model.vision]
         if current_model in {model.id for model in vision}:
@@ -245,12 +248,15 @@ def choose_model(
             laya_unavailable = True
     else:
         task, confidence = "general", 0.0
-    matches = [model for model in eligible if task in model.tasks]
-    if current_model in by_id and (confidence < 0.7 or current_model in {m.id for m in matches}):
+    matches = [model.id for model in eligible if task in model.tasks]
+    no_signal = laya_unavailable or not tasks
+    if current_model in by_id and (
+        current_model in matches or no_signal or (follow_up and confidence < 0.7)
+    ):
         return RouterDecision(current_model, "continuing with current model", task)
-    if confidence >= 0.7 and matches:
-        preferred = next((m for m in matches if m.id == profile.default_model), matches[0])
-        return RouterDecision(preferred.id, f"{task} task", task)
+    if matches and not no_signal:
+        preferred = profile.default_model if profile.default_model in matches else matches[0]
+        return RouterDecision(preferred, f"{task} task", task)
     if profile.default_model in by_id:
         return RouterDecision(
             profile.default_model,

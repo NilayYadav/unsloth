@@ -8453,6 +8453,17 @@ async def _resolve_auto_model(
     if last_user is not None:
         prompt = _monitor_content_text(last_user.get("content") if isinstance(last_user, dict) else last_user.content) or prompt
     pinned = request.headers.get("x-unsloth-router-pin")
+    last = messages[-1] if messages else None
+    last_role = last.get("role") if isinstance(last, dict) else getattr(last, "role", None)
+    last_content = last.get("content") if isinstance(last, dict) else getattr(last, "content", None)
+    tool_turn = last_role in ("tool", "function") or (
+        last_role == "user"
+        and isinstance(last_content, list)
+        and any(
+            (part.get("type") if isinstance(part, dict) else getattr(part, "type", None)) == "tool_result"
+            for part in last_content
+        )
+    )
     follow_up = sum(
         (m.get("role") if isinstance(m, dict) else m.role) == "user" for m in messages
     ) > 1
@@ -8465,6 +8476,7 @@ async def _resolve_auto_model(
             tools = bool(getattr(payload, "tools", None)) or getattr(payload, "enable_tools", None) is True,
             estimated_tokens = estimated_tokens,
             current_model = current, pinned_model = pinned, follow_up = follow_up,
+            tool_turn = tool_turn,
         )
     except ValueError as exc:
         raise HTTPException(status_code = 400, detail = str(exc)) from None

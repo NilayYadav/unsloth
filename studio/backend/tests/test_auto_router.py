@@ -27,7 +27,8 @@ def profile():
 
 
 def route(
-    *, prompt="hello", image=False, tools=False, tokens=100, current=None, pin=None, follow_up=False
+    *, prompt="hello", image=False, tools=False, tokens=100, current=None, pin=None, follow_up=False,
+    tool_turn=False,
 ):
     return choose_model(
         profile(),
@@ -38,6 +39,7 @@ def route(
         current_model=current,
         pinned_model=pin,
         follow_up=follow_up,
+        tool_turn=tool_turn,
     )
 
 
@@ -102,3 +104,36 @@ def test_invalid_profile_cannot_name_a_model_outside_pool():
         RouterProfile.model_validate(
             {"models": [{"id": "coder", "tasks": ["code"]}], "default_model": "missing"}
         )
+
+
+def test_new_chat_follows_an_unsure_task_guess_over_the_loaded_model(monkeypatch):
+    monkeypatch.setattr(auto_router, "_classify", lambda prompt, choices: ("code", 0.55))
+    decision = route(prompt="Write a Python function", current="general")
+    assert decision.model == "coder"
+    assert decision.reason == "code task"
+
+
+def test_new_chat_follows_an_unsure_task_guess_with_nothing_loaded(monkeypatch):
+    monkeypatch.setattr(auto_router, "_classify", lambda prompt, choices: ("code", 0.55))
+    assert route(prompt="Write a Python function").model == "coder"
+
+
+def test_follow_up_stays_unless_the_task_clearly_changes(monkeypatch):
+    monkeypatch.setattr(auto_router, "_classify", lambda prompt, choices: ("general", 0.55))
+    assert route(prompt="make it faster", current="coder", follow_up=True).model == "coder"
+
+
+def test_tool_result_turn_keeps_the_serving_model(monkeypatch):
+    monkeypatch.setattr(auto_router, "_classify", lambda prompt, choices: ("general", 0.95))
+    decision = route(prompt="[tool_result]", current="coder", follow_up=True, tool_turn=True)
+    assert decision.model == "coder"
+    assert decision.reason == "continuing a tool call"
+
+
+def test_laya_unavailable_keeps_the_loaded_model(monkeypatch):
+    def unavailable(prompt, choices):
+        raise RuntimeError("Laya is loading")
+
+    monkeypatch.setattr(auto_router, "_classify", unavailable)
+    assert route(prompt="Write a Python function", current="coder").model == "coder"
+    assert route(prompt="Write a Python function").reason == "default while Laya is unavailable"
