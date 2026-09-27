@@ -12,8 +12,15 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   customProviderDisplayName,
   parseExternalModelId,
+  setAutoRouterPin,
+  useAutoRouterSelection,
   useChatPreferencesStore,
   useChatRuntimeStore,
   useExternalProvidersStore,
@@ -22,8 +29,13 @@ import {
   mcpToolFromProvenance,
 } from "@/features/chat";
 import { FIND_SKIP_ATTRIBUTE } from "@/features/find-in-page";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { useMessage, useMessageTiming } from "@assistant-ui/react";
+import {
+  useAuiState,
+  useMessage,
+  useMessageTiming,
+} from "@assistant-ui/react";
 import { InformationCircleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { FC, ReactNode } from "react";
@@ -32,6 +44,7 @@ type ResponseDetailsMetadata = {
   modelId?: string;
   modelLabel?: string;
   responseModelId?: string;
+  routerModel?: string;
   routerReason?: string;
   providerId?: string;
   providerName?: string;
@@ -337,10 +350,82 @@ export const MessageResponseModelBadge: FC<{ className?: string }> = ({
   );
 };
 
+function autoRouterAnswer(metadata: unknown): string | null {
+  const details = (
+    (metadata as { custom?: MessageCustomMetadata } | undefined)?.custom
+  )?.responseDetails;
+  if (details?.modelId !== "auto") return null;
+  return details.routerModel ?? details.responseModelId ?? null;
+}
+
+export const MessageAutoRouterChip: FC<{ className?: string }> = ({
+  className,
+}) => {
+  const model = useAuiState(({ message }) => autoRouterAnswer(message.metadata));
+  return model ? <AutoRouterChip model={model} className={className} /> : null;
+};
+
+const AutoRouterChip: FC<{ model: string; className?: string }> = ({
+  model,
+  className,
+}) => {
+  const t = useT();
+  const reason = useAuiState(
+    ({ message }) =>
+      (message.metadata as { custom?: MessageCustomMetadata } | undefined)
+        ?.custom?.responseDetails?.routerReason ?? null,
+  );
+  const threadId = useChatRuntimeStore((s) => s.activeThreadId);
+  const pin = useAutoRouterSelection().threads[threadId ?? ""]?.pin ?? null;
+  const pinned = pin === model;
+  const shortName = model.slice(model.lastIndexOf("/") + 1) || model;
+  const label = t("settings.chat.autoRouter.answeredBy", { model: shortName });
+
+  return (
+    <span
+      className={cn(
+        "flex min-w-0 items-center gap-1.5 text-muted-foreground/80 text-xs",
+        className,
+      )}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild={true}>
+          <span className="min-w-0 truncate" tabIndex={0}>
+            {label}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-72">
+          {reason ?? model}
+        </TooltipContent>
+      </Tooltip>
+      {threadId ? (
+        <button
+          type="button"
+          onClick={() => setAutoRouterPin(threadId, pinned ? null : model)}
+          aria-label={t(
+            pinned
+              ? "settings.chat.autoRouter.unpinModel"
+              : "settings.chat.autoRouter.pinModel",
+            { model: shortName },
+          )}
+          className="shrink-0 rounded-md px-1 py-0.5 hover:bg-chat-icon-bg-hover hover:text-chat-icon-fg-hover"
+        >
+          {t(
+            pinned
+              ? "settings.chat.autoRouter.unpin"
+              : "settings.chat.autoRouter.pin",
+          )}
+        </button>
+      ) : null}
+    </span>
+  );
+};
+
 export const MessageResponseDetailsSheet: FC<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }> = ({ open, onOpenChange }) => {
+  const t = useT();
   const timing = useMessageTiming();
   const {
     message,
@@ -416,7 +501,10 @@ export const MessageResponseDetailsSheet: FC<{
 
           <DetailSection title="Response">
             <DetailRow label="Model" value={modelLabel} />
-            <DetailRow label="Auto choice" value={responseDetails?.routerReason} />
+            <DetailRow
+              label={t("settings.chat.autoRouter.detailsLabel")}
+              value={responseDetails?.routerReason}
+            />
             <DetailRow
               label="Requested"
               value={

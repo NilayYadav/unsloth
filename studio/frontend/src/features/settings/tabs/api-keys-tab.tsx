@@ -20,7 +20,6 @@ import type {
   KeylessApiAccessScope,
 } from "../api/keyless-api-access";
 import { ApiKeyRow } from "../components/api-key-row";
-import { AutoRouterSection } from "../components/auto-router-section";
 import { CreateKeyForm } from "../components/create-key-form";
 import { DecisionApiSection } from "../components/decision-api-section";
 import { KeyRevealCard } from "../components/key-reveal-card";
@@ -196,7 +195,6 @@ export function ApiKeysTab() {
           <LanAccessSection />
 
           <ModelAutoSwitchSection />
-          <AutoRouterSection />
         </>
       ) : null}
 

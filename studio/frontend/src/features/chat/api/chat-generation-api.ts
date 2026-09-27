@@ -7,6 +7,7 @@ import type {
   OpenAIChatChunk,
   OpenAIChatCompletionsRequest,
 } from "../types/api";
+import { routerDecisionChunk } from "./router-decision";
 
 export type ChatGenerationStatus =
   | "queued"
@@ -90,6 +91,9 @@ export function normalizeChatGenerationChunkPayload(
     }
     if (frameType === "diffusion_frame") {
       return { _diffusionFrame: payload } as unknown as OpenAIChatChunk;
+    }
+    if (frameType === "router_decision") {
+      return routerDecisionChunk(payload);
     }
   }
   return payload;

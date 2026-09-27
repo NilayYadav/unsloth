@@ -50,6 +50,7 @@ import {
   uploadChatAttachmentOriginal,
 } from "./api/chat-api";
 import { selectCodeToolNames } from "./api/code-tool-placement";
+import { type RouterDecision, readRouterDecision } from "./api/router-decision";
 import { getResearchThreadState } from "./api/research-api";
 import {
   cancelChatGenerationRun,
@@ -1214,6 +1215,7 @@ function scheduleGenerationRecovery(
         : undefined;
     let totalChunks = Number(metadata.generationChunkCount ?? 0);
     if (!Number.isSafeInteger(totalChunks) || totalChunks < 0) totalChunks = 0;
+    let routerDecision: RouterDecision | null = null;
     let currentMetadata = { ...metadata };
     const serverCancel = () => {
       void cancelChatGenerationRun(runId).catch(() => {});
@@ -1331,6 +1333,7 @@ function scheduleGenerationRecovery(
           firstChunkAt,
           totalChunks,
           toolCalls: toolNames(rebuild()),
+          router: routerDecision,
         });
       }
       await commit(nextMetadata, generationNeedsRecovery(nextMetadata));
@@ -1438,6 +1441,7 @@ function scheduleGenerationRecovery(
                 }>;
                 context_truncated?: OpenAIChatChunk["context_truncated"];
               };
+              routerDecision = readRouterDecision(chunk) ?? routerDecision;
               if ("_reasoningDurationMs" in chunk) {
                 currentMetadata = recoveredReasoningSummaryMetadata(
                   currentMetadata,

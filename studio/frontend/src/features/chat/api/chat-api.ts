@@ -2,7 +2,7 @@
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { authFetch, getAuthSessionEpoch } from "@/features/auth";
-import { autoRouterThread, recordAutoRouterChoice } from "../stores/auto-router-selection";
+import { routerDecisionChunk } from "./router-decision";
 import { prepareHfTokenForUse } from "@/features/hf-auth";
 // These helpers are deliberately API-layer-only, not part of their features' public barrels.
 // eslint-disable-next-line no-restricted-imports
@@ -1648,7 +1648,6 @@ export async function* streamChatCompletions(
   loadedContextLength?: number | null,
   routerSessionId?: string | null,
 ): AsyncGenerator<OpenAIChatChunk> {
-  const routerPin = payload.model === "auto" ? autoRouterThread(routerSessionId).pin : null;
   const response = await authFetch("/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -1656,7 +1655,6 @@ export async function* streamChatCompletions(
       // Opt into Unsloth's UI control frames (tool cards, statuses, reasoning timing). The
       // endpoint defaults to a clean OpenAI stream for external clients.
       "X-Unsloth-Events": "1",
-      ...(routerPin ? { "X-Unsloth-Router-Pin": routerPin } : {}),
       ...(payload.model === "auto" && routerSessionId ? { "X-Unsloth-Router-Session": routerSessionId } : {}),
     },
     body: JSON.stringify(payload),
@@ -1668,9 +1666,13 @@ export async function* streamChatCompletions(
     throw new Error(parseErrorText(response.status, body));
   }
 
-  if (payload.model === "auto") {
-    const model = response.headers.get("X-Unsloth-Router-Model");
-    if (model) recordAutoRouterChoice(routerSessionId, model, response.headers.get("X-Unsloth-Router-Reason"));
+  const headerRouterModel =
+    payload.model === "auto" ? response.headers.get("X-Unsloth-Router-Model") : null;
+  if (headerRouterModel) {
+    yield routerDecisionChunk({
+      model: headerRouterModel,
+      reason: response.headers.get("X-Unsloth-Router-Reason"),
+    });
   }
 
   if (!response.body) {
@@ -1753,6 +1755,11 @@ export async function* streamChatCompletions(
           yield {
             _toolStatus: parsed.content ?? "",
           } as unknown as OpenAIChatChunk;
+          separatorIndex = buffer.search(/\r?\n\r?\n/);
+          continue;
+        }
+        if ("type" in parsed && parsed.type === "router_decision") {
+          yield routerDecisionChunk(parsed);
           separatorIndex = buffer.search(/\r?\n\r?\n/);
           continue;
         }

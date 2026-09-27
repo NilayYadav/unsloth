@@ -17,6 +17,7 @@ import {
 } from "../lib/server-tuning-fields";
 import { authFetch, getAuthToken } from "@/features/auth";
 import { autoRouterSelection, autoRouterThread, recordAutoRouterChoice } from "../stores/auto-router-selection";
+import { readRouterDecision } from "./router-decision";
 import { withSandboxAttachmentPaths } from "../sandbox-attachments";
 import { prepareHfTokenForUse } from "@/features/hf-auth";
 import { DOWNLOAD_KIND } from "@/features/hub/download-manager/constants";
@@ -435,6 +436,7 @@ interface ResponseDetailsMetadata {
   modelId: string;
   modelLabel: string;
   responseModelId: string;
+  routerModel?: string;
   routerReason?: string;
   providerId?: string;
   providerName: string;
@@ -5392,6 +5394,8 @@ export function createOpenAIStreamAdapter(
       const streamStartTime = Date.now();
       let responseModelId = externalSelection?.modelId ?? params.checkpoint;
       const autoRequested = autoRouterSelection().enabled;
+      let routerModel: string | null = null;
+      let routerReason: string | null = null;
       let firstTokenTime: number | undefined;
       let totalChunks = 0;
       let resolveFirstToken: (() => void) | null = null;
@@ -6104,9 +6108,8 @@ export function createOpenAIStreamAdapter(
             "Unknown model",
           responseModelId:
             responseModelId || externalSelection?.modelId || params.checkpoint,
-          ...(autoRequested && autoRouterThread(resolvedThreadId).lastReason
-            ? { routerReason: autoRouterThread(resolvedThreadId).lastReason! }
-            : {}),
+          ...(autoRequested && routerModel ? { routerModel } : {}),
+          ...(autoRequested && routerReason ? { routerReason } : {}),
           ...(externalProvider?.id ? { providerId: externalProvider.id } : {}),
           providerName:
             externalProvider?.name ??
@@ -6483,7 +6486,10 @@ export function createOpenAIStreamAdapter(
           }
 
           return {
-            model: autoRouterSelection().enabled ? "auto" : params.checkpoint,
+            model: autoRequested ? "auto" : params.checkpoint,
+            ...(autoRequested && autoRouterThread(resolvedThreadId).pin
+              ? { router_pin: autoRouterThread(resolvedThreadId).pin! }
+              : {}),
             messages: outboundMessages,
             stream: true,
             ...(continuation ? { continue_final_message: true } : {}),
@@ -6633,7 +6639,7 @@ export function createOpenAIStreamAdapter(
               // Keyed on `enabled_tools`, never on `requestPayload.tools`: see durable-gate.ts. Keying this on
               // `tools` read as "no tools" on the local path and as "browser tools" for every passthrough turn that
               // carried a schema catalog, silently forcing those turns back onto the cancel-on-disconnect path.
-              if (requestPayload.model === "auto" || turnRequiresLegacyStream(requestPayload)) {
+              if (turnRequiresLegacyStream(requestPayload)) {
                 // Only a tool chain the BROWSER must execute still needs the live tab: there is no server-side
                 // executor to run it while you're away. Everything else is durable like plain text - an auto/bypass
                 // loop runs to completion while you're away, and a confirm ("ask") call parks on its approval_id
@@ -6789,11 +6795,22 @@ export function createOpenAIStreamAdapter(
             const canPublish = createStreamPublishGate();
 
             for await (const chunk of stream) {
+              const routerDecision = readRouterDecision(chunk);
+              if (routerDecision) {
+                if (autoRequested) {
+                  routerModel = routerDecision.model;
+                  routerReason = routerDecision.reason;
+                  responseModelId = routerDecision.model;
+                  recordAutoRouterChoice(resolvedThreadId, routerModel);
+                }
+                continue;
+              }
               const chunkModel = (chunk as { model?: unknown }).model;
               if (typeof chunkModel === "string" && chunkModel.length > 0) {
                 responseModelId = chunkModel;
-                if (requestPayload.model === "auto") {
-                  recordAutoRouterChoice(resolvedThreadId, chunkModel, autoRouterThread(resolvedThreadId).lastReason);
+                if (autoRequested && chunkModel !== "auto") {
+                  routerModel = chunkModel;
+                  recordAutoRouterChoice(resolvedThreadId, chunkModel);
                 }
               }
 

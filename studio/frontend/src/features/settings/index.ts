@@ -12,6 +12,10 @@ export {
 export { loadEmbeddingModelSettings } from "./api/embedding-model";
 export { updateHubSource } from "./api/hub-settings";
 export { loadOpenAIAutoSwitchSettings } from "./api/openai-auto-switch";
+export {
+  loadAutoRouterSettings,
+  subscribeAutoRouterSettings,
+} from "./api/auto-router";
 export { listOpenAIModels } from "./api/openai-models";
 export {
   loadHuggingFaceCacheSettings,

@@ -24,6 +24,14 @@ export interface ModelOption {
   audioType?: string | null;
 }
 
+export interface AutoModelOption {
+  selected: boolean;
+  label: string;
+  description: string;
+  lastModel?: string | null;
+  onSelect: () => void;
+}
+
 export interface LoraModelOption extends ModelOption {
   baseModel?: string;
   updatedAt?: number;

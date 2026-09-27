@@ -9,14 +9,16 @@ const PINS_KEY = "unsloth_router_pins";
 interface ThreadChoice {
   pin: string | null;
   lastModel: string | null;
-  lastReason: string | null;
 }
 
 interface Selection {
   enabled: boolean;
+  configured: boolean;
   toolsCapable: boolean;
   threads: Record<string, ThreadChoice>;
 }
+
+const EMPTY_CHOICE: ThreadChoice = { pin: null, lastModel: null };
 
 function saved(key: string): string | null {
   try { return window.localStorage.getItem(key); } catch { return null; }
@@ -28,21 +30,20 @@ function savedPins(): Record<string, ThreadChoice> {
     const value = JSON.parse(saved(PINS_KEY) || "{}");
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     return Object.fromEntries(
-      Object.entries(value).filter(([, pin]) => typeof pin === "string").map(([threadId, pin]) => [threadId, {
-        pin: pin as string,
-        lastModel: null,
-        lastReason: null,
-      }]),
+      Object.entries(value)
+        .filter(([threadId, pin]) => threadId !== "__default" && typeof pin === "string")
+        .map(([threadId, pin]) => [threadId, { ...EMPTY_CHOICE, pin: pin as string }]),
     );
   } catch { return {}; }
 }
 
 let selection: Selection = {
   enabled: typeof window !== "undefined" && saved(ENABLED_KEY) === "1",
+  configured: false,
   toolsCapable: false,
   threads: savedPins(),
 };
-const serverSelection: Selection = { enabled: false, toolsCapable: false, threads: {} };
+const serverSelection: Selection = { enabled: false, configured: false, toolsCapable: false, threads: {} };
 const listeners = new Set<() => void>();
 
 function publish(next: Selection) {
@@ -64,32 +65,45 @@ export function autoRouterSelection(): Selection {
 }
 
 export function autoRouterThread(threadId: string | null | undefined): ThreadChoice {
-  return selection.threads[threadId || "__default"] || { pin: null, lastModel: null, lastReason: null };
+  return (threadId && selection.threads[threadId]) || EMPTY_CHOICE;
 }
 
 export function setAutoRouterEnabled(enabled: boolean) {
-  try { window.localStorage.setItem(ENABLED_KEY, enabled ? "1" : "0"); } catch {}
-  publish({ ...selection, enabled, toolsCapable: enabled && selection.toolsCapable });
+  if (selection.enabled === enabled) return;
+  try {
+    window.localStorage.setItem(ENABLED_KEY, enabled ? "1" : "0");
+  } catch {
+    // Ignore unavailable storage.
+  }
+  publish({ ...selection, enabled });
 }
 
-export function setAutoRouterToolsCapable(toolsCapable: boolean) {
-  publish({ ...selection, toolsCapable });
+export function setAutoRouterSettings(models: { tools: boolean }[]) {
+  const configured = models.length > 0;
+  const toolsCapable = models.some((model) => model.tools);
+  if (!configured && selection.enabled) setAutoRouterEnabled(false);
+  if (selection.configured === configured && selection.toolsCapable === toolsCapable) return;
+  publish({ ...selection, configured, toolsCapable });
 }
 
 export function setAutoRouterPin(threadId: string | null | undefined, pin: string | null) {
-  const key = threadId || "__default";
-  const threads = { ...selection.threads, [key]: { ...autoRouterThread(threadId), pin } };
+  if (!threadId) return;
+  const threads = { ...selection.threads, [threadId]: { ...autoRouterThread(threadId), pin } };
   try {
     const pins = Object.fromEntries(Object.entries(threads).filter(([, choice]) => choice.pin).map(([id, choice]) => [id, choice.pin]));
     window.localStorage.setItem(PINS_KEY, JSON.stringify(pins));
-  } catch {}
+  } catch {
+    // Ignore unavailable storage.
+  }
   publish({ ...selection, threads });
 }
 
-export function recordAutoRouterChoice(threadId: string | null | undefined, model: string, reason: string | null) {
-  const key = threadId || "__default";
+export function recordAutoRouterChoice(threadId: string | null | undefined, model: string) {
+  if (!threadId) return;
+  const current = autoRouterThread(threadId);
+  if (current.lastModel === model) return;
   publish({
     ...selection,
-    threads: { ...selection.threads, [key]: { ...autoRouterThread(threadId), lastModel: model, lastReason: reason } },
+    threads: { ...selection.threads, [threadId]: { ...current, lastModel: model } },
   });
 }

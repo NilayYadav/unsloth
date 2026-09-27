@@ -48,6 +48,7 @@ export function generationChunkCountsTowardTiming(payload: unknown): boolean {
   const chunk = payload as
     | {
         _reasoningDurationMs?: unknown;
+        _routerDecision?: unknown;
         context_truncated?: unknown;
         usage?: unknown;
         choices?: unknown[];
@@ -55,7 +56,9 @@ export function generationChunkCountsTowardTiming(payload: unknown): boolean {
     | null
     | undefined;
   if (!chunk || typeof chunk !== "object") return false;
-  if ("_reasoningDurationMs" in chunk || chunk.context_truncated) return false;
+  if ("_reasoningDurationMs" in chunk || "_routerDecision" in chunk || chunk.context_truncated) {
+    return false;
+  }
   return !(chunk.usage && Array.isArray(chunk.choices) && chunk.choices.length === 0);
 }
 
@@ -143,6 +146,7 @@ export function recoveredGenerationFinalMetadata(options: {
   firstChunkAt?: number;
   totalChunks: number;
   toolCalls?: string[];
+  router?: { model: string; reason: string | null } | null;
 }): Record<string, unknown> {
   const { current, run, usage, timings, firstChunkAt, totalChunks } = options;
   const modelId =
@@ -192,10 +196,13 @@ export function recoveredGenerationFinalMetadata(options: {
     };
   }
   if (next.responseDetails === undefined) {
+    const router = options.router;
     next.responseDetails = {
       modelId,
-      modelLabel: modelId,
-      responseModelId: modelId,
+      modelLabel: router?.model ?? modelId,
+      responseModelId: router?.model ?? modelId,
+      ...(router ? { routerModel: router.model } : {}),
+      ...(router?.reason ? { routerReason: router.reason } : {}),
       providerName: "Local model",
       providerType: "local",
       startedAt,

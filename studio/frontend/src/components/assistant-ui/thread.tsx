@@ -19,6 +19,7 @@ import { downloadImagePart } from "@/components/assistant-ui/image";
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import { MessageHtmlArtifacts } from "@/components/assistant-ui/message-html-artifacts";
 import {
+  MessageAutoRouterChip,
   MessageResponseDetailsSheet,
   MessageResponseModelBadge,
 } from "@/components/assistant-ui/message-response-details-sheet";
@@ -8061,6 +8062,7 @@ const AssistantMessage: FC = () => {
       <div className="aui-assistant-message-footer mt-1.5 -ml-[var(--icon-btn-inset)] flex min-h-8">
         <BranchPicker className="mr-0.5" />
         <AssistantActionBar />
+        <MessageAutoRouterChip className="ml-auto self-center pl-2" />
       </div>
       {/* Renders nothing. `If last` keeps the hook off the other N-1. */}
       <MessagePrimitive.If last={true}>

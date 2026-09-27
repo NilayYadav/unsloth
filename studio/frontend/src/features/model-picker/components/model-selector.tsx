@@ -66,6 +66,7 @@ import { PillTabs } from "./model-selector/pill-tabs";
 import { loraOptionLabel } from "./model-selector/row-meta";
 import { isFineTunedSource } from "./model-selector/source-tabs";
 import type {
+  AutoModelOption,
   DeletedModelRef,
   ExternalModelOption,
   LoraModelOption,
@@ -76,6 +77,7 @@ import type {
 } from "./model-selector/types";
 
 export type {
+  AutoModelOption,
   DeletedModelRef,
   ExternalModelOption,
   LoraModelOption,
@@ -143,6 +145,8 @@ interface ModelSelectorProps {
   /** Trigger text when nothing is loaded. Defaults to "Select model"; task pages name what they
    *  pick so it reads as separate from the chat model. */
   placeholder?: string;
+  /** Chat only: an Auto row atop the list; while selected the trigger names it, not the checkpoint. */
+  autoOption?: AutoModelOption;
 }
 
 function ModelSelectorTrigger({
@@ -366,6 +370,7 @@ function ModelSelectorContent({
   task,
   catalog,
   communityModelPolicy,
+  autoOption,
 }: {
   open: boolean;
   models: ModelOption[];
@@ -396,6 +401,7 @@ function ModelSelectorContent({
   task?: HfTaskFilter;
   catalog?: CatalogGroup[];
   communityModelPolicy?: CommunityModelPolicy;
+  autoOption?: AutoModelOption;
 }) {
   const t = useT();
   const hasSelection = Boolean(value);
@@ -667,6 +673,7 @@ function ModelSelectorContent({
               task={task}
               catalog={catalog}
               communityModelPolicy={communityModelPolicy}
+              autoOption={autoOption}
               npu={npu}
               section={effectiveHubSection}
               sectionToggle={
@@ -733,6 +740,7 @@ export function ModelSelector({
   placeholder,
   loaded,
   loadedCount,
+  autoOption,
 }: ModelSelectorProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
@@ -844,6 +852,17 @@ export function ModelSelector({
     t,
   ]);
 
+  const autoSelected = autoOption?.selected === true;
+  const autoTriggerModel: ModelOption | undefined = autoOption?.selected
+    ? {
+        id: "auto",
+        name: autoOption.label,
+        description: autoOption.lastModel
+          ? modelDisplayName(autoOption.lastModel)
+          : undefined,
+      }
+    : undefined;
+
   function handleSelect(id: string, meta: ModelSelectorChangeMeta) {
     if (onValueChange) {
       onValueChange(id, meta);
@@ -877,8 +896,8 @@ export function ModelSelector({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <ModelSelectorTrigger
-        currentModel={currentModel}
-        isLoaded={isLoaded}
+        currentModel={autoTriggerModel ?? currentModel}
+        isLoaded={isLoaded && !autoSelected}
         showCloudIndicator={showCloudIndicator}
         variant={variant}
         size={size}
@@ -886,7 +905,7 @@ export function ModelSelector({
         triggerLabelClassName={triggerLabelClassName}
         dataTour={triggerDataTour}
         onEject={onEject ? () => handleEject() : undefined}
-        loadedCount={loadedCount}
+        loadedCount={autoSelected ? undefined : loadedCount}
         placeholder={placeholder}
       />
       <ModelSelectorContent
@@ -931,6 +950,15 @@ export function ModelSelector({
         task={task}
         catalog={catalog}
         communityModelPolicy={communityModelPolicy}
+        autoOption={
+          autoOption && {
+            ...autoOption,
+            onSelect: () => {
+              autoOption.onSelect();
+              setOpen(false);
+            },
+          }
+        }
       />
     </Popover>
   );

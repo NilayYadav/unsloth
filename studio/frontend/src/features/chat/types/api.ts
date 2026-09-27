@@ -670,6 +670,8 @@ export interface OpenAIChatCompletionsRequest {
   max_tool_calls_per_message?: number;
   tool_call_timeout?: number;
   session_id?: string;
+  /** Auto only: keep this thread on one model instead of routing each message. */
+  router_pin?: string;
   cancel_id?: string;
   provider_id?: string;
   provider_type?: string;

@@ -248,6 +248,7 @@ import {
   verifiedSoleHubVariant,
 } from "./sole-quant-cache";
 import type {
+  AutoModelOption,
   DeletedModelRef,
   ExternalModelOption,
   LoraModelOption,
@@ -292,6 +293,8 @@ function normalizeForSearch(s: string): string {
 function makeModelOptionKey(section: string, id: string): string {
   return `${section}::${id}`;
 }
+
+const AUTO_OPTION_KEY = makeModelOptionKey("auto", "auto");
 
 function makeModelOptionChildrenId(optionKey: string): string {
   return `model-picker-children-${optionKey.replace(/[^A-Za-z0-9_-]/g, "-")}`;
@@ -2890,6 +2893,7 @@ export function HubModelPicker({
   catalog,
   communityModelPolicy = "none",
   npu,
+  autoOption,
 }: {
   models: ModelOption[];
   /** Task-runtime downloads using a cache layout the shared Hub inventory cannot represent (for
@@ -2924,6 +2928,7 @@ export function HubModelPicker({
    *  Opt-in, since the runtime has to load an arbitrary publisher's checkpoint: true of audio. */
   communityModelPolicy?: CommunityModelPolicy;
   npu?: NpuPickerSource;
+  autoOption?: AutoModelOption;
 }) {
   const gpu = useGpuInfo();
   const inferenceGpu = useInferenceGpuInfo();
@@ -2975,6 +2980,8 @@ export function HubModelPicker({
   );
   const isKeptLoaded = (repoId: string) =>
     loadedIdSet.has(repoId.toLowerCase());
+  const showAutoRow =
+    isChatPicker && autoOption !== undefined && !debouncedQuery.trim();
   const loadedRows = useMemo(() => {
     if (task !== undefined || section !== "recommended") return [];
     const q = debouncedQuery.trim().toLowerCase();
@@ -5249,9 +5256,10 @@ export function HubModelPicker({
     ];
   }, [connectedMatches, pinnedConnectedSet, connectedSort]);
   const hubOptionKeys = useMemo(() => {
-    const keys: string[] = loadedRows.map((m) =>
-      makeModelOptionKey("loaded", m.id),
-    );
+    const keys: string[] = [
+      ...(showAutoRow ? [AUTO_OPTION_KEY] : []),
+      ...loadedRows.map((m) => makeModelOptionKey("loaded", m.id)),
+    ];
 
     // The tab lists nothing else, so these are the whole roving order, in drawn order.
     if (section === "connected") {
@@ -5428,14 +5436,18 @@ export function HubModelPicker({
     otherCachedModelRows,
     otherAdditionalOnDeviceModels,
     otherModelsCollapsed,
+    showAutoRow,
   ]);
 
+  const autoSelected = showAutoRow && autoOption?.selected === true;
   const selectedHubOptionKey = useMemo(
     () =>
-      value
-        ? hubOptionKeys.find((optionKey) => optionKey.endsWith(`::${value}`))
-        : undefined,
-    [hubOptionKeys, value],
+      autoSelected
+        ? AUTO_OPTION_KEY
+        : value
+          ? hubOptionKeys.find((optionKey) => optionKey.endsWith(`::${value}`))
+          : undefined,
+    [autoSelected, hubOptionKeys, value],
   );
   const hubModelList = useRovingModelList({
     label: "Hub models",
@@ -6830,6 +6842,29 @@ export function HubModelPicker({
                 : "pb-4",
             )}
           >
+            {showAutoRow && autoOption ? (
+              <div className="pb-1.5">
+                <div className={downloadedRowShellClassName(autoSelected)}>
+                  <div className="min-w-0 flex-1">
+                    <ModelRow
+                      label={autoOption.label}
+                      tooltipText={autoOption.description}
+                      hideOwner={true}
+                      selected={autoSelected}
+                      loaded={false}
+                      optionProps={hubModelList.getOptionProps(
+                        AUTO_OPTION_KEY,
+                        autoSelected,
+                      )}
+                      onClick={autoOption.onSelect}
+                      vramStatus={null}
+                      className={downloadedRowButtonClassName}
+                    />
+                  </div>
+                </div>
+                <div className="mx-2.5 mt-1.5 border-t border-border/50" />
+              </div>
+            ) : null}
             {loadedRows.length > 0 ? (
               <div className="pb-1.5">
                 {loadedRows.map(renderLoadedRow)}

@@ -57,6 +57,10 @@ export {
   type Preset,
 } from "./chat-settings-sheet";
 export { useChatRuntimeStore } from "./stores/chat-runtime-store";
+export {
+  setAutoRouterPin,
+  useAutoRouterSelection,
+} from "./stores/auto-router-selection";
 export { openFolderAsProject, useOpeningFolder } from "./utils/open-folder-as-project";
 export {
   hydrateModelDisclaimerPreference,

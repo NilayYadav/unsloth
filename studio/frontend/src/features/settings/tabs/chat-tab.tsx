@@ -24,6 +24,7 @@ import {
 import { PASTED_TEXT_THRESHOLD_CHOICES } from "@/features/chat/utils/pasted-text";
 import { refreshContextUsage } from "@/features/chat/utils/refresh-context-usage";
 import { formatBindingLabel, isMacPlatform } from "../lib/keyboard-shortcuts";
+import { useIsAccountOwner } from "@/features/auth";
 import { useUserProfileStore } from "@/features/profile";
 import { type TranslationKey, useT } from "@/i18n";
 import { toast } from "@/lib/toast";
@@ -45,6 +46,7 @@ import {
   loadCurrentDatePrompt,
   updateCurrentDatePrompt,
 } from "../api/current-date-prompt";
+import { AutoRouterSection } from "../components/auto-router-section";
 import { SettingsRow } from "../components/settings-row";
 import { ComposerSettings } from "../components/composer-settings";
 import { SettingsSection } from "../components/settings-section";
@@ -144,6 +146,7 @@ const PLUS_MENU_SETTINGS: {
 
 export function ChatTab() {
   const t = useT();
+  const isOwner = useIsAccountOwner();
   const plusPins = usePlusMenuPrefsStore((state) => state.pins);
   const togglePlusPin = usePlusMenuPrefsStore((state) => state.togglePin);
   const autoTitle = useChatRuntimeStore((state) => state.autoTitle);
@@ -638,6 +641,8 @@ export function ChatTab() {
           />
         </SettingsRow>
       </SettingsSection>
+
+      {isOwner ? <AutoRouterSection /> : null}
 
       <SettingsSection title={t("settings.chat.artifacts.title")}>
         <div ref={networkAccessRowRef}>

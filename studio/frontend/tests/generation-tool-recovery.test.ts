@@ -20,6 +20,9 @@ const parser = await import(
 const { createGenerationToolRecovery } = await import(
   "../src/features/chat/utils/generation-tool-recovery.ts"
 );
+const { readRouterDecision } = await import(
+  "../src/features/chat/api/router-decision.ts"
+);
 
 const start = (id = "call_0") => ({
   type: "tool_start",
@@ -360,6 +363,7 @@ async function recoverRun(
     ...recovery,
     ...parser,
     createGenerationToolRecovery,
+    readRouterDecision,
     generationRecoveries,
     useChatRuntimeStore: { getState: () => runtime },
     cancelChatGenerationRun: async () => {},
