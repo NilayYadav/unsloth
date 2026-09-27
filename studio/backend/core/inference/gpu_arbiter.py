@@ -38,10 +38,11 @@ def _evict_chat() -> None:
     import time
 
     from core.inference import get_inference_backend
-    from routes.inference import get_llama_cpp_backend, unload_extra_models
+    from routes.inference import get_llama_cpp_backend, note_chat_evicted, unload_extra_models
 
     from core.inference.llama_cpp import chat_load_active
 
+    note_chat_evicted()
     unload_extra_models()
     llama = get_llama_cpp_backend()
     # is_active (process exists), not is_loaded (exists AND healthy): a chat model still starting up holds VRAM but is
@@ -167,6 +168,7 @@ def acquire_for(
     allow_evict: bool = True,
     account_id: Optional[str] = None,
     replacing: bool = False,
+    alongside: bool = False,
 ) -> Any:
     """Make ``owner`` the sole GPU owner, evicting the other if it holds it.
 
@@ -193,8 +195,9 @@ def acquire_for(
                 raise GpuBusyForAnotherAccountError(_owner, busy)
             logger.info("gpu_arbiter: evicting %s for %s", _owner, owner)
             _EVICTORS[_owner]()
-        # Records who LOADED the model; a plain re-assert must not hand it to whoever asked last.
-        claims = _owner != owner or register is not None or replacing
+        # Records who LOADED the model; a plain re-assert must not hand it to whoever asked last,
+        # nor a model loaded alongside take it from the account that loaded the primary.
+        claims = _owner != owner or ((register is not None or replacing) and not alongside)
         _owner = owner
         _owner_epoch += 1
         result = register() if register is not None else None

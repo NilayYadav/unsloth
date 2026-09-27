@@ -230,7 +230,6 @@ _START_API_KEY_MARKER_ENV = "_UNSLOTH_START_API_KEY_MARKER"
 # Marks run()'s re-exec'd child; a marked child still outside the venv must stop, not loop.
 _STUDIO_REEXEC_ENV = "_UNSLOTH_STUDIO_REEXEC"
 _CLOUDFLARE_INTENT_ENV = "_UNSLOTH_CLOUDFLARE_INTENT"
-_RUN_ALSO_ENV = "_UNSLOTH_RUN_ALSO"
 
 
 def _consume_start_api_key_marker_env() -> bool:
@@ -1674,7 +1673,6 @@ def _load_model_via_http(
     llama_extra_args: Optional[List[str]] = None,
     timeout: int = 600,
     request_host: str = "127.0.0.1",
-    alongside: bool = False,
 ) -> dict:
     import json
     import urllib.request
@@ -1689,8 +1687,6 @@ def _load_model_via_http(
     }
     if gguf_variant:
         payload["gguf_variant"] = gguf_variant
-    if alongside:
-        payload["alongside"] = True
     if gpu_memory_mode == "manual":
         payload["gpu_memory_mode"] = "manual"
         payload["gpu_layers"] = -1
@@ -2202,15 +2198,6 @@ def run(
         rich_help_panel = _RUN_PANEL_MODEL,
         help = "GGUF quant variant (e.g. UD-Q4_K_XL)",
     ),
-    also: Optional[List[str]] = typer.Option(
-        None,
-        "--also",
-        rich_help_panel = _RUN_PANEL_MODEL,
-        help = (
-            "Another GGUF (`org/repo:variant`) to serve alongside --model; repeatable. "
-            "Requests pick one by its `model` name."
-        ),
-    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -2454,7 +2441,6 @@ def run(
     """
     # Passed via env, so an older re-exec target ignores it instead of treating it as a llama-server arg.
     inherited_start_api_key_marker = _consume_start_api_key_marker_env()
-    also = [*(also or ()), *json.loads(os.environ.pop(_RUN_ALSO_ENV, "[]"))]
     start_api_key_marker = start_api_key_marker or inherited_start_api_key_marker
     runtime_gate_handoff = _studio_runtime_gate.consume_runtime_gate_handoff()
     # The group callback returns before its own clear once a subcommand is named, so this path must clear the override itself (#7331).
@@ -2689,9 +2675,6 @@ def run(
 
         if start_api_key_marker:
             os.environ[_START_API_KEY_MARKER_ENV] = "1"
-        # Via env too: an older re-exec target would hand an unknown --also to llama-server.
-        if also:
-            os.environ[_RUN_ALSO_ENV] = json.dumps(also)
         os.environ[_STUDIO_REEXEC_ENV] = "1"
         try:
             if sys.platform == "win32":
@@ -2709,7 +2692,6 @@ def run(
                 os.execvp(args[0], args)
         finally:
             os.environ.pop(_START_API_KEY_MARKER_ENV, None)
-            os.environ.pop(_RUN_ALSO_ENV, None)
             os.environ.pop(_STUDIO_REEXEC_ENV, None)
 
     with _studio_deps.studio_backend_imports("unsloth studio"):
@@ -2757,35 +2739,23 @@ def run(
             typer.echo(f"UNSLOTH_START_PORT: {actual_port}")
             typer.echo(f"UNSLOTH_START_API_KEY: {api_key}")
 
+        if not silent:
+            typer.echo(f"Loading model: {model}...")
         try:
-            results = []
-            for repo, variant in [(model, gguf_variant), *map(_split_repo_variant, also)]:
-                if not silent:
-                    typer.echo(f"Loading model: {repo}...")
-                # The tuning flags describe --model; a model loaded alongside takes its own defaults.
-                tuning = {} if results else {
-                    "tensor_parallel": tensor_parallel,
-                    "speculative_type": speculative_type,
-                    "spec_draft_n_max": spec_draft_n_max,
-                    "llama_extra_args": extra_llama_args,
-                }
-                try:
-                    results.append(
-                        _load_model_via_http(
-                            port = actual_port,
-                            api_key = api_key,
-                            model = repo,
-                            gguf_variant = variant,
-                            max_seq_length = max_seq_length,
-                            load_in_4bit = load_in_4bit,
-                            gpu_memory_mode = gpu_memory_mode,
-                            request_host = request_host,
-                            alongside = bool(results),
-                            **tuning,
-                        )
-                    )
-                except RuntimeError as exc:
-                    raise RuntimeError(f"{repo}: {exc}") from exc
+            result = _load_model_via_http(
+                port = actual_port,
+                api_key = api_key,
+                model = model,
+                gguf_variant = gguf_variant,
+                max_seq_length = max_seq_length,
+                load_in_4bit = load_in_4bit,
+                gpu_memory_mode = gpu_memory_mode,
+                tensor_parallel = tensor_parallel,
+                speculative_type = speculative_type,
+                spec_draft_n_max = spec_draft_n_max,
+                llama_extra_args = extra_llama_args,
+                request_host = request_host,
+            )
         except RuntimeError as exc:
             typer.echo(f"Error: {exc}", err = True)
             raise typer.Exit(1)
@@ -2794,7 +2764,6 @@ def run(
         getattr(run_mod, "_wait_for_server_shutdown", lambda: None)()
         raise
 
-    result = results[0]
     loaded_model = result.get("model", model)
     display_variant = f" ({gguf_variant})" if gguf_variant else ""
     context_length_line = _format_context_length_line(result)
@@ -2838,8 +2807,6 @@ def run(
             typer.echo(f"  Unsloth Studio running at {base_url}")
             _emit_run_cloudflare_notice(run_mod, host, display_host, actual_port, secure)
         typer.echo(f"  Model loaded: {loaded_model}{display_variant}")
-        for name in also:
-            typer.echo(f"  Also serving: {name}")
         if context_length_line:
             typer.echo(context_length_line)
         typer.echo(f"  API Key:      {api_key}")

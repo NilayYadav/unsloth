@@ -55,7 +55,7 @@ _kv_resume = None
 _lifecycle_lock = threading.Lock()
 
 
-# Loads run one at a time. A load into a new slot holds only this, so inference keeps starting.
+# Serializes loads. A load into a new slot holds only this, so inference keeps starting.
 _load_lock = threading.Lock()
 
 
@@ -397,6 +397,30 @@ def set_current_response_scope(scope) -> None:
     _current_response_scope.set(scope if isinstance(scope, dict) else None)
 
 
+_END_CALLBACKS_SCOPE_KEY = "unsloth.end_callbacks"
+_ENDED_SCOPE_KEY = "unsloth.request_ended"
+
+
+def on_request_end(callback) -> bool:
+    """Run ``callback`` once the current tracked request has ended. False outside one."""
+    scope = _current_response_scope.get()
+    if not isinstance(scope, dict) or scope.get(_ENDED_SCOPE_KEY):
+        return False
+    scope.setdefault(_END_CALLBACKS_SCOPE_KEY, []).append(callback)
+    return True
+
+
+def _run_end_callbacks(scope) -> None:
+    if not isinstance(scope, dict):
+        return
+    scope[_ENDED_SCOPE_KEY] = True
+    for callback in scope.pop(_END_CALLBACKS_SCOPE_KEY, ()):
+        try:
+            callback()
+        except Exception as exc:
+            logger.debug("request end callback failed: %s", exc)
+
+
 def mark_current_response_failed() -> None:
     """Flag the current response failed via the contextvar the middleware set, so an
     OpenAI-family streaming error emitted deep in a generator (no direct scope handle)
@@ -725,6 +749,7 @@ class LlamaKeepWarmMiddleware:
             if ended["done"]:
                 return
             ended["done"] = True
+            _run_end_callbacks(scope)
             code = status["code"]
             if media_owner is not None:
                 media_keepwarm.end_request(media_owner, counted = code not in (401, 403))
@@ -846,15 +871,20 @@ async def idle_unload_loop(poll_seconds: float = 15.0) -> None:
             ttl = await asyncio.to_thread(get_auto_unload_idle_seconds)
             if ttl <= 0:
                 continue
-            from routes.inference import get_llama_cpp_backend, unload_extra_models
+            from routes.inference import (
+                get_llama_cpp_backend,
+                release_chat_gpu_claim,
+                unload_extra_models,
+            )
 
-            async with _unload_gate():
-                if _is_idle(ttl):
-                    await asyncio.to_thread(unload_extra_models, _user_pinned)
             backend = get_llama_cpp_backend()
             # track by (id, variant): a (re)loaded model counts as activity so it survives one TTL before its first
             # request
             async with _unload_gate():
+                if _is_idle(ttl) and await asyncio.to_thread(
+                    unload_extra_models, _user_pinned, True, True
+                ):
+                    await asyncio.to_thread(release_chat_gpu_claim)
                 # Purging the stash mid-reload would race the restore.
                 current = _loaded_identity(backend)
                 if current != seen_model:

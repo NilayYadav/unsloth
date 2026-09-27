@@ -66,8 +66,8 @@ import contextvars
 import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack, asynccontextmanager, contextmanager, nullcontext
-from dataclasses import dataclass, fields as dataclass_fields, replace
+from contextlib import ExitStack, asynccontextmanager, contextmanager, nullcontext, suppress
+from dataclasses import dataclass, field as dataclass_field, fields as dataclass_fields, replace
 
 
 import re as _re
@@ -119,7 +119,7 @@ from core.inference.orchestrator import (
     MINIMAX_MUSIC_MAX_FRAMES,
     MOSS_TTS_MAX_FRAMES,
     _summed_tool_loop_stats,
-    routed_inference_backend,
+    routed_slot,
 )
 from core.inference.llama_admission import (
     LlamaAdmissionCancelled,
@@ -133,7 +133,11 @@ from core.inference.llama_admission import (
     peek_llama_admission_snapshot,
 )
 from core.inference.tool_stream_exec import TOOL_APPROVAL_FLUSH_DELAY_S
-from core.inference.llama_cpp import requested_video_fps
+from core.inference.llama_cpp import (
+    register_serving_backend,
+    requested_video_fps,
+    unregister_serving_backend,
+)
 from core.inference.llama_video_input import shrink_video_for_llama
 
 
@@ -5014,6 +5018,7 @@ class _TrackedCancel:
         self._active = active_generations.ActiveGeneration(
             event, thread_id = thread_id, run_id = run_id, model = model, kind = kind
         )
+        self._slot = None
 
     @classmethod
     def for_payload(cls, event: threading.Event, payload, *keys):
@@ -5039,6 +5044,11 @@ class _TrackedCancel:
                 if k and _PENDING_CANCELS.pop(k, None) is not None:
                     should_cancel = True
         self._active.__enter__()
+        # A model loaded alongside is not torn down under a generation it is serving.
+        self._slot = routed_slot.get()
+        if self._slot is not None:
+            with _slot_lock:
+                self._slot.generations.add(self.event)
         if should_cancel:
             self.event.set()
         return self.event
@@ -5053,6 +5063,10 @@ class _TrackedCancel:
                 if not bucket:
                     _CANCEL_REGISTRY.pop(k, None)
         self._active.__exit__(*exc)
+        if self._slot is not None:
+            with _slot_lock:
+                self._slot.generations.discard(self.event)
+            self._slot = None
         return False
 
 
@@ -8110,43 +8124,69 @@ def _resolve_model_identifier_for_request(
 
 # GGUF inference backend (llama-server)
 _llama_cpp_backend = LlamaCppBackend()
+register_serving_backend(_llama_cpp_backend)
 
-# Models loaded alongside the primary one. A slot pairs its own llama.cpp backend and
-# orchestrator, as the primary pair does, and a request is routed to the slot its model names.
-class _ExtraSlot(NamedTuple):
+
+# A model loaded alongside the primary one, behind its own backends. routed_slot points a request at one.
+@dataclass(eq = False)
+class _ExtraSlot:
     llama: LlamaCppBackend
     orchestrator: InferenceOrchestrator
     account: str
+    request: Optional[LoadRequest] = None
+    last_used: float = 0.0
+    # Cancel events of the generations it is serving.
+    generations: set = dataclass_field(default_factory = set)
+    # Requests routed here that have not finished, generating or not yet.
+    refs: int = 0
 
 
 _extra_slots: list[_ExtraSlot] = []
-_extra_slots_lock = threading.Lock()
+# Held while a generation joins a slot and while eviction claims one, so neither misses the other.
+_slot_lock = threading.Lock()
 # The slot a load is filling and the model it asked for, so Stop loading can reach it.
 _loading_slot: Optional[tuple[_ExtraSlot, str]] = None
-_routed_llama_backend: contextvars.ContextVar[Optional[LlamaCppBackend]] = contextvars.ContextVar(
-    "routed_llama_backend", default = None
-)
+# Models Studio evicted (to fit another, for Images/Video, or idle), reloaded when a request names one,
+# with the conversation KV their slots held when there was room to save it.
+_evicted: dict[str, LoadRequest] = {}
+_evicted_kv: dict[str, dict] = {}
+# The account whose model each stash entry is; a managed account sees only its own.
+_evicted_owner: dict[str, str] = {}
+_primary_request: Optional[LoadRequest] = None
+_primary_account: Optional[str] = None
 
 
 def get_llama_cpp_backend() -> LlamaCppBackend:
-    return _routed_llama_backend.get() or _llama_cpp_backend
-
-
-def _route_to_slot(slot: Optional[_ExtraSlot]) -> None:
-    _routed_llama_backend.set(slot.llama if slot else None)
-    routed_inference_backend.set(slot.orchestrator if slot else None)
+    slot = routed_slot.get()
+    return slot.llama if slot is not None else _llama_cpp_backend
 
 
 def _in_slot(slot: Optional[_ExtraSlot], fn):
-    def call():
-        _route_to_slot(slot)
-        return fn()
+    context = contextvars.copy_context()
+    context.run(routed_slot.set, slot)
+    return context.run(fn)
 
-    return contextvars.copy_context().run(call)
+
+def extra_slot_backends() -> list[tuple[LlamaCppBackend, InferenceOrchestrator]]:
+    """The backends of every model kept alongside, whichever account loaded it."""
+    return [(slot.llama, slot.orchestrator) for slot in list(_extra_slots)]
+
+
+def extra_slot_loading() -> bool:
+    """Whether a model is still loading into a slot of its own."""
+    return _loading_slot is not None or any(
+        getattr(slot.orchestrator, "loading_models", None) for slot in list(_extra_slots)
+    )
 
 
 def _slot_in_use(slot: _ExtraSlot) -> bool:
     return bool(slot.llama.is_active or slot.orchestrator.active_model_name)
+
+
+def _visible_extra_slots() -> list[_ExtraSlot]:
+    if not account_access.managed_account():
+        return list(_extra_slots)
+    return [slot for slot in _extra_slots if slot.account == current_account_id()]
 
 
 def _visible_loading_slot() -> Optional[tuple[_ExtraSlot, str]]:
@@ -8154,55 +8194,324 @@ def _visible_loading_slot() -> Optional[tuple[_ExtraSlot, str]]:
     return loading if loading and loading[0] in _visible_extra_slots() else None
 
 
-def _visible_extra_slots() -> list[_ExtraSlot]:
-    """A managed account sees only the slots it loaded."""
-    if not account_access.managed_account():
-        return list(_extra_slots)
-    return [slot for slot in _extra_slots if slot.account == current_account_id()]
-
-
-async def _route_to_extra_slot(requested: Optional[str]) -> Optional[_ExtraSlot]:
-    """Point this request at the extra slot serving *requested*, if one does. The primary wins a tie."""
-    _route_to_slot(None)
-    slots = _visible_extra_slots()
-    if not slots or not isinstance(requested, str) or not requested:
-        return None
-    if await asyncio.to_thread(_loaded_satisfies, requested):
-        return None
-    try:
-        for slot in slots:
-            _route_to_slot(slot)
-            if await asyncio.to_thread(_loaded_satisfies, requested):
-                return slot
-    except BaseException:
-        _route_to_slot(None)
-        raise
-    _route_to_slot(None)
+def _slot_serving(requested: str, slots: list[_ExtraSlot]) -> Optional[_ExtraSlot]:
+    for slot in (None, *slots):
+        if _in_slot(slot, lambda: _loaded_satisfies(requested)):
+            return slot
     return None
 
 
-def _drop_extra_slot(slot: _ExtraSlot) -> None:
-    """Tear a slot down. Safe to repeat: a load that outlived its eviction is dropped again."""
-    with _extra_slots_lock:
-        if slot in _extra_slots:
-            _extra_slots.remove(slot)
+async def _route_to_extra_slot(requested: Optional[str]) -> Optional[_ExtraSlot]:
+    """Route this request to the extra slot serving *requested*, if any. The primary wins a tie."""
+    routed_slot.set(None)
+    slots = _visible_extra_slots()
+    if not slots or not isinstance(requested, str) or not requested:
+        return None
+    slot = await asyncio.to_thread(_slot_serving, requested, slots)
+    if slot is not None:
+        if not _reserve_slot(slot):
+            # Evicted while the probe ran.
+            return None
+        routed_slot.set(slot)
+        slot.last_used = time.monotonic()
+    return slot
+
+
+def _reserve_slot(slot: _ExtraSlot) -> bool:
+    """Hold ``slot`` against eviction until the current request ends; False once it is gone."""
+    from core.inference.llama_keepwarm import on_request_end
+
+    with _slot_lock:
+        if slot not in _extra_slots:
+            return False
+        slot.refs += 1
+    if not on_request_end(lambda: _release_slot(slot)):
+        _release_slot(slot)
+    return True
+
+
+def _release_slot(slot: _ExtraSlot) -> None:
+    with _slot_lock:
+        slot.refs -= 1
+
+
+def _restorable(request: LoadRequest) -> Optional[LoadRequest]:
+    """The request to replay when this model is evicted; a leased native path cannot be replayed."""
+    if request.native_path_lease:
+        return None
+    return request.model_copy(
+        update = {
+            "hf_token": None,
+            "load_request_id": None,
+            "force_reload": False,
+            "force_cancel_active": False,
+            "alongside": True,
+        }
+    )
+
+
+def _stash_key(request: LoadRequest) -> str:
+    return (
+        f"{request.model_path}:{request.gguf_variant}"
+        if request.gguf_variant
+        else request.model_path
+    )
+
+
+def _stash_evicted(
+    request: Optional[LoadRequest],
+    kv: Optional[dict] = None,
+    account: Optional[str] = None,
+) -> None:
+    from core.inference.llama_keepwarm import _delete_resume_files
+
+    if request is None:
+        return
+    key = _stash_key(request)
+    # Two accounts can each have kept the same model; neither entry may overwrite the other's.
+    if account is not None and _evicted_owner.get(key, account) != account:
+        key = f"{key}@{account}"
+    _evicted[key] = request
+    if account is None:
+        _evicted_owner.pop(key, None)
+    else:
+        _evicted_owner[key] = account
+    stale = _evicted_kv.pop(key, None)
+    if stale is not None:
+        _delete_resume_files(stale)
+    if kv is not None:
+        _evicted_kv[key] = kv
+
+
+def _evicted_visible(key: str) -> bool:
+    owner = _evicted_owner.get(key)
+    return owner is None or not account_access.managed_account() or owner == current_account_id()
+
+
+def _evicted_request(requested) -> Optional[LoadRequest]:
+    from core.inference.openai_auto_download import looks_like_quant, split_model_ref
+
+    if not isinstance(requested, str) or not requested:
+        return None
+    base, variant = split_model_ref(requested)
+    for key, request in list(_evicted.items()):
+        if not _evicted_visible(key):
+            continue
+        if not _matches_any(base, (request.model_path, public_model_id(request.model_path))):
+            continue
+        if looks_like_quant(variant) and (request.gguf_variant or "").lower() != variant.lower():
+            continue
+        return request
+    return None
+
+
+def _forget_evicted(model_path: str, keep_kv: bool = False) -> Optional[dict]:
+    """A deliberate unload or a fresh load of the model: nothing to bring back. Returns the saved
+    KV for ``keep_kv``, else deletes it."""
+    from core.inference.llama_keepwarm import _delete_resume_files
+
+    global _primary_request
+    kept = None
+    for key, request in list(_evicted.items()):
+        if not _evicted_visible(key):
+            continue
+        if _matches_any(model_path, (request.model_path, public_model_id(request.model_path))):
+            del _evicted[key]
+            _evicted_owner.pop(key, None)
+            kv = _evicted_kv.pop(key, None)
+            if kv is not None and keep_kv and kept is None:
+                kept = kv
+            elif kv is not None:
+                _delete_resume_files(kv)
+    if _primary_request is not None and _matches_any(model_path, (_primary_request.model_path,)):
+        _primary_request = None
+    return kept
+
+
+def _eviction_victims(
+    exclude: Optional[_ExtraSlot],
+    short_mib: int,
+    gpu_indices = None,
+) -> list[_ExtraSlot]:
+    """Least recently used slots first, as many as it takes to free ``short_mib``; one at a time
+    when a footprint is unknown, since the retry prices the rest."""
+    # A slot still generating is never a victim: evicting it would cut a reply off mid-stream.
+    slots = sorted(
+        (
+            s
+            for s in _visible_extra_slots()
+            if s is not exclude and _slot_in_use(s) and not s.generations and not s.refs
+        ),
+        key = lambda s: s.last_used,
+    )
+    victims, freed = [], 0
+    for slot in slots:
+        planned = getattr(slot.llama, "_planned_vram_mib", {})
+        # Only memory on the GPUs the load was priced on makes room for it.
+        held = sum(mib for idx, mib in planned.items() if gpu_indices is None or idx in gpu_indices)
+        if planned and not held:
+            continue
+        victims.append(slot)
+        freed += held
+        if not held or freed >= short_mib:
+            return victims
+    # Every candidate's footprint is known and together they cannot make room: evict none.
+    return []
+
+
+def _claim_victim(slot: _ExtraSlot) -> bool:
+    """Take ``slot`` out of routing unless a request reached it since it was picked."""
+    with _slot_lock:
+        if slot.generations or slot.refs or slot not in _extra_slots:
+            return False
+        _extra_slots.remove(slot)
+        return True
+
+
+def note_chat_evicted() -> None:
+    """Images/Video is taking the GPU: remember every chat model so a request naming one brings it back."""
+    from core.inference import orchestrator as _orchestrator_module
+
+    primary_serving = _llama_cpp_backend.is_active or getattr(
+        _orchestrator_module._inference_backend, "active_model_name", None
+    )
+    if primary_serving:
+        _stash_evicted(_primary_request, account = _primary_account)
+    for slot in _extra_slots:
+        _stash_evicted(slot.request, account = slot.account)
+
+
+def _slot_generations() -> set:
+    return {event for slot in list(_extra_slots) for event in list(slot.generations)}
+
+
+def _routed_generation_count() -> int:
+    """Generations on the model this request is routed to; each loaded model decodes on its own server."""
+    slot = routed_slot.get()
+    if slot is not None:
+        return len(slot.generations)
+    elsewhere = _slot_generations()
+    return active_generations.count(None, elsewhere) if elsewhere else active_generations.count()
+
+
+def _raise_or_cancel_slot_generations(
+    slot: _ExtraSlot,
+    *,
+    force: bool,
+    cancel: bool = True,
+    action: str = "Unloading this model",
+) -> int:
+    """The primary's 409 for a slot: only the generations this slot serves are in the way."""
+    events = list(slot.generations)
+    if not events:
+        return 0
+    if not force:
+        running = len(events)
+        raise HTTPException(
+            status_code = 409,
+            detail = {
+                "error": "active_generations",
+                "message": (
+                    f"{action} would stop {running} chat"
+                    f"{'s' if running != 1 else ''} that "
+                    f"{'are' if running != 1 else 'is'} still generating. "
+                    "Stop them first, or retry with force_cancel_active."
+                ),
+                "running": running,
+                "thread_ids": active_generations.thread_ids_for(events),
+            },
+        )
+    if not cancel:
+        return 0
+    for event in events:
+        event.set()
+    return len(events)
+
+
+def _drop_extra_slot(slot: _ExtraSlot, stash: bool = False) -> None:
+    # Safe to repeat: a load that outlived its eviction drops the slot again.
+    with suppress(ValueError):
+        _extra_slots.remove(slot)
+    if stash:
+        from utils.openai_auto_switch_settings import get_auto_unload_keep_kv
+
+        kv = None
+        if slot.request is not None and get_auto_unload_keep_kv():
+            try:
+                kv = slot.llama.save_slots_for_resume()
+            except Exception as exc:
+                logger.debug("slot save before eviction failed: %s", exc)
+        _stash_evicted(slot.request, kv, slot.account)
     try:
         slot.llama.unload_model()
-        slot.orchestrator._cleanup()
     finally:
+        unregister_serving_backend(slot.llama)
         atexit.unregister(slot.llama._cleanup)
         atexit.unregister(slot.orchestrator._cleanup)
+        slot.orchestrator._cleanup()
 
 
-def unload_extra_models(keep = None) -> None:
-    """Drop every extra slot, or for ``keep`` only the loaded ones it does not spare."""
+def unload_extra_models(
+    keep = None,
+    stash: bool = False,
+    spare_filling: bool = False,
+) -> int:
+    """Drop every extra slot, or with ``keep`` only the loaded ones it does not spare. Returns how many."""
+    dropped = 0
+    filling = _loading_slot[0] if _loading_slot else None
     for slot in list(_extra_slots):
         loaded = slot.llama.is_loaded or slot.orchestrator.active_model_name
+        # The idle sweep leaves the slot a load is still filling to that load.
+        if spare_filling and slot is filling:
+            continue
         if keep is None or (loaded and not keep(slot.llama)):
+            dropped += 1
             try:
-                _drop_extra_slot(slot)
+                _drop_extra_slot(slot, stash)
             except Exception as exc:
                 logger.warning("Could not unload an extra model: %s", exc)
+    return dropped
+
+
+def unload_llama_slots() -> int:
+    """Drop every slot running or starting a llama-server, a GGUF load still filling one included."""
+    filling = _loading_slot[0] if _loading_slot else None
+    dropped = 0
+    for slot in list(_extra_slots):
+        starting = slot is filling and not getattr(slot.orchestrator, "loading_models", None)
+        if not (slot.llama.is_active or slot.llama.is_loaded or starting):
+            continue
+        dropped += 1
+        try:
+            _drop_extra_slot(slot, True)
+        except Exception as exc:
+            logger.warning("Could not unload an extra model: %s", exc)
+    return dropped
+
+
+def _note_primary_load(request: LoadRequest) -> None:
+    """The primary now serves ``request``: what an eviction must bring back."""
+    global _primary_request, _primary_account
+    replaced = _primary_request
+    _forget_evicted(request.model_path)
+    # A plain load replaces the primary on purpose, so the model it replaced is not brought back.
+    if replaced is not None and not request.alongside:
+        _forget_evicted(replaced.model_path)
+    _primary_request = _restorable(request)
+    _primary_account = current_account_id()
+
+
+async def _restore_evicted(request: LoadRequest, fastapi_request, current_subject: str) -> None:
+    try:
+        await load_model_gated(
+            request, fastapi_request, current_subject, current_request_counted = True
+        )
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code = 503,
+            detail = f"Could not reload {request.model_path}: {exc.detail}",
+            headers = {"Retry-After": "5"},
+        ) from exc
 
 
 # Serializes opt-in auto-switch loads so two requests can't race a swap. One
@@ -8310,12 +8619,11 @@ async def _wait_for_model_switch_idle(
             current_request_counted = current_request_counted,
             include_pending = False,
         )
+        # A model loaded alongside serves its requests on its own server: the swap never waits on them.
+        elsewhere = _slot_generations()
+        active_others -= min(active_others, len(elsewhere))
         if cancel_pending:
-            cancellable = (
-                active_generations.count(account_id)
-                if account_id is not None
-                else active_generations.count()
-            )
+            cancellable = active_generations.count(account_id, elsewhere)
             active_others -= min(active_others, cancellable)
         if active_others <= queued_switches:
             return
@@ -10307,6 +10615,16 @@ async def _maybe_auto_switch_model(
     scope = getattr(fastapi_request, "scope", None)
     if isinstance(scope, dict) and scope.get(_DISABLE_OPENAI_AUTO_SWITCH_SCOPE_KEY):
         return
+    # A model Studio evicted comes back when a request names it, whatever the switch setting: the
+    # user loaded it and Studio took it away.
+    from auth.authentication import request_admitted_without_credential
+
+    stashed = _evicted_request(requested_model)
+    if stashed is not None and not request_admitted_without_credential(fastapi_request):
+        if not await asyncio.to_thread(_loaded_satisfies, requested_model):
+            await _restore_evicted(stashed, fastapi_request, current_subject)
+        if await _route_to_extra_slot(requested_model) is not None:
+            return
     auto_switch_on = get_openai_auto_switch_enabled() or bool(
         getattr(fastapi_request.state, "auto_router_decision", None)
     )
@@ -10863,6 +11181,7 @@ async def _maybe_auto_switch_model(
                                     **load_internal_kw,
                                 )
                             _switch_loaded_ok = True
+                            _note_primary_load(load_request)
                             # publish the completed load before a late cancellation is observed.
                             target_backend._openai_advertised_id = override_id
                             target_backend._loaded_by_user_action = False
@@ -11037,7 +11356,11 @@ def release_chat_gpu_claim() -> bool:
     from core.inference.llama_cpp import chat_load_active
 
     def chat_idle() -> bool:
-        if any(map(_slot_in_use, _extra_slots)):
+        # A model still loading alongside holds the GPU before it is published.
+        if _loading_slot is not None or any(
+            _slot_in_use(slot) or tuple(getattr(slot.orchestrator, "loading_models", ()) or ())
+            for slot in _extra_slots
+        ):
             return False
         llama = get_llama_cpp_backend()
         # is_active, not is_loaded: a starting model holds VRAM, and an HF load has no process yet.
@@ -11048,7 +11371,8 @@ def release_chat_gpu_claim() -> bool:
             getattr(backend, "loading_models", ()) or ()
         )
 
-    return release_if(CHAT, chat_idle)
+    # Judged on the primary, whatever slot the caller is routed to: an emptied slot says nothing of it.
+    return _in_slot(None, lambda: release_if(CHAT, chat_idle))
 
 
 def _preview_same_checkpoint(loaded: str, requested: str) -> bool:
@@ -11240,6 +11564,7 @@ async def load_model_for_preview(
                         allow_gpu_owner_eviction = False,
                     )
                     loaded_ok = True
+                    _note_primary_load(request)
                 except GpuOwnerBusyError as exc:
                     untrack_current_request(scope)
                     raise HTTPException(
@@ -15632,11 +15957,13 @@ def _raise_or_cancel_active_generations(
         # first would end the caller's chats for nothing. Keyed on account_scope(), whose count
         # drops while a deactivated account's generation still holds the GPU.
         require_no_foreign_generations(scope)
-    if not active_generations.count(scope):
+    # Chats on a model loaded alongside keep their own server through this swap.
+    elsewhere = _slot_generations()
+    if not active_generations.count(scope, elsewhere):
         return 0
     if not force:
-        thread_ids = active_generations.active_thread_ids(scope)
-        running = active_generations.count(scope)
+        thread_ids = active_generations.active_thread_ids(scope, elsewhere)
+        running = active_generations.count(scope, elsewhere)
         raise HTTPException(
             status_code = 409,
             detail = {
@@ -15654,7 +15981,7 @@ def _raise_or_cancel_active_generations(
     if not cancel:
         # Refusal-only pass: the caller cancels later, once nothing can still reject the load.
         return 0
-    cancelled = active_generations.cancel_all(scope)
+    cancelled = active_generations.cancel_all(scope, elsewhere)
     if cancelled:
         logger.info(
             "model_swap_cancelled_active_generations",
@@ -16281,6 +16608,7 @@ async def load_model_gated(
     current_subject: str,
     *,
     user_initiated: bool = False,
+    current_request_counted: bool = False,
 ):
     """Everything ``POST /load`` does except the tunnel-safe padding.
 
@@ -16293,10 +16621,12 @@ async def load_model_gated(
     # then gets unloaded by the pre-swap teardown. Rechecked under the gate: an
     # install can reserve while this request queues on the gate, so the pre-gate
     # check alone is only a fast path.
+    from core.inference.llama_cpp import GpuMemoryShortError
     from core.inference.llama_keepwarm import inference_lifecycle_gate, model_load_gate
 
     global _loading_slot
     extra = None
+    evicted: list[str] = []
     attempt = _begin_load_attempt(request, current_subject)
     with _scoped_load_attempts_lock:
         _pending_load_attempts[attempt.token] = attempt
@@ -16314,57 +16644,124 @@ async def load_model_gated(
         async with model_load_gate():
             # Chosen under the gate, so two loads cannot both claim an empty primary.
             extra = await _select_load_slot(request)
-            # A new slot replaces nothing, so its load does not hold up inference on the others.
+            # A new slot replaces nothing: its load neither holds up inference nor stops a chat.
             new_slot = extra is not None and extra not in _extra_slots
             if new_slot:
-                with _extra_slots_lock:
-                    _extra_slots.append(extra)
+                _extra_slots.append(extra)
             if extra is not None:
                 _loading_slot = (extra, request.model_path)
             async with nullcontext() if new_slot else inference_lifecycle_gate():
                 _raise_if_sidecar_swap_in_progress()
                 # The active-generation gate runs inside _load_model_impl, once it knows this is a real
                 # reload, and still under the lifecycle gate so the check stays atomic with the teardown.
-                response = await _run_tracked_load_model_impl(
-                    request,
-                    fastapi_request,
-                    current_subject,
-                    attempt = attempt,
-                    # An extra slot replaces nothing, so no running chat is in its way.
-                    on_reload_confirmed = None
-                    if extra is not None
-                    else lambda *, cancel: _raise_or_cancel_active_generations(
-                        force = request.force_cancel_active,
-                        action = "Loading a model",
-                        cancel = cancel,
-                    ),
-                )
+                if new_slot:
+                    reload_gate = None
+                elif extra is not None:
+                    # Reloading a kept model stops only the chats on that model.
+                    def reload_gate(*, cancel):
+                        return _raise_or_cancel_slot_generations(
+                            extra,
+                            force = request.force_cancel_active,
+                            cancel = cancel,
+                            action = "Reloading this model",
+                        )
+                else:
+
+                    def reload_gate(*, cancel):
+                        return _raise_or_cancel_active_generations(
+                            force = request.force_cancel_active,
+                            action = "Loading a model",
+                            cancel = cancel,
+                        )
+
+                while True:
+                    try:
+                        response = await _run_tracked_load_model_impl(
+                            request,
+                            fastapi_request,
+                            current_subject,
+                            attempt = attempt,
+                            current_request_counted = current_request_counted,
+                            on_reload_confirmed = reload_gate,
+                        )
+                        break
+                    except GpuMemoryShortError as exc:
+                        # Make room as Ollama does: drop the least recently used models loaded
+                        # alongside and try again. A request naming one brings it back.
+                        # A new slot's load does not hold the inference gate, so take it here: no
+                        # chat may start on a victim between the pick and its teardown.
+                        async with inference_lifecycle_gate() if new_slot else nullcontext():
+                            dropped = 0
+                            for victim in _eviction_victims(
+                                extra, exc.short_mib, getattr(exc, "gpu_indices", None)
+                            ):
+                                if not _claim_victim(victim):
+                                    continue
+                                if victim.request is not None:
+                                    evicted.append(_stash_key(victim.request))
+                                await asyncio.to_thread(_drop_extra_slot, victim, True)
+                                dropped += 1
+                        if not dropped:
+                            if not exc.capped:
+                                raise HTTPException(status_code = 409, detail = str(exc)) from exc
+                            # Nothing left to make room with: take the smaller context, as a lone model would.
+                            request = request.model_copy(update = {"force_alongside": True})
+                            continue
+                        logger.info(
+                            "Unloaded %d model(s) loaded alongside to fit %s",
+                            dropped,
+                            request.model_path,
+                        )
+                        extra.llama._last_kill_monotonic = time.monotonic()
+            # Under the gate, so a load queued behind this one cannot publish first and be overwritten.
+            kv = _forget_evicted(request.model_path, keep_kv = True)
+            if kv is not None:
+                from core.inference.llama_keepwarm import restore_kv_resume
+                await asyncio.to_thread(restore_kv_resume, get_llama_cpp_backend(), kv)
+            if extra is None:
+                _note_primary_load(request)
+            else:
+                from core.inference.llama_keepwarm import _note_activity
+
+                extra.request = _restorable(request)
+                extra.last_used = time.monotonic()
+                # A fresh load is use: without it the idle loop drops the slot on its next tick.
+                _note_activity()
         # Record provenance only once the model is resident, and here rather than
         # inside the impl so the already-loaded fast paths are covered too. Preview
         # keeps the False default: only an explicit UI load pins. Outside the gate:
         # it is a plain attribute write and holding the gate for it would only widen
         # the window that blocks unload.
         get_llama_cpp_backend()._loaded_by_user_action = user_initiated
+        if evicted and isinstance(response, LoadResponse):
+            response.evicted = evicted
         return response
     finally:
         if extra is not None:
             _loading_slot = None
-            # Evicted while it loaded, or never came up: either way nothing else will reap it.
+            # Evicted while it loaded, or never came up: nothing else will reap it.
             if extra not in _extra_slots or not _slot_in_use(extra):
                 await asyncio.to_thread(_drop_extra_slot, extra)
+                await asyncio.to_thread(release_chat_gpu_claim)
         with _scoped_load_attempts_lock:
             _pending_load_attempts.pop(attempt.token, None)
         _finish_load_attempt(attempt)
 
 
 async def _select_load_slot(request: LoadRequest) -> Optional[_ExtraSlot]:
-    """Aim this load at the extra slot already serving the model, or a new one for ``alongside``."""
+    """The extra slot already serving the model, or a new one for ``alongside``. None is the primary."""
     requested = (
         f"{request.model_path}:{request.gguf_variant}"
         if request.gguf_variant
         else request.model_path
     )
     slot = await _route_to_extra_slot(requested)
+    if slot is None and request.gguf_variant:
+        # Another quant of a loaded repo replaces it where it is: requests name the repo, so a
+        # second copy beside it could never be reached.
+        slot = await _route_to_extra_slot(request.model_path)
+        if slot is not None or await asyncio.to_thread(_loaded_satisfies, request.model_path):
+            return slot
     if slot is not None or not request.alongside:
         return slot
     orchestrator = _peek_inference_backend()
@@ -16376,7 +16773,13 @@ async def _select_load_slot(request: LoadRequest) -> Optional[_ExtraSlot]:
         await asyncio.to_thread(InferenceOrchestrator),
         current_account_id(),
     )
-    _route_to_slot(slot)
+    slot.llama._owns_pidfile = False
+    # Built during a llama.cpp update, it refuses its load as the primary does.
+    slot.llama._llama_update_in_progress = getattr(
+        _llama_cpp_backend, "_llama_update_in_progress", False
+    )
+    register_serving_backend(slot.llama)
+    routed_slot.set(slot)
     return slot
 
 
@@ -16577,7 +16980,7 @@ async def _load_model_impl(
     _cached_before_this_load = _repo_is_in_the_hub_cache(request.model_path)
     _cache_footprint_before = _hub_cache_footprint(request.model_path)
     _lora_base_before_this_load = _lora_base_already_in_the_hub_cache(request.model_path)
-    from core.inference.llama_cpp import LlamaServerNotFoundError
+    from core.inference.llama_cpp import GpuMemoryShortError, LlamaServerNotFoundError
 
     def _raise_if_scoped_load_cancelled() -> None:
         if load_cancel_event is not None and load_cancel_event.is_set():
@@ -16757,8 +17160,13 @@ async def _load_model_impl(
         # ── Already-loaded check: skip reload if the exact model is active ──
         backend = await asyncio.to_thread(get_inference_backend)
         llama_backend = get_llama_cpp_backend()
-        # An extra slot loads next to what is serving, so no running chat is drained for it.
-        replacing = _routed_llama_backend.get() is None
+        # False for an extra slot, which owns none of the primary's residency or keep-warm state.
+        replacing = routed_slot.get() is None
+        # Only a load that tears a serving model down drains and stops the chats on it.
+        serving = bool(
+            getattr(llama_backend, "is_active", getattr(llama_backend, "is_loaded", False))
+            or getattr(backend, "active_model_name", None)
+        )
 
         # Resolve once so dedupe, admission and launch use the same slot count.
         _n_parallel = _resolve_parallel_slots(request, fastapi_request)
@@ -17014,6 +17422,8 @@ async def _load_model_impl(
             )
             if speech_codec_path is not None:
                 gguf_intent = replace(gguf_intent, audio_codec_path = speech_codec_path)
+            if not replacing and not request.force_alongside:
+                gguf_intent = replace(gguf_intent, refuse_partial_gpu_fit = True)
             same_loaded_model = llama_backend.matches_load_source(gguf_intent)
             _loaded_companion_roots = tuple(
                 getattr(llama_backend, "_openai_gguf_companion_roots", ()) or ()
@@ -17054,9 +17464,11 @@ async def _load_model_impl(
         # Config-resolved dedupe must run first: a duplicate must not refuse/cancel active chats.
         # Refusal is non-destructive; defer forced cancellation past every remaining rejection.
         account_access.require_idle_other_accounts()
-        if on_reload_confirmed is not None:
+        if serving and on_reload_confirmed is not None:
             on_reload_confirmed(cancel = False)
-        cancel_pending = on_reload_confirmed is not None and bool(request.force_cancel_active)
+        cancel_pending = (
+            serving and on_reload_confirmed is not None and bool(request.force_cancel_active)
+        )
 
         if not config.is_gguf and _mlx_distributed_launch_detected():
             raise HTTPException(
@@ -17243,6 +17655,8 @@ async def _load_model_impl(
                     handoff_kwargs["expected_current"] = expected_native_owner
                 if not allow_gpu_owner_eviction:
                     handoff_kwargs["allow_evict"] = False
+                if not replacing:
+                    handoff_kwargs["alongside"] = True
                 await asyncio.to_thread(
                     acquire_for_request,
                     CHAT,
@@ -17306,7 +17720,7 @@ async def _load_model_impl(
 
             # Drain active generations first (the lifecycle gate blocks new starts); a forced swap
             # excludes the ones it is about to cancel rather than waiting them out.
-            if replacing:
+            if replacing and serving:
                 await _wait_for_model_switch_idle(
                     current_request_counted = current_request_counted,
                     cancel_pending = cancel_pending,
@@ -17318,7 +17732,7 @@ async def _load_model_impl(
             # Point of no return for the GGUF path: nothing left can reject this load, so stop the
             # chats the swap interrupts (or refuse, if the caller never opted in).
             _raise_if_scoped_load_cancelled()
-            if on_reload_confirmed is not None:
+            if serving and on_reload_confirmed is not None:
                 on_reload_confirmed(cancel = True)
 
             # Let the cancelled generations unwind before the teardown; no check follows, so this cannot
@@ -17429,7 +17843,7 @@ async def _load_model_impl(
                         "so the load was cancelled. Unload that model, then try again."
                     ),
                 )
-            if not chat_load_needs_gpu:
+            if replacing and not chat_load_needs_gpu:
                 # Drop the stale CHAT claim after any zero-VRAM load.
                 await asyncio.to_thread(release, CHAT)
 
@@ -17485,7 +17899,7 @@ async def _load_model_impl(
         _raise_if_sidecar_swap_in_progress()
 
         llama_backend = get_llama_cpp_backend()
-        if replacing:
+        if replacing and serving:
             await _wait_for_model_switch_idle(
                 current_request_counted = current_request_counted,
                 cancel_pending = cancel_pending,
@@ -17494,7 +17908,7 @@ async def _load_model_impl(
 
         # Point of no return for the Unsloth path: cancel only once nothing can still reject the load.
         _raise_if_scoped_load_cancelled()
-        if on_reload_confirmed is not None:
+        if serving and on_reload_confirmed is not None:
             on_reload_confirmed(cancel = True)
 
         # Let the cancelled generations unwind before the teardown; no check follows. Bounded like GGUF.
@@ -17621,7 +18035,7 @@ async def _load_model_impl(
                     "so the load was cancelled. Unload that model, then try again."
                 ),
             )
-        if not chat_load_needs_gpu:
+        if replacing and not chat_load_needs_gpu:
             # This load replaced whatever held CHAT; leaving the claim makes the next
             # Images/Video acquire evict a model that never used the GPU.
             await asyncio.to_thread(release, CHAT)
@@ -17757,6 +18171,8 @@ async def _load_model_impl(
         logger.warning("Rejected inference GPU selection: %s", e)
         # User-facing validation (e.g. "Invalid gpu_ids [99]"): redact paths, keep detail.
         raise HTTPException(status_code = 400, detail = redacted_msg)
+    except GpuMemoryShortError:
+        raise  # load_model_gated makes room and retries
     except LlamaServerNotFoundError as e:
         # Missing GGUF runtime: 400 with the install message, not a generic 500.
         logger.warning("GGUF runtime missing while loading '%s': %s", model_log_label, e)
@@ -19181,20 +19597,26 @@ async def _unload_model_impl(request: UnloadRequest, current_subject: str):
     if extra is not None:
         from core.inference.llama_keepwarm import inference_lifecycle_gate
 
+        _forget_evicted(request.model_path)
         async with inference_lifecycle_gate():
+            if _raise_or_cancel_slot_generations(extra, force = request.force_cancel_active):
+                # Let the cancelled streams unwind before their server goes; the gate holds off new ones.
+                deadline = time.monotonic() + _POST_CANCEL_DRAIN_TIMEOUT_S
+                while extra.generations and time.monotonic() < deadline:
+                    await asyncio.sleep(0.05)
             await asyncio.to_thread(_drop_extra_slot, extra)
+        await asyncio.to_thread(release_chat_gpu_claim)
         api_monitor.record_lifecycle(
             event = "unload", model = _lifecycle_model_label(request.model_path), reason = "manual"
         )
         return UnloadResponse(status = "unloaded", model = request.model_path)
     # Stop loading for a slot still being filled: the cancel paths below then act on its backends.
-    loading = _visible_loading_slot()
-    if loading is not None and not _names_the_loading_model(loading[1], request.model_path):
-        loading = None
-    if loading is not None:
-        _route_to_slot(loading[0])
+    filling = _visible_loading_slot()
+    if filling and _names_the_loading_model(filling[1], request.model_path):
+        routed_slot.set(filling[0])
+    on_primary = routed_slot.get() is None
     # The chat residency record describes the primary; a slot answers only to its own account.
-    if loading is None:
+    if on_primary:
         if (
             request.cancel_load_request_id is None
             and account_access.managed_account()
@@ -19205,16 +19627,18 @@ async def _unload_model_impl(request: UnloadRequest, current_subject: str):
         account_access.require_resident_control(
             "chat", _loaded_slot_ident() if account_access.managed_account() else None
         )
+    # Only once something is really unloaded: a sharer leaving keeps the model, and what brings it back.
+    if request.cancel_load_request_id is None:
+        _forget_evicted(request.model_path)
     # A deliberate unload means "stay unloaded": drop any idle reload stash so the
     # next /v1 request can't resurrect this model. The idle loop unloads via the
     # backend directly (not this route), so clearing here never fights keep-warm.
     from core.inference.llama_keepwarm import inference_lifecycle_gate, note_model_unloaded
     from core.inference.npu_backend import MODEL_PREFIX, is_npu_model_path, peek_npu_backend
 
-    def _note_unloaded() -> None:
+    if not on_primary:
         # The reload stash is the primary's; cancelling a slot's load leaves it alone.
-        if _routed_llama_backend.get() is None:
-            note_model_unloaded()
+        note_model_unloaded = lambda: None
 
     try:
         if is_npu_model_path(request.model_path):
@@ -19276,7 +19700,7 @@ async def _unload_model_impl(request: UnloadRequest, current_subject: str):
                     and _names_the_loading_model(loading, attempt.model_path)
                     and await asyncio.to_thread(backend.cancel_load, loading)
                 ):
-                    _note_unloaded()
+                    note_model_unloaded()
                     logger.info("Cancelled scoped in-flight load: %s", request.model_path)
                     return UnloadResponse(status = "unloaded", model = request.model_path)
 
@@ -19295,7 +19719,7 @@ async def _unload_model_impl(request: UnloadRequest, current_subject: str):
                     )
                 ):
                     await asyncio.to_thread(llama_backend.unload_model)
-                    _note_unloaded()
+                    note_model_unloaded()
                     logger.info("Cancelled scoped in-flight GGUF load: %s", request.model_path)
                 return UnloadResponse(status = "unloaded", model = request.model_path)
             finally:
@@ -19314,7 +19738,7 @@ async def _unload_model_impl(request: UnloadRequest, current_subject: str):
         ):
             # Cancel under the name the load runs as, which a pinned row states as a path.
             if await asyncio.to_thread(backend.cancel_load, loading):
-                _note_unloaded()
+                note_model_unloaded()
                 logger.info(f"Cancelled in-flight load: {request.model_path}")
                 return UnloadResponse(status = "unloaded", model = request.model_path)
 
@@ -19336,11 +19760,11 @@ async def _unload_model_impl(request: UnloadRequest, current_subject: str):
             )
         ):
             await asyncio.to_thread(llama_backend.unload_model)
-            _note_unloaded()
+            note_model_unloaded()
             logger.info(f"Cancelled in-flight GGUF load: {request.model_path}")
             return UnloadResponse(status = "unloaded", model = request.model_path)
         # A slot still being filled holds nothing else to tear down.
-        if _routed_llama_backend.get() is not None:
+        if not on_primary:
             return UnloadResponse(status = "unloaded", model = request.model_path)
 
         # Same gate as /load: refusal only, so a non-forced unload fails fast before queueing on the
@@ -19966,24 +20390,11 @@ async def get_llama_flags(
     )
 
 
-async def get_status(
-    current_subject: str = Depends(get_current_subject), model: Optional[str] = None
-):
-    """Status of the slot serving ``model`` (the primary one by default), listing every loaded model."""
-    slot = await _route_to_extra_slot(model)
-    response = await _slot_status(current_subject)
-    if isinstance(response, InferenceStatusResponse):
-        for other in (None, *_visible_extra_slots()):
-            if other is not slot:
-                entries = await asyncio.to_thread(_in_slot, other, _slot_model_objects)
-                response.loaded += [e["id"] for e in entries if e["id"] not in response.loaded]
-    return response
-
-
 @router.get("/status", response_model = InferenceStatusResponse)
 async def inference_status(
     current_subject: str = Depends(get_current_subject),
     via_api_key: bool = Depends(authenticated_via_api_key),
+    model: Optional[str] = None,
 ):
     """`GET /api/inference/status`, redacted the way the image and video status routes are.
 
@@ -19997,9 +20408,21 @@ async def inference_status(
     """
     from hub.utils.host_paths import redact_host_paths
     return redact_host_paths(
-        await get_status(current_subject = current_subject),
+        await get_status(current_subject = current_subject, model = model),
         via_api_key = via_api_key,
     )
+
+
+async def get_status(current_subject: str, model: Optional[str] = None):
+    """Status of the slot serving ``model`` (the primary one by default), listing every loaded model."""
+    slot = await _route_to_extra_slot(model)
+    response = await _slot_status(current_subject)
+    if isinstance(response, InferenceStatusResponse):
+        for other in (None, *_visible_extra_slots()):
+            if other is not slot:
+                entries = await asyncio.to_thread(_in_slot, other, _slot_model_objects)
+                response.loaded += [e["id"] for e in entries if e["id"] not in response.loaded]
+    return response
 
 
 async def _slot_status(current_subject: str):
@@ -20007,12 +20430,16 @@ async def _slot_status(current_subject: str):
     Get current inference backend status.
     Reports whichever backend (Unsloth or llama-server) is active.
     """
-    if account_access.resident_hidden("chat"):
+    # The residency record describes the primary; a routed slot is always the caller's own.
+    on_primary = routed_slot.get() is None
+    if on_primary and account_access.resident_hidden("chat"):
         return account_access.hidden_chat_status_response()
     try:
         llama_backend = get_llama_cpp_backend()
-        if account_access.managed_account() and account_access.resident_hidden(
-            "chat", _loaded_slot_ident()
+        if (
+            on_primary
+            and account_access.managed_account()
+            and account_access.resident_hidden("chat", _loaded_slot_ident())
         ):
             return account_access.hidden_chat_status_response()
 
@@ -20282,12 +20709,11 @@ async def get_load_progress(current_subject: str = Depends(get_current_subject))
     Returns an empty payload (``phase=null, bytes=0``) when no load is in
     flight. The frontend should stop polling once ``phase`` becomes ``ready``.
     """
-    if account_access.resident_hidden("chat"):
+    loading = _visible_loading_slot()
+    if loading is None and account_access.resident_hidden("chat"):
         return account_access.hidden_resident_response()
     try:
-        loading = _visible_loading_slot()
-        _route_to_slot(loading[0] if loading else None)
-        llama_backend = get_llama_cpp_backend()
+        llama_backend = loading[0].llama if loading else get_llama_cpp_backend()
         progress = llama_backend.load_progress()
         if progress is None:
             return LoadProgressResponse()
@@ -30845,8 +31271,11 @@ def _slot_model_objects() -> list[dict]:
     Shared by the LIST and RETRIEVE handlers so both report the same ids and
     field shape.
     """
-    if account_access.managed_account() and account_access.resident_hidden(
-        "chat", _loaded_slot_ident()
+    # The residency record describes the primary; a routed slot is always the caller's own.
+    if (
+        routed_slot.get() is None
+        and account_access.managed_account()
+        and account_access.resident_hidden("chat", _loaded_slot_ident())
     ):
         return []
     models: list[dict] = []
@@ -35746,7 +36175,7 @@ async def _mlx_count_chat_tokens(payload, request = None) -> Optional[JSONRespon
     # Re-checked immediately before the only work that takes the orchestrator's lock:
     # everything since the endpoint's entry check awaits, so a chat can have started in
     # the gap and would then wait on this count. The GGUF path re-checks for this reason.
-    if active_generations.count() > 0:
+    if _routed_generation_count() > 0:
         raise HTTPException(
             status_code = 503,
             detail = "Cannot count tokens while a generation is in progress.",
@@ -35808,7 +36237,9 @@ async def chat_count_tokens(
     # registers external-provider runs too, so those decline a count they could have served;
     # narrowing it means trusting a kind/model field to decide whether to work next to a decode, and
     # being wrong there costs inference time while over-refusing only costs a redraw.
-    if active_generations.count() > 0:
+    # Routed first, so every check below looks at the model being counted.
+    await _route_to_extra_slot(payload.model)
+    if _routed_generation_count() > 0:
         raise HTTPException(
             status_code = 503,
             detail = "Cannot count tokens while a generation is in progress.",
@@ -35852,7 +36283,6 @@ async def chat_count_tokens(
             detail = "Cannot count tokens for messages containing video.",
         )
 
-    await _route_to_extra_slot(payload.model)
     # A replay envelope is countable on a text-only model, where generation strips it
     # and sends no pixels. On a model that reads images the completion promotes it, so
     # counting would underreport the prompt by every image-embedding token -- the same
@@ -36041,7 +36471,7 @@ async def chat_count_tokens(
 
     # Re-checked immediately before the only work that reaches llama-server, because everything
     # between here and the entry check awaits, so a run can have started in the gap.
-    if active_generations.count() > 0:
+    if _routed_generation_count() > 0:
         raise HTTPException(
             status_code = 503,
             detail = "Cannot count tokens while a generation is in progress.",
@@ -36059,7 +36489,7 @@ async def chat_count_tokens(
             chat_template_kwargs = _template_kwargs,
             # Polled between /apply-template and /tokenize: admission and the work are separate
             # steps, so a run starting in between is caught here and the second round trip is not.
-            should_abort = lambda: active_generations.count() > 0,
+            should_abort = lambda: _routed_generation_count() > 0,
         )
     except CountAborted:
         raise HTTPException(
@@ -36479,6 +36909,8 @@ async def anthropic_messages(
             else None
         ),
     )
+    # The switch may have restored the named model into its own slot.
+    llama_backend = get_llama_cpp_backend()
     if not llama_backend.is_loaded:
         _status, _detail = await _no_model_loaded_error(
             "No GGUF model loaded. Load a GGUF model first.",

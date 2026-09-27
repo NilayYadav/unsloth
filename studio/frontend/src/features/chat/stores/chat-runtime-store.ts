@@ -2244,6 +2244,9 @@ type ToolStatusEntry = {
   owner?: () => void;
 };
 
+/** ``quant`` is undefined until looked up, null for a model without one. */
+export type LoadedModelSummary = { id: string; quant?: string | null };
+
 type ChatRuntimeStore = {
   settingsHydrated: boolean;
   /** The open chat's settings were asked for but have not arrived, so the store shows the
@@ -2280,6 +2283,8 @@ type ChatRuntimeStore = {
   /** What /api/inference/status says is resident, as opposed to what the picker selected.
    *  undefined until the first read, so the header does not flash "not loaded". */
   residentCheckpoint: string | null | undefined;
+  /** Every local model the server holds in memory, the selected one included. */
+  loadedModels: LoadedModelSummary[];
   activeModelIsLocal: boolean;
   loadedContextLength: number | null;
   maxContextLength: number | null;
@@ -2322,7 +2327,6 @@ type ChatRuntimeStore = {
   /** Whether the provider exposes server-side web_fetch (Anthropic `web_fetch_*`). Gates the
    *  composer's Fetch pill, independent of Search. */
   supportsBuiltinWebFetch: boolean;
-  /** Loading a model keeps the ones already loaded instead of replacing them. */
   keepModelsLoaded: boolean;
   toolsEnabled: boolean;
   /** Persisted Code preference. Use codeToolsOn() for the effective value. */
@@ -4103,6 +4107,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
   lastModelLoadError: null,
   activeGgufVariant: null,
   residentCheckpoint: undefined,
+  loadedModels: [],
   activeModelIsLocal: false,
   loadedContextLength: null,
   maxContextLength: null,
@@ -5315,7 +5320,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
       };
     }),
   setKeepModelsLoaded: (keepModelsLoaded) => {
-    writeStorageValue(CHAT_KEEP_MODELS_LOADED_KEY, String(keepModelsLoaded));
+    saveBool(CHAT_KEEP_MODELS_LOADED_KEY, keepModelsLoaded);
     set({ keepModelsLoaded });
   },
   setCodeToolsEnabled: (codeToolsEnabled) =>
