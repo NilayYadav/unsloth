@@ -180,7 +180,7 @@ import {
 } from "./hooks/use-chat-sidebar-items";
 import { usePinnedChatsStore } from "./stores/pinned-chats-store";
 import { usePinnedProjectsStore } from "./stores/pinned-projects-store";
-import { setAutoRouterEnabled, setAutoRouterPin, useAutoRouterSelection } from "./stores/auto-router-selection";
+import { setAutoRouterEnabled, setAutoRouterPin, setAutoRouterToolsCapable, useAutoRouterSelection } from "./stores/auto-router-selection";
 import {
   clearTrainingCompareHandoff,
   getTrainingCompareHandoff,
@@ -2171,6 +2171,18 @@ type PendingHubAutoLoad = {
   originGgufVariant: string | null;
 };
 
+function applyAutoToolCapability(toolsCapable: boolean) {
+  setAutoRouterToolsCapable(toolsCapable);
+  if (!toolsCapable) {
+    useChatRuntimeStore.setState({
+      toolsEnabled: false,
+      codeToolsEnabled: false,
+      mcpEnabledForChat: false,
+      ragEnabled: false,
+    });
+  }
+}
+
 // `search` comes from RootLayout (not useSearch) so ChatPage stays mounted off-route, frozen to the last /chat
 // search. `active` is false off-route: close portaled surfaces and stop route-specific listeners.
 export function ChatPage({
@@ -2179,6 +2191,14 @@ export function ChatPage({
 }: { search: ChatSearch; active: boolean }): ReactElement {
   const t = useT();
   const autoRouterState = useAutoRouterSelection();
+  useEffect(() => {
+    if (!autoRouterState.enabled) return;
+    let active = true;
+    void loadAutoRouterSettings().then((settings) => {
+      if (active) applyAutoToolCapability(settings.models.some((model) => model.tools));
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [autoRouterState.enabled]);
   const showContextWindowUsage = useChatPreferencesStore(
     (s) => s.showContextWindowUsage,
   );
@@ -4210,6 +4230,8 @@ export function ChatPage({
                         toast.info(t("settings.apiKeys.autoRouter.configuredRequired"));
                         return;
                       }
+                      const toolsCapable = settings.models.some((model) => model.tools);
+                      applyAutoToolCapability(toolsCapable);
                       setAutoRouterEnabled(true);
                     },
                     (error) => toast.error(error instanceof Error ? error.message : t("settings.apiKeys.autoRouter.loadError")),

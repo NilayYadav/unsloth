@@ -188,15 +188,27 @@ def choose_model(
 ) -> RouterDecision:
     if not profile.models:
         raise ValueError("Auto has no models. Add downloaded models in Router settings.")
-    eligible = [
+    capable = [
         model
         for model in profile.models
         if (not image or model.vision)
         and (not tools or model.tools)
-        and (model.context_length is None or estimated_tokens <= model.context_length)
+    ]
+    eligible = [
+        model for model in capable
+        if model.context_length is None or estimated_tokens <= model.context_length
     ]
     if not eligible:
-        raise ValueError("No Auto model can handle this request's capabilities or context length.")
+        if image and not any(model.vision for model in profile.models):
+            raise ValueError("No Auto model accepts images. Mark a vision model as 'Accepts images' in Router settings.")
+        if tools and not any(model.tools for model in profile.models):
+            raise ValueError("No Auto model supports tools. Turn off Search/Code or mark a tool-capable model as 'Supports tools' in Router settings.")
+        if not capable:
+            raise ValueError("No Auto model supports this combination of images and tools.")
+        raise ValueError(
+            f"The request is about {estimated_tokens} tokens, beyond every compatible Auto model's context limit. "
+            "Shorten the conversation or correct the context lengths in Router settings."
+        )
     by_id = {model.id: model for model in eligible}
     if pinned_model:
         if pinned_model not in by_id:

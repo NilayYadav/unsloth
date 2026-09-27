@@ -54,9 +54,36 @@ def test_user_rule_selects_model_before_task_guess():
 
 
 def test_rule_cannot_override_capability_or_context_limit():
-    with pytest.raises(ValueError, match="No Auto model"):
+    with pytest.raises(ValueError, match="combination of images and tools"):
         route(image=True, tools=True)
     assert route(prompt="project atlas", tokens=5000).model == "general"
+
+
+def test_missing_tool_capability_explains_how_to_fix_auto():
+    pool = RouterProfile.model_validate(
+        {"models": [{"id": "coder", "tasks": ["code"]}], "default_model": "coder"}
+    )
+    assert choose_model(
+        pool, prompt="Write a Python program", image=False, tools=False,
+        estimated_tokens=20, current_model=None,
+    ).model == "coder"
+    with pytest.raises(ValueError, match="Turn off Search/Code"):
+        choose_model(
+            pool, prompt="Write a Python program", image=False, tools=True,
+            estimated_tokens=20, current_model=None,
+        )
+
+
+def test_context_error_reports_estimated_size():
+    with pytest.raises(ValueError, match="about 5000 tokens"):
+        choose_model(
+            RouterProfile.model_validate({
+                "models": [{"id": "coder", "tasks": ["code"], "context_length": 4096}],
+                "default_model": "coder",
+            }),
+            prompt="Write a Python program", image=False, tools=False,
+            estimated_tokens=5000, current_model=None,
+        )
 
 
 def test_short_follow_up_stays_on_current_model():

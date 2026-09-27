@@ -4833,7 +4833,7 @@ export function createOpenAIStreamAdapter(
 
       const supportsStudioToolsForThisTurn = isExternalRequest
         ? externalUsesStudioTools
-        : supportsTools;
+        : autoRouterSelection().enabled ? autoRouterSelection().toolsCapable : supportsTools;
       const selectedModelSummary = runtime.models.find(
         (model) => model.id === params.checkpoint,
       );
@@ -5149,7 +5149,7 @@ export function createOpenAIStreamAdapter(
       // Canvas is independent of Search/Code: render_html stays local-only and mirrors the backend image-turn gate.
       const renderHtmlToolEnabledForThisTurn = Boolean(
         !isExternalRequest &&
-          supportsTools &&
+          supportsStudioToolsForThisTurn &&
           artifactsEnabled &&
           !hasOutboundImage,
       );
@@ -6130,7 +6130,7 @@ export function createOpenAIStreamAdapter(
           tools: {
             search:
               webSearchEnabledForThisTurn ||
-              (!isExternalRequest && supportsTools && toolsEnabled),
+              (!isExternalRequest && supportsStudioToolsForThisTurn && toolsEnabled),
             fetch: webFetchEnabledForThisTurn,
             code:
               hostedCodeToolsForThisTurn.length > 0 ||
@@ -6538,7 +6538,7 @@ export function createOpenAIStreamAdapter(
               : { confirm_tool_calls: permissionMode === "ask" }),
             bypass_permissions: bypassPermissions,
             ...(deepResearchArmed ? { deep_research_armed: true } : {}),
-            ...(supportsTools &&
+            ...(supportsStudioToolsForThisTurn &&
               (toolsEnabled ||
                 codeToolsEnabled ||
                 renderHtmlToolEnabledForThisTurn ||

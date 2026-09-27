@@ -165,7 +165,7 @@ export function AutoRouterSection() {
                 <Input
                   className="h-8 w-28"
                   type="number"
-                  min={1}
+                  min={256}
                   value={model.context_length ?? ""}
                   placeholder={t("settings.apiKeys.autoRouter.unknown")}
                   onChange={(event) => updateModel(model.id, { context_length: event.target.value ? Number(event.target.value) : null })}

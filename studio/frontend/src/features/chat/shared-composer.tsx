@@ -666,7 +666,7 @@ export function SharedComposer({
   const modelLoaded = useChatRuntimeStore(
     (s) => !!s.params.checkpoint && !s.modelLoading,
   );
-  const autoRouterEnabled = useAutoRouterSelection().enabled;
+  const { enabled: autoRouterEnabled, toolsCapable: autoRouterToolsCapable } = useAutoRouterSelection();
   const lastModelLoadError = useChatRuntimeStore((s) => s.lastModelLoadError);
   const loadedIsMultimodal = useChatRuntimeStore((s) => s.loadedIsMultimodal);
   const loadedVisionDisabledByUser = useChatRuntimeStore(
@@ -870,9 +870,9 @@ export function SharedComposer({
     isExternalGemini && supportsBuiltinImageGeneration;
   // Disable only when a loaded model lacks the capability; with no model the tool can still be
   // pre-selected, matching the + menu.
-  const searchDisabled =
-    modelLoaded &&
-    (isGeminiImageTier
+  const searchDisabled = autoRouterEnabled
+    ? !autoRouterToolsCapable
+    : modelLoaded && (isGeminiImageTier
       ? !supportsBuiltinWebSearch
       : !(supportsTools || supportsBuiltinWebSearch));
   const externalUsesStudioTools =
@@ -880,8 +880,10 @@ export function SharedComposer({
       selectedExternalProvider?.providerType,
       externalSelection?.modelId,
     ) === true;
-  const canRunCode = isExternalModel
-    ? codeToolCanRun({
+  const canRunCode = autoRouterEnabled
+    ? autoRouterToolsCapable
+    : isExternalModel
+      ? codeToolCanRun({
         hostedCodeExecutionForThisTurn: supportsBuiltinCodeExecution,
         providerHostsCodeExecution: providerHostsCodeExecution(
           selectedExternalProvider?.providerType,
@@ -889,19 +891,20 @@ export function SharedComposer({
           selectedExternalProvider?.apiType,
         ),
         supportsStudioTools: externalUsesStudioTools,
-      })
-    : supportsTools;
-  const codeDisabled =
-    (modelLoaded && (isGeminiImageTier || !canRunCode)) ||
-    imageModeDisablesCode;
+        })
+      : supportsTools;
+  const codeDisabled = autoRouterEnabled
+    ? !autoRouterToolsCapable
+    : (modelLoaded && (isGeminiImageTier || !canRunCode)) || imageModeDisablesCode;
   // Images pill lights only on OpenAI cloud Responses-API models and the Gemini Nano Banana
   // family. No local tool runtime fallback.
   const showImagePill = supportsBuiltinImageGeneration;
   // Fetch pill: Anthropic-only (web_fetch_20250910 / web_fetch_20260209).
   const webFetchDisabled = !modelLoaded || !supportsBuiltinWebFetch;
   const showWebFetchPill = supportsBuiltinWebFetch;
-  const ragDisabled =
-    modelLoaded && ((!externalUsesStudioTools && isExternalModel) || !supportsTools);
+  const ragDisabled = autoRouterEnabled
+    ? !autoRouterToolsCapable
+    : modelLoaded && ((!externalUsesStudioTools && isExternalModel) || !supportsTools);
   const showRagPill = !isExternalModel || externalUsesStudioTools;
   // Above 4 pills, collapse to icons only. Compare, Search, Code and permissions always show.
   // Narrow viewports collapse too: the labelled row is wider than a phone-width composer.

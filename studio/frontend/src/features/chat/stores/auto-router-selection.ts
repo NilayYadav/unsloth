@@ -14,6 +14,7 @@ interface ThreadChoice {
 
 interface Selection {
   enabled: boolean;
+  toolsCapable: boolean;
   threads: Record<string, ThreadChoice>;
 }
 
@@ -38,9 +39,10 @@ function savedPins(): Record<string, ThreadChoice> {
 
 let selection: Selection = {
   enabled: typeof window !== "undefined" && saved(ENABLED_KEY) === "1",
+  toolsCapable: false,
   threads: savedPins(),
 };
-const serverSelection: Selection = { enabled: false, threads: {} };
+const serverSelection: Selection = { enabled: false, toolsCapable: false, threads: {} };
 const listeners = new Set<() => void>();
 
 function publish(next: Selection) {
@@ -67,7 +69,11 @@ export function autoRouterThread(threadId: string | null | undefined): ThreadCho
 
 export function setAutoRouterEnabled(enabled: boolean) {
   try { window.localStorage.setItem(ENABLED_KEY, enabled ? "1" : "0"); } catch {}
-  publish({ ...selection, enabled });
+  publish({ ...selection, enabled, toolsCapable: enabled && selection.toolsCapable });
+}
+
+export function setAutoRouterToolsCapable(toolsCapable: boolean) {
+  publish({ ...selection, toolsCapable });
 }
 
 export function setAutoRouterPin(threadId: string | null | undefined, pin: string | null) {
