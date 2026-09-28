@@ -68,7 +68,6 @@ import {
   extractPdfAttachmentText,
   getDocumentAttachmentSizeError,
   getDocxAttachmentError,
-  getPdfAttachmentTextError,
 } from "./attachment-content";
 import {
   type ChatAttachmentOriginal,
@@ -437,75 +436,39 @@ class VisionImageAdapter implements AttachmentAdapter {
 
 class PDFAttachmentAdapter implements AttachmentAdapter {
   accept = "application/pdf";
-  private readonly texts = new Map<string, string>();
 
   // Refused here, not at send: the composer empties itself before it awaits send(), so a ceiling that
   // only fires there discards the typed message too. The throw is invisible (nothing subscribes to
   // attachmentAddError and the picker never awaits addAttachment), so the toast is the only reason given.
-  async add({ file }: { file: File }): Promise<PendingAttachment> {
+  add({ file }: { file: File }): Promise<PendingAttachment> {
     const sizeError = getDocumentAttachmentSizeError(file, "PDF");
     if (sizeError) {
       toast.error(sizeError);
       throw new Error(sizeError);
     }
-    let text: string;
-    try {
-      text = await extractPdfAttachmentText(file);
-    } catch {
-      const error = `PDF file could not be read: ${file.name}`;
-      toast.error(error);
-      throw new Error(error);
-    }
-    const textError = getPdfAttachmentTextError(
-      file.name,
-      text,
-      pythonToolOpensAttachments(),
-    );
-    if (textError) {
-      toast.error(textError);
-      throw new Error(textError);
-    }
-    const id = crypto.randomUUID();
-    this.texts.set(id, text);
-    return {
-      id,
+    return Promise.resolve({
+      id: crypto.randomUUID(),
       type: "document",
       name: file.name,
       contentType: file.type,
       file,
       status: { type: "requires-action", reason: "composer-send" },
-    };
+    });
   }
 
   async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
-    const text =
-      this.texts.get(attachment.id) ??
-      (await extractPdfAttachmentText(attachment.file));
-    this.texts.delete(attachment.id);
-    // Code or a temporary chat can change after the attach check passed.
-    const textError = getPdfAttachmentTextError(
-      attachment.name,
-      text,
-      pythonToolOpensAttachments(),
-    );
-    if (textError) toast.error(textError);
+    const text = await extractPdfAttachmentText(attachment.file);
     return {
       id: attachment.id,
       type: "document",
       name: attachment.name,
       contentType: attachment.contentType,
-      content: [
-        {
-          type: "text",
-          text: `[PDF: ${attachment.name}]\n${textError ?? text}`,
-        },
-      ],
+      content: [{ type: "text", text: `[PDF: ${attachment.name}]\n${text}` }],
       status: { type: "complete" },
     };
   }
 
-  remove(attachment: Attachment): Promise<void> {
-    this.texts.delete(attachment.id);
+  remove(): Promise<void> {
     return Promise.resolve();
   }
 }
@@ -914,10 +877,6 @@ function pythonToolRunsInStudio(): boolean {
       provider.apiType,
     ),
   }).local.includes("python");
-}
-
-function pythonToolOpensAttachments(): boolean {
-  return pythonToolRunsInStudio() && !useChatRuntimeStore.getState().incognito;
 }
 
 class ToolOnlyAttachmentAdapter implements AttachmentAdapter {
