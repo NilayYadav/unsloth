@@ -1114,3 +1114,79 @@ def test_a_model_that_does_not_fit_says_so_without_api_flags():
     capped = _gpu_short_message(13.2, 8.4, 32768, 8192, True)
     assert "8192 context" in capped
     assert "force_alongside" not in spill + capped
+
+
+def test_a_reused_slot_refuses_a_load_during_a_llama_update(backends, monkeypatch):
+    primary, extra = backends
+    primary._llama_update_in_progress = True
+    request = LoadRequest(model_path = "org/B-GGUF", gguf_variant = "Q4_K_M", alongside = True)
+    assert _selected(monkeypatch, request) is extra
+    assert extra.llama._llama_update_in_progress is True
+    primary._llama_update_in_progress = False
+    assert _selected(monkeypatch, request) is extra
+    assert extra.llama._llama_update_in_progress is False
+
+
+def test_a_repo_still_filling_a_slot_cannot_be_deleted(backends, monkeypatch):
+    from hub.services.models import deletion
+
+    _, extra = backends
+    starting = inf._ExtraSlot(FakeLlama(), FakeOrchestrator(), "owner")
+    inf._extra_slots.append(starting)
+    monkeypatch.setattr(inf, "_loading_slot", (starting, "org/D-GGUF"))
+    assert deletion._llama_cpp_blocks_delete("org/D-GGUF", "Q4_K_M")
+    monkeypatch.setattr(inf, "_loading_slot", None)
+    assert not deletion._llama_cpp_blocks_delete("org/D-GGUF", "Q4_K_M")
+    starting.orchestrator.loading_models = {"org/E"}
+    assert deletion._inference_backend_blocks_delete("org/E")
+
+
+def test_a_resident_npu_model_keeps_to_the_primarys_seat(backends, monkeypatch):
+    from types import SimpleNamespace
+
+    import core.inference.npu_backend as npu_backend
+
+    primary, extra = backends
+    primary.unload_model()
+    npu_model = SimpleNamespace(model_path = "lemonade:qwen3-0.6b-FLM", id = "qwen3-0.6b-FLM")
+    npu = SimpleNamespace(is_loaded = True, loaded_model = npu_model, resident = lambda: None)
+    monkeypatch.setattr(npu_backend, "peek_npu_backend", lambda: npu)
+
+    async def route(model):
+        slot = await inf._route_to_extra_slot(model)
+        return slot, inf._resident_npu_model(), inf._loaded_slot_ident()
+
+    assert asyncio.run(route("org/B-GGUF")) == (extra, None, "org/B-GGUF")
+    assert asyncio.run(route("qwen3-0.6b-FLM")) == (None, npu_model, npu_model.model_path)
+
+
+def test_an_npu_load_takes_the_primarys_seat_even_alongside(backends, monkeypatch):
+    request = LoadRequest(model_path = "lemonade:qwen3-0.6b-FLM", alongside = True)
+    assert _selected(monkeypatch, request) is None
+
+
+def test_the_loaded_models_list_names_the_npu_model_once(backends, monkeypatch):
+    from types import SimpleNamespace
+
+    import core.inference.npu_backend as npu_backend
+
+    primary, _ = backends
+    primary.unload_model()
+    inf._extra_slots.append(inf._ExtraSlot(FakeLlama("org/D-GGUF"), FakeOrchestrator(), "owner"))
+    npu_model = SimpleNamespace(
+        model_path = "lemonade:qwen3-0.6b-FLM",
+        id = "qwen3-0.6b-FLM",
+        vision = False,
+        max_context_length = 4096,
+        reasoning = False,
+        tools = False,
+    )
+    resident = SimpleNamespace(model = npu_model, context_length = 4096)
+    npu = SimpleNamespace(is_loaded = True, loaded_model = npu_model, resident = lambda: resident)
+    monkeypatch.setattr(npu_backend, "peek_npu_backend", lambda: npu)
+    app = FastAPI()
+    app.include_router(inf.studio_router, prefix = "/api/inference")
+    app.dependency_overrides[get_current_subject] = lambda: "test-subject"
+    with TestClient(app) as client:
+        ids = [entry["id"] for entry in client.get("/api/inference/loaded-models").json()["data"]]
+    assert ids.count("lemonade:qwen3-0.6b-FLM") == 1 and "org/B-GGUF" in ids and "org/D-GGUF" in ids

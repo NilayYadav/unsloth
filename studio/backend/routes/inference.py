@@ -8172,6 +8172,12 @@ def extra_slot_backends() -> list[tuple[LlamaCppBackend, InferenceOrchestrator]]
     return [(slot.llama, slot.orchestrator) for slot in list(_extra_slots)]
 
 
+def filling_slot_model() -> Optional[str]:
+    """The model a load is still filling a slot of its own with, if any."""
+    loading = _loading_slot
+    return loading[1] if loading else None
+
+
 def extra_slot_loading() -> bool:
     """Whether a model is still loading into a slot of its own."""
     return _loading_slot is not None or any(
@@ -9743,10 +9749,8 @@ async def _no_model_loaded_error(
     """
     from utils.openai_auto_switch_settings import get_openai_auto_switch_enabled
     from core.inference.local_model_resolver import resolve_local_gguf
-    from core.inference.npu_backend import peek_npu_backend
 
-    _npu = peek_npu_backend()
-    _npu_model = _npu.loaded_model if _npu is not None else None
+    _npu_model = _resident_npu_model()
     if _npu_model is not None:
         return 400, (
             f"The loaded NPU model ({_npu_model.model_path}) serves "
@@ -9924,9 +9928,12 @@ def _resident_id_is_namespaced() -> bool:
 
 
 def _resident_npu_model():
-    """The NPU model serving chat, or None. It answers to its own names only."""
+    """The NPU model serving chat, or None. It answers to its own names only, and holds the
+    primary's seat: a request routed to a model kept alongside is not the NPU's."""
     from core.inference.npu_backend import peek_npu_backend
 
+    if routed_slot.get() is not None:
+        return None
     npu = peek_npu_backend()
     return npu.loaded_model if npu is not None else None
 
@@ -11448,10 +11455,7 @@ def _loaded_slot_ident() -> Optional[str]:
     llama_backend = get_llama_cpp_backend()
     if llama_backend.is_loaded and llama_backend.model_identifier:
         return str(llama_backend.model_identifier)
-    from core.inference.npu_backend import peek_npu_backend
-
-    npu = peek_npu_backend()
-    npu_model = npu.loaded_model if npu is not None else None
+    npu_model = _resident_npu_model()
     return npu_model.model_path if npu_model is not None else None
 
 
@@ -16856,6 +16860,22 @@ async def load_model_gated(
 
 async def _select_load_slot(request: LoadRequest) -> Optional[_ExtraSlot]:
     """The extra slot already serving the model, or a new one for ``alongside``. None is the primary."""
+    slot = await _pick_load_slot(request)
+    if slot is not None:
+        # A slot loading during a llama.cpp update refuses as the primary does, a reused one included.
+        slot.llama._llama_update_in_progress = getattr(
+            _llama_cpp_backend, "_llama_update_in_progress", False
+        )
+    return slot
+
+
+async def _pick_load_slot(request: LoadRequest) -> Optional[_ExtraSlot]:
+    from core.inference.npu_backend import is_npu_model_path
+
+    # The NPU backend is one per process and replaces the primary, so it never takes a slot.
+    if is_npu_model_path(request.model_path):
+        routed_slot.set(None)
+        return None
     requested = (
         f"{request.model_path}:{request.gguf_variant}"
         if request.gguf_variant
@@ -16880,10 +16900,6 @@ async def _select_load_slot(request: LoadRequest) -> Optional[_ExtraSlot]:
         current_account_id(),
     )
     slot.llama._owns_pidfile = False
-    # Built during a llama.cpp update, it refuses its load as the primary does.
-    slot.llama._llama_update_in_progress = getattr(
-        _llama_cpp_backend, "_llama_update_in_progress", False
-    )
     register_serving_backend(slot.llama)
     routed_slot.set(slot)
     return slot
@@ -20585,7 +20601,7 @@ async def _slot_status(current_subject: str):
         from core.inference.npu_backend import peek_npu_backend
 
         _npu = peek_npu_backend()
-        _npu_resident = _npu.resident() if _npu is not None else None
+        _npu_resident = _npu.resident() if _npu is not None and routed_slot.get() is None else None
         if _npu_resident is not None:
             _npu_model = _npu_resident.model
             return InferenceStatusResponse(
@@ -26747,7 +26763,7 @@ async def produce_openai_chat_completions(
     from core.inference.npu_backend import peek_npu_backend
 
     _npu = peek_npu_backend()
-    if _npu is not None and _npu.is_loaded:
+    if _npu is not None and _npu.is_loaded and routed_slot.get() is None:
         return await _npu_chat_completions(payload, request, current_subject)
 
     llama_backend = get_llama_cpp_backend()
@@ -31414,7 +31430,8 @@ def _slot_model_objects() -> list[dict]:
     from core.inference.npu_backend import peek_npu_backend
 
     _npu = peek_npu_backend()
-    _npu_resident = _npu.resident() if _npu is not None else None
+    # The NPU holds the primary's seat, so a slot's listing never repeats it.
+    _npu_resident = _npu.resident() if _npu is not None and routed_slot.get() is None else None
     if _npu_resident is not None:
         _npu_model = _npu_resident.model
         _npu_entry = {
@@ -36437,7 +36454,7 @@ async def chat_count_tokens(
     from core.inference.npu_backend import peek_npu_backend
 
     _npu = peek_npu_backend()
-    if _npu is not None and _npu.is_loaded:
+    if _npu is not None and _npu.is_loaded and routed_slot.get() is None:
         # FastFlowLM has no tokenizer endpoint; each reply's usage still reports the prompt size.
         raise HTTPException(
             status_code = 503,
