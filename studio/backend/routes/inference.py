@@ -26934,19 +26934,6 @@ async def produce_openai_chat_completions(
         finally:
             _tracker.__exit__(None, None, None)
 
-    if not using_gguf and _messages_have_remote_image(payload.messages):
-        if not model_info.get("is_vision"):
-            raise _reject(
-                400, "Image provided but current model is text-only. Load a vision model."
-            )
-        try:
-            await asyncio.to_thread(
-                _inline_served_remote_images, payload, _serves_several_images(backend)
-            )
-        except HTTPException as exc:
-            raise _reject(exc.status_code, exc.detail)
-        _pre_parsed = None
-
     # ── Parse messages (handles multimodal content parts) ─────
     # Reuse the pre-hook parse when auto-switch did it, else parse now.
     if _pre_parsed is not None:
@@ -35376,44 +35363,6 @@ def _inline_request_remote_images(payload) -> None:
             continue
         for part in message.content:
             if isinstance(part, ImageContentPart) and not part.image_url.url.startswith("data:"):
-                part.image_url.url = fetches.inline(part.image_url.url)
-
-
-def _inline_served_remote_images(payload, several: bool) -> None:
-    # Only what the renderers read: the image _extract_content_parts selects, and on a
-    # multi-image model every user turn's (_conversation_with_image_markers).
-    latest = latest_user = None
-    for message in payload.messages:
-        if message.role in ("system", "developer") or not isinstance(message.content, list):
-            continue
-        part = next(
-            (
-                p
-                for p in message.content
-                if isinstance(p, ImageContentPart)
-                and (
-                    p.image_url.url.partition(",")[2]
-                    if p.image_url.url.startswith("data:")
-                    else _image_url_scheme(p.image_url.url)
-                )
-            ),
-            None,
-        )
-        if part is not None:
-            latest = part
-            if message.role == "user":
-                latest_user = part
-    selected = latest_user or latest
-    fetches = _RemoteImageFetches()
-    for message in payload.messages:
-        if not isinstance(message.content, list):
-            continue
-        for part in message.content:
-            if (
-                isinstance(part, ImageContentPart)
-                and not part.image_url.url.startswith("data:")
-                and (part is selected or (several and message.role == "user"))
-            ):
                 part.image_url.url = fetches.inline(part.image_url.url)
 
 
