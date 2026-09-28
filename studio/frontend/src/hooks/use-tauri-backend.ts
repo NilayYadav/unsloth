@@ -13,14 +13,7 @@ import {
   MANAGED_ENVIRONMENT_BUSY,
   MANAGED_ENVIRONMENT_UPDATING,
   preflightStaleMessage,
-  runtimeRepairFailureMessage,
-  runtimeRepairRecurrenceMessage,
-  isLlamaRuntimeReason,
 } from "@/hooks/backend-preflight-message";
-import {
-  recordRuntimeRepair,
-  wasRuntimeRepairedRecently,
-} from "@/hooks/runtime-repair-history";
 import {
   copySupportDiagnostics,
   type CopySupportDiagnosticsResult,
@@ -185,10 +178,6 @@ export function useTauriBackend() {
   // Whether the repair in flight was asked to skip straight to the installer. Read back by
   // approveElevation, which restarts the repair after the system packages land.
   const forcedRepairRef = useRef(false);
-  const repairReasonRef = useRef<string | null>(null);
-  // Set by Retry: the next preflight may repair a runtime that was repaired recently. Only
-  // the automatic launch-time repair is held back; a click is the user asking for it.
-  const allowHeldRuntimeRepairRef = useRef(false);
   // One preflight and one repair at a time. Retry runs the preflight, a stale verdict starts a
   // repair, and five clicks two seconds apart used to fan out into five of each: the Rust side
   // saw them as five repairs racing for one installer.
@@ -321,8 +310,6 @@ export function useTauriBackend() {
     }
     if (preflightInFlightRef.current) return;
     preflightInFlightRef.current = true;
-    const allowHeldRuntimeRepair = allowHeldRuntimeRepairRef.current;
-    allowHeldRuntimeRepairRef.current = false;
     // Released below and again in the finally; by then a later call may hold the flag, and
     // clearing it unowned would let a third preflight through.
     let ownsPreflight = true;
@@ -382,11 +369,7 @@ export function useTauriBackend() {
             return;
           }
           if (preflight.can_auto_repair) {
-            if (!allowHeldRuntimeRepair && wasRuntimeRepairedRecently(preflight.reason)) {
-              setBackendError(runtimeRepairRecurrenceMessage());
-            } else {
-              await startRepair({ preflightReason: preflight.reason });
-            }
+            await startRepair();
           } else {
             setBackendError(
               preflightStaleMessage(preflight.disposition, preflight.reason),
@@ -463,7 +446,7 @@ export function useTauriBackend() {
   // automatic callers leave it off, because an out-of-date venv is the common case. Settings'
   // manual repair turns it on: an update reuses the environment it finds, so a venv whose
   // PyTorch was replaced by a CPU-only wheel comes back from one still CPU-only.
-  async function startRepair(options?: { forceInstaller?: boolean; preflightReason?: string | null }) {
+  async function startRepair(options?: { forceInstaller?: boolean }) {
     if (repairInFlightRef.current) return;
     repairInFlightRef.current = true;
     // Same ownership rule as the preflight flag, handed to runRepair so it can release as soon
@@ -482,13 +465,12 @@ export function useTauriBackend() {
   }
 
   async function runRepair(
-    options?: { forceInstaller?: boolean; preflightReason?: string | null },
+    options?: { forceInstaller?: boolean },
     releaseRepair: () => void = () => {},
   ) {
     const forceInstaller = options?.forceInstaller ?? false;
     // Survives the elevation round trip: approveElevation resumes by calling this again.
     forcedRepairRef.current = forceInstaller;
-    repairReasonRef.current = options?.preflightReason ?? null;
     elevationResumeRef.current = null;
     setCurrentStepIndex(-1);
     setProgressDetail(null);
@@ -504,22 +486,18 @@ export function useTauriBackend() {
     const { invoke } = await import("@tauri-apps/api/core");
     try {
       await invoke("start_managed_repair", { forceInstaller });
-      recordRuntimeRepair(repairReasonRef.current);
       // The repair ends here; what follows is an ordinary start, and holding the flag across it
       // swallows the Retry that server-start-timeout offers.
       releaseRepair();
+
+      setBackendStatus("starting");
+      elevationResumeRef.current = null;
+      await startManagedServer();
     } catch (e) {
       const msg = String(e);
       if (msg.includes("NEEDS_ELEVATION")) return;
-      setBackendError(
-        isLlamaRuntimeReason(repairReasonRef.current) ? runtimeRepairFailureMessage(msg) : msg,
-        "repair-error",
-      );
-      return;
+      setBackendError(msg, "repair-error");
     }
-    setBackendStatus("starting");
-    elevationResumeRef.current = null;
-    await startManagedServer();
   }
 
   async function startServer() {
@@ -618,7 +596,6 @@ export function useTauriBackend() {
       void startRepair({ forceInstaller: true });
       return;
     }
-    allowHeldRuntimeRepairRef.current = true;
     checkInstallAndStart();
   }, []);
 
@@ -653,10 +630,7 @@ export function useTauriBackend() {
       setProgressDetail(null);
       elevationResumeRef.current = null;
       if (resume === "repair") {
-        await startRepair({
-          forceInstaller: forcedRepairRef.current,
-          preflightReason: repairReasonRef.current,
-        });
+        await startRepair({ forceInstaller: forcedRepairRef.current });
       } else {
         await startInstall();
       }
@@ -774,12 +748,7 @@ export function useTauriBackend() {
 
       register<string>("repair-failed", (e) => {
         if (statusRef.current !== "repairing") return;
-        setBackendError(
-          isLlamaRuntimeReason(repairReasonRef.current)
-            ? runtimeRepairFailureMessage(e.payload)
-            : e.payload,
-          "repair-error",
-        );
+        setBackendError(e.payload, "repair-error");
       });
 
       register<number>("server-port", (e) => {
