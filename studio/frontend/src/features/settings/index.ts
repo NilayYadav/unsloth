@@ -14,7 +14,9 @@ export { updateHubSource } from "./api/hub-settings";
 export { loadOpenAIAutoSwitchSettings } from "./api/openai-auto-switch";
 export {
   loadAutoRouterSettings,
+  loadNamedRouters,
   subscribeAutoRouterSettings,
+  subscribeNamedRouters,
 } from "./api/auto-router";
 export { listOpenAIModels } from "./api/openai-models";
 export {

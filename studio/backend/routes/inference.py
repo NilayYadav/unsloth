@@ -8813,21 +8813,86 @@ async def _effective_auto_profile(loaded: Optional[set[str]] = None):
     ), False
 
 
+async def _named_router_profile(model: str, catalog: Optional[list[dict]] = None):
+    from core.inference.auto_router import find_router, router_profile
+    from core.inference.auto_router_capabilities import detect_capabilities
+
+    router = await asyncio.to_thread(find_router, model)
+    if router is None:
+        raise HTTPException(status_code = 404, detail = f"No router named {model!r}. Create it in Settings → Chat.")
+    entries = {
+        entry["id"].casefold(): entry
+        for entry in _auto_router_entries(catalog if catalog is not None else await _openai_catalog_objects())
+    }
+    missing = sorted({m for m in router.slots.values() if m.casefold() not in entries})
+    if router.slots["general"].casefold() not in entries:
+        raise HTTPException(
+            status_code = 400,
+            detail = f"{router.name}'s General model {router.slots['general']} is not downloaded.",
+        )
+    router = router.model_copy(
+        update = {"slots": {slot: m for slot, m in router.slots.items() if m not in missing}}
+    )
+    ids = sorted(set(router.slots.values()))
+    detected = await asyncio.gather(*(asyncio.to_thread(detect_capabilities, m) for m in ids))
+    capabilities = {}
+    for model_id, caps in zip(ids, detected):
+        caps = dict(caps)
+        if caps.get("context_length") is None:
+            entry = entries.get(model_id.casefold(), {})
+            for key in ("native_context_length", "max_context_length"):
+                if isinstance(entry.get(key), int) and entry[key] >= 256:
+                    caps["context_length"] = entry[key]
+                    break
+        capabilities[model_id] = caps
+    return router_profile(router, capabilities)
+
+
+async def _router_profile_for(model: str, loaded: set[str]):
+    if model == "auto":
+        profile, _ = await _effective_auto_profile(loaded)
+        if not profile.models:
+            raise HTTPException(status_code = 400, detail = "Auto has no downloaded models available.")
+        return profile
+    return await _named_router_profile(model)
+
+
+async def _preview_router(model: str, prompt: str) -> dict:
+    from core.inference.auto_router import choose_model
+
+    loaded = {entry["id"].casefold() for entry in await asyncio.to_thread(_openai_model_objects)}
+    profile = await _router_profile_for(model, loaded)
+    resident = frozenset(m.id for m in profile.models if m.id.casefold() in loaded)
+    current = next((m.id for m in profile.models if m.id in resident), None)
+    try:
+        decision = await asyncio.to_thread(
+            choose_model, profile, prompt = prompt, image = False, tools = False,
+            estimated_tokens = max(1, len(prompt) // 3), current_model = current, resident = resident,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code = 400, detail = str(exc)) from None
+    return {
+        "model": decision.model,
+        "reason": decision.reason,
+        "task": decision.task,
+        "loaded": decision.model in resident,
+    }
+
+
 async def _resolve_auto_model(
     payload, request: Request, messages, *, image: bool = False, subject: str = "",
     count_only: bool = False,
 ) -> None:
-    if getattr(payload, "model", None) != "auto":
-        return
     from core.inference.auto_router import (
-        RouterDecision, choose_model, remember_session, session_model,
+        RouterDecision, choose_model, is_router_model, remember_session, session_model,
     )
 
+    requested = getattr(payload, "model", None)
+    if not is_router_model(requested):
+        return
     loaded = {entry["id"].casefold() for entry in await asyncio.to_thread(_openai_model_objects)}
-    profile, _ = await _effective_auto_profile(loaded)
+    profile = await _router_profile_for(requested, loaded)
     models = profile.models
-    if not models:
-        raise HTTPException(status_code = 400, detail = "Auto has no downloaded models available.")
     resident = frozenset(model.id for model in models if model.id.casefold() in loaded)
     current = next((model.id for model in models if model.id in resident), None)
     session_id = _auto_router_session_id(request, payload, messages)
@@ -11408,11 +11473,13 @@ async def _auto_switch_from_request_body(
         # a reload-only sentinel so the idle-stash reload still runs (an idle-freed
         # model is restored) without the resolver ever matching a real name.
         model = body.get("model") or _RELOAD_ONLY_MODEL
-        if model == "auto" and request.url.path.endswith("/completions"):
+        from core.inference.auto_router import is_router_model
+
+        if is_router_model(model) and request.url.path.endswith("/completions"):
             from types import SimpleNamespace
 
             prompt = body.get("prompt", "")
-            routed_payload = SimpleNamespace(model = "auto", tools = None)
+            routed_payload = SimpleNamespace(model = model, tools = None)
             await _resolve_auto_model(
                 routed_payload, request,
                 [{"role": "user", "content": prompt if isinstance(prompt, str) else str(prompt)}],
@@ -32212,6 +32279,25 @@ async def _openai_catalog_objects() -> list[dict]:
     return list(by_id.values())
 
 
+async def _router_model_objects(catalog: list[dict]) -> list[dict]:
+    """``auto`` plus each saved router whose General model is downloaded, as /v1/models entries."""
+    from core.inference.auto_router import ROUTER_PREFIX, get_routers
+
+    entries = _auto_router_entries(catalog)
+    if not entries:
+        return []
+    available = {entry["id"].casefold() for entry in entries}
+    created = int(time.time())
+    objects = [{"id": "auto", "object": "model", "created": created, "owned_by": _OWNED_BY, "loaded": False}]
+    for router in await asyncio.to_thread(get_routers):
+        if router.slots["general"].casefold() in available:
+            objects.append({
+                "id": ROUTER_PREFIX + router.id, "object": "model", "created": created,
+                "owned_by": _OWNED_BY, "loaded": False, "display_name": router.name,
+            })
+    return objects
+
+
 @studio_router.get("/loaded-models")
 async def loaded_inference_models(current_subject: str = Depends(get_current_subject)):
     """Loaded llama.cpp/orchestrator models for agent startup, without a disk catalog scan.
@@ -32240,9 +32326,7 @@ async def openai_list_models(current_subject: str = Depends(get_current_subject)
     memory. Each entry carries a clean public id and a ``loaded`` flag.
     """
     data = await _openai_catalog_objects()
-    if _auto_router_entries(data):
-        data.insert(0, {"id": "auto", "object": "model", "created": int(time.time()),
-                        "owned_by": _OWNED_BY, "loaded": False})
+    data[:0] = await _router_model_objects(data)
     return {"object": "list", "data": data}
 
 
@@ -32258,10 +32342,12 @@ async def openai_retrieve_model(model_id: str, current_subject: str = Depends(ge
     """
     from core.inference.model_ids import model_id_matches
 
-    if model_id == "auto":
-        if _auto_router_entries(await _openai_catalog_objects()):
-            return {"id": "auto", "object": "model", "created": int(time.time()),
-                    "owned_by": _OWNED_BY, "loaded": False}
+    from core.inference.auto_router import is_router_model
+
+    if is_router_model(model_id):
+        for entry in await _router_model_objects(await _openai_catalog_objects()):
+            if entry["id"] == model_id:
+                return entry
 
     # Loaded models resolve without a catalog scan (the common case); only build
     # the full catalog -- which may hit the filesystem -- for unloaded ids. Match

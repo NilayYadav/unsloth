@@ -46,7 +46,7 @@ import {
   loadCurrentDatePrompt,
   updateCurrentDatePrompt,
 } from "../api/current-date-prompt";
-import { AutoRouterSection } from "../components/auto-router-section";
+import { RoutersSection } from "../components/routers-section";
 import { SettingsRow } from "../components/settings-row";
 import { ComposerSettings } from "../components/composer-settings";
 import { SettingsSection } from "../components/settings-section";
@@ -642,7 +642,7 @@ export function ChatTab() {
         </SettingsRow>
       </SettingsSection>
 
-      {isOwner ? <AutoRouterSection /> : null}
+      {isOwner ? <RoutersSection /> : null}
 
       <SettingsSection title={t("settings.chat.artifacts.title")}>
         <div ref={networkAccessRowRef}>

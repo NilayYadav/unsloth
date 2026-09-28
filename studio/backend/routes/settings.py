@@ -1430,6 +1430,61 @@ async def get_auto_router_candidates(current_subject: str = Depends(get_current_
     return {"models": await _auto_router_candidates()}
 
 
+async def _routers_response() -> dict:
+    from core.inference.auto_router import ROUTER_PREFIX, get_routers
+    from routes.inference import _named_router_profile, _openai_catalog_objects
+
+    catalog = await _openai_catalog_objects()
+    routers = []
+    for router in await asyncio.to_thread(get_routers):
+        try:
+            profile = await _named_router_profile(ROUTER_PREFIX + router.id, catalog)
+            ready, tools, vision = True, any(m.tools for m in profile.models), any(m.vision for m in profile.models)
+        except HTTPException:
+            ready, tools, vision = False, False, False
+        routers.append({
+            **router.model_dump(), "model": ROUTER_PREFIX + router.id,
+            "ready": ready, "tools": tools, "vision": vision,
+        })
+    return {"routers": routers}
+
+
+@_shared_settings_router.get("/auto-router/routers")
+async def get_named_routers(current_subject: str = Depends(get_current_subject)):
+    return await _routers_response()
+
+
+@_owner_settings_router.put("/auto-router/routers")
+async def update_named_routers(payload: dict, current_subject: str = Depends(get_current_subject)):
+    from core.inference.auto_router import NamedRouters, save_routers
+    from routes.inference import _auto_router_entries, _openai_catalog_objects
+
+    try:
+        routers = NamedRouters.model_validate(payload).routers
+    except ValidationError as exc:
+        raise HTTPException(status_code = 400, detail = _validation_message(exc)) from None
+    available = {entry["id"].casefold() for entry in _auto_router_entries(await _openai_catalog_objects())}
+    missing = sorted({m for router in routers for m in router.slots.values() if m.casefold() not in available})
+    if missing:
+        raise HTTPException(status_code = 400, detail = f"Download these models first: {', '.join(missing)}")
+    await asyncio.to_thread(save_routers, routers)
+    return await _routers_response()
+
+
+@_shared_settings_router.post("/auto-router/preview")
+async def preview_router(payload: dict, current_subject: str = Depends(get_current_subject)):
+    from core.inference.auto_router import is_router_model
+    from routes.inference import _preview_router
+
+    model = payload.get("model")
+    prompt = payload.get("prompt")
+    if not is_router_model(model):
+        raise HTTPException(status_code = 400, detail = "Choose Auto or one of your routers.")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise HTTPException(status_code = 400, detail = "Type a prompt to test.")
+    return await _preview_router(model, prompt[:4000])
+
+
 @_owner_settings_router.put("/auto-router")
 async def update_auto_router_settings(
     payload: dict, current_subject: str = Depends(get_current_subject)

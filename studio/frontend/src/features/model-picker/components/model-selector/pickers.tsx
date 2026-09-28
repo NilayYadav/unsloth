@@ -5276,9 +5276,16 @@ export function HubModelPicker({
       },
     ];
   }, [connectedMatches, pinnedConnectedSet, connectedSort]);
+  const routerRows = showAutoRow ? (autoOption?.routers ?? []) : [];
+  const routerIdsKey = routerRows.map((router) => router.id).join("\n");
+  const routerIds = useMemo(
+    () => (routerIdsKey ? routerIdsKey.split("\n") : []),
+    [routerIdsKey],
+  );
   const hubOptionKeys = useMemo(() => {
     const keys: string[] = [
       ...(showAutoRow ? [AUTO_OPTION_KEY] : []),
+      ...routerIds.map((id) => makeModelOptionKey("router", id)),
       ...loadedRows.map((m) => makeModelOptionKey("loaded", m.id)),
     ];
 
@@ -5458,17 +5465,21 @@ export function HubModelPicker({
     otherAdditionalOnDeviceModels,
     otherModelsCollapsed,
     showAutoRow,
+    routerIds,
   ]);
 
   const autoSelected = showAutoRow && autoOption?.selected === true;
+  const selectedRouterId = routerRows.find((router) => router.selected)?.id;
   const selectedHubOptionKey = useMemo(
     () =>
       autoSelected
         ? AUTO_OPTION_KEY
-        : value
-          ? hubOptionKeys.find((optionKey) => optionKey.endsWith(`::${value}`))
-          : undefined,
-    [autoSelected, hubOptionKeys, value],
+        : selectedRouterId
+          ? makeModelOptionKey("router", selectedRouterId)
+          : value
+            ? hubOptionKeys.find((optionKey) => optionKey.endsWith(`::${value}`))
+            : undefined,
+    [autoSelected, selectedRouterId, hubOptionKeys, value],
   );
   const hubModelList = useRovingModelList({
     label: "Hub models",
@@ -6889,6 +6900,26 @@ export function HubModelPicker({
                     />
                   </div>
                 </div>
+                {routerRows.map((router) => {
+                  const optionKey = makeModelOptionKey("router", router.id);
+                  return (
+                    <div key={optionKey} className={downloadedRowShellClassName(router.selected)}>
+                      <div className="min-w-0 flex-1">
+                        <ModelRow
+                          label={router.label}
+                          tooltipText={router.description}
+                          hideOwner={true}
+                          selected={router.selected}
+                          loaded={false}
+                          optionProps={hubModelList.getOptionProps(optionKey, router.selected)}
+                          onClick={router.onSelect}
+                          vramStatus={null}
+                          className={downloadedRowButtonClassName}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
                 <div className="mx-2.5 mt-1.5 border-t border-border/50" />
               </div>
             ) : null}

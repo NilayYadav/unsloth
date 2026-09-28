@@ -4383,7 +4383,9 @@ export function createOpenAIStreamAdapter(
           params.checkpoint,
           runtime.activeGgufVariant,
         );
-        const selectedCheckpoint = autoRouterSelection().enabled ? "auto" : params.checkpoint.trim();
+        const selectedCheckpoint = autoRouterSelection().enabled
+          ? autoRouterSelection().routerModel
+          : params.checkpoint.trim();
         const researchExternalSelection =
           parseExternalModelId(selectedCheckpoint);
         const researchExternalProvider = researchExternalSelection
@@ -5394,6 +5396,7 @@ export function createOpenAIStreamAdapter(
       const streamStartTime = Date.now();
       let responseModelId = externalSelection?.modelId ?? params.checkpoint;
       const autoRequested = autoRouterSelection().enabled;
+      const routerModelId = autoRouterSelection().routerModel;
       let routerModel: string | null = null;
       let routerReason: string | null = null;
       let firstTokenTime: number | undefined;
@@ -6099,7 +6102,7 @@ export function createOpenAIStreamAdapter(
         const buildResponseDetails = (
           finishedAt: number,
         ): ResponseDetailsMetadata => ({
-          modelId: autoRequested ? "auto" : params.checkpoint,
+          modelId: autoRequested ? routerModelId : params.checkpoint,
           modelLabel:
             (isExternalRequest || responseModelId !== params.checkpoint
               ? responseModelId
@@ -6486,7 +6489,7 @@ export function createOpenAIStreamAdapter(
           }
 
           return {
-            model: autoRequested ? "auto" : params.checkpoint,
+            model: autoRequested ? routerModelId : params.checkpoint,
             ...(autoRequested && autoRouterThread(resolvedThreadId).pin
               ? { router_pin: autoRouterThread(resolvedThreadId).pin! }
               : {}),
@@ -6808,7 +6811,7 @@ export function createOpenAIStreamAdapter(
               const chunkModel = (chunk as { model?: unknown }).model;
               if (typeof chunkModel === "string" && chunkModel.length > 0) {
                 responseModelId = chunkModel;
-                if (autoRequested && chunkModel !== "auto") {
+                if (autoRequested && chunkModel !== routerModelId) {
                   routerModel = chunkModel;
                   recordAutoRouterChoice(resolvedThreadId, chunkModel);
                 }

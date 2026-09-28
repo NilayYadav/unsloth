@@ -180,8 +180,10 @@ import {
 import { usePinnedChatsStore } from "./stores/pinned-chats-store";
 import { usePinnedProjectsStore } from "./stores/pinned-projects-store";
 import {
+  selectRouter,
   setAutoRouterEnabled,
   setAutoRouterSettings,
+  setNamedRouters,
   useAutoRouterSelection,
 } from "./stores/auto-router-selection";
 import {
@@ -208,7 +210,9 @@ import {
   COMPOSER_INPUT_SELECTOR,
   isSurfaceBackgrounded,
   loadAutoRouterSettings,
+  loadNamedRouters,
   subscribeAutoRouterSettings,
+  subscribeNamedRouters,
   useShortcut,
 } from "@/features/settings";
 import {
@@ -2196,9 +2200,17 @@ export function ChatPage({
     const unsubscribe = subscribeAutoRouterSettings((settings) =>
       setAutoRouterSettings(settings.models),
     );
+    loadNamedRouters({ force: true }).then(
+      (routers) => {
+        if (live) setNamedRouters(routers);
+      },
+      () => {},
+    );
+    const unsubscribeRouters = subscribeNamedRouters(setNamedRouters);
     return () => {
       live = false;
       unsubscribe();
+      unsubscribeRouters();
     };
   }, [active]);
   const showContextWindowUsage = useChatPreferencesStore(
@@ -4223,13 +4235,26 @@ export function ChatPage({
                 contentDataTour="chat-model-selector-popover"
                 showCloudIndicator={isExternalModel && !autoRouterState.enabled}
                 autoOption={
-                  autoRouterState.configured || autoRouterState.enabled
+                  autoRouterState.configured ||
+                  autoRouterState.enabled ||
+                  autoRouterState.routers.length > 0
                     ? {
-                        selected: autoRouterState.enabled,
+                        selected:
+                          autoRouterState.enabled &&
+                          autoRouterState.routerModel === "auto",
                         label: t("settings.chat.autoRouter.auto"),
                         description: t("settings.chat.autoRouter.pickerDescription"),
                         lastModel: autoRouterLastModel,
-                        onSelect: () => setAutoRouterEnabled(true),
+                        onSelect: () => selectRouter("auto"),
+                        routers: autoRouterState.routers.map((router) => ({
+                          id: router.model,
+                          label: router.name,
+                          description: t("settings.chat.autoRouter.routerPickerDescription"),
+                          selected:
+                            autoRouterState.enabled &&
+                            autoRouterState.routerModel === router.model,
+                          onSelect: () => selectRouter(router.model),
+                        })),
                       }
                     : undefined
                 }

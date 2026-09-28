@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/tooltip";
 import {
   customProviderDisplayName,
+  isRouterModelId,
   parseExternalModelId,
   setAutoRouterPin,
   useAutoRouterSelection,
@@ -354,7 +355,7 @@ function autoRouterAnswer(metadata: unknown): string | null {
   const details = (
     (metadata as { custom?: MessageCustomMetadata } | undefined)?.custom
   )?.responseDetails;
-  if (details?.modelId !== "auto") return null;
+  if (!details || !isRouterModelId(details.modelId)) return null;
   return details.routerModel ?? details.responseModelId ?? null;
 }
 

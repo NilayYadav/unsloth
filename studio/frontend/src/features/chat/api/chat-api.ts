@@ -2,6 +2,7 @@
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { authFetch, getAuthSessionEpoch } from "@/features/auth";
+import { isRouterModelId } from "../stores/auto-router-selection";
 import { routerDecisionChunk } from "./router-decision";
 import { prepareHfTokenForUse } from "@/features/hf-auth";
 // These helpers are deliberately API-layer-only, not part of their features' public barrels.
@@ -1655,7 +1656,7 @@ export async function* streamChatCompletions(
       // Opt into Unsloth's UI control frames (tool cards, statuses, reasoning timing). The
       // endpoint defaults to a clean OpenAI stream for external clients.
       "X-Unsloth-Events": "1",
-      ...(payload.model === "auto" && routerSessionId ? { "X-Unsloth-Router-Session": routerSessionId } : {}),
+      ...(isRouterModelId(payload.model) && routerSessionId ? { "X-Unsloth-Router-Session": routerSessionId } : {}),
     },
     body: JSON.stringify(payload),
     signal,
@@ -1667,7 +1668,7 @@ export async function* streamChatCompletions(
   }
 
   const headerRouterModel =
-    payload.model === "auto" ? response.headers.get("X-Unsloth-Router-Model") : null;
+    isRouterModelId(payload.model) ? response.headers.get("X-Unsloth-Router-Model") : null;
   if (headerRouterModel) {
     yield routerDecisionChunk({
       model: headerRouterModel,

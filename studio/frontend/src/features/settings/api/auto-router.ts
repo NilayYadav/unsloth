@@ -8,6 +8,7 @@ export const AUTO_TASKS = ["code", "reasoning", "writing", "general", "vision"] 
 export type AutoTask = (typeof AUTO_TASKS)[number];
 
 const AUTO_ROUTER_EVENT = "unsloth-auto-router-change";
+const NAMED_ROUTERS_EVENT = "unsloth-named-routers-change";
 
 export interface AutoRouterModel {
   id: string;
@@ -119,4 +120,82 @@ export function autoRouterModelFromCandidate(candidate: AutoRouterCandidate): Au
     tools: candidate.tools,
     context_length: candidate.context_length,
   };
+}
+
+export const ROUTER_SLOTS = ["code", "reasoning", "writing", "general", "vision"] as const;
+export type RouterSlot = (typeof ROUTER_SLOTS)[number];
+
+export interface NamedRouter {
+  id: string;
+  name: string;
+  slots: Partial<Record<RouterSlot, string>>;
+  model?: string;
+  ready?: boolean;
+  tools?: boolean;
+  vision?: boolean;
+}
+
+export interface RouterPreview {
+  model: string;
+  reason: string;
+  task: string | null;
+  loaded: boolean;
+}
+
+let cachedRouters: NamedRouter[] | null = null;
+
+function cacheRouters(routers: NamedRouter[]): NamedRouter[] {
+  cachedRouters = routers;
+  window.dispatchEvent(new CustomEvent(NAMED_ROUTERS_EVENT, { detail: routers }));
+  return routers;
+}
+
+export function subscribeNamedRouters(listener: (routers: NamedRouter[]) => void): () => void {
+  const handleChange = (event: Event) => {
+    listener((event as CustomEvent<NamedRouter[]>).detail);
+  };
+  window.addEventListener(NAMED_ROUTERS_EVENT, handleChange);
+  return () => window.removeEventListener(NAMED_ROUTERS_EVENT, handleChange);
+}
+
+export async function loadNamedRouters({ force = false } = {}): Promise<NamedRouter[]> {
+  if (cachedRouters && !force) return cachedRouters;
+  const body = await readJson<{ routers?: NamedRouter[] }>(
+    await authFetch("/api/settings/auto-router/routers"),
+  );
+  return cacheRouters(Array.isArray(body?.routers) ? body.routers : []);
+}
+
+export async function saveNamedRouters(routers: NamedRouter[]): Promise<NamedRouter[]> {
+  const response = await authFetch("/api/settings/auto-router/routers", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      routers: routers.map(({ id, name, slots }) => ({ id, name, slots })),
+    }),
+  });
+  const body = await readJson<{ routers?: NamedRouter[] }>(response);
+  return cacheRouters(Array.isArray(body?.routers) ? body.routers : []);
+}
+
+export async function previewRouter(model: string, prompt: string): Promise<RouterPreview> {
+  const response = await authFetch("/api/settings/auto-router/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, prompt }),
+  });
+  return readJson<RouterPreview>(response);
+}
+
+export function routerIdFromName(name: string, taken: readonly string[]): string {
+  const base =
+    name
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "router";
+  let id = base;
+  for (let n = 2; taken.includes(id); n += 1) id = `${base}-${n}`;
+  return id;
 }

@@ -215,5 +215,48 @@ def test_build_profile_handles_a_large_download_folder():
     assert built.default_model == "model-7"
 
 
+def named_router(**slots):
+    return auto_router.NamedRouter(id="coding-setup", name="Coding setup", slots=slots)
+
+
+def test_named_router_needs_a_general_model():
+    with pytest.raises(ValueError, match="General model"):
+        named_router(code="glm")
+    with pytest.raises(ValueError, match="unique"):
+        auto_router.NamedRouters(routers=[named_router(general="a"), named_router(general="b")])
+
+
+def test_named_router_turns_slots_into_a_profile():
+    profile = auto_router.router_profile(
+        named_router(code="glm", general="qwen", vision="qwen-vl", writing="qwen"),
+        {"glm": {"tools": True, "context_length": 131072}, "qwen-vl": {"vision": False}},
+    )
+    by_id = {model.id: model for model in profile.models}
+    assert by_id["glm"].tasks == ["code"]
+    assert by_id["qwen"].tasks == ["writing", "general"]
+    assert by_id["qwen-vl"].vision
+    assert by_id["glm"].context_length == 131072
+    assert profile.default_model == "qwen"
+    assert profile.load_for_task
+
+
+def test_named_router_loads_the_model_the_user_chose_for_the_task(monkeypatch):
+    monkeypatch.setattr(auto_router, "_classify", lambda prompt, choices: ("code", 0.95))
+    profile = auto_router.router_profile(named_router(code="glm", general="qwen"), {})
+    decision = choose_model(
+        profile, prompt="Fix this Python bug", image=False, tools=False,
+        estimated_tokens=20, current_model="qwen", resident=frozenset({"qwen"}),
+    )
+    assert decision.model == "glm"
+    assert decision.reason == "code task"
+
+
+def test_router_model_ids():
+    assert auto_router.is_router_model("auto")
+    assert auto_router.is_router_model("router/coding-setup")
+    assert not auto_router.is_router_model("unsloth/Qwen3-4B")
+    assert not auto_router.is_router_model(None)
+
+
 def test_pinned_choice_has_no_fallbacks():
     assert route(pin="coder").fallbacks == ()

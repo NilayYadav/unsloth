@@ -17,6 +17,8 @@ from utils.account_context import OWNER, run_as
 logger = logging.getLogger(__name__)
 
 SETTING_KEY = "auto_router_profile"
+ROUTERS_KEY = "auto_routers"
+ROUTER_PREFIX = "router/"
 TASKS = ("code", "reasoning", "writing", "general", "vision")
 CRITERIA = {
     "code": "code",
@@ -57,6 +59,7 @@ class RouterProfile(BaseModel):
     models: list[RouterModel] = Field(default_factory=list, max_length=256)
     default_model: str | None = None
     rules: list[RouterRule] = Field(default_factory=list, max_length=32)
+    load_for_task: bool = Field(default=False, exclude=True)
 
     @model_validator(mode="after")
     def validate_models(self):
@@ -70,6 +73,39 @@ class RouterProfile(BaseModel):
         if self.models and self.default_model is None:
             raise ValueError("Choose a default model for Auto")
         return self
+
+
+class NamedRouter(BaseModel):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,47}$")
+    name: str = Field(min_length=1, max_length=80)
+    slots: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_slots(self):
+        self.name = self.name.strip()
+        if not self.name:
+            raise ValueError("Give the router a name")
+        self.slots = {slot: model for slot, model in self.slots.items() if model}
+        if any(slot not in TASKS for slot in self.slots):
+            raise ValueError(f"Router slots must be among: {', '.join(TASKS)}")
+        if not self.slots.get("general"):
+            raise ValueError("Choose a General model for the router")
+        return self
+
+
+class NamedRouters(BaseModel):
+    routers: list[NamedRouter] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_ids(self):
+        ids = [router.id for router in self.routers]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Router names must be unique")
+        return self
+
+
+def is_router_model(model: Any) -> bool:
+    return model == "auto" or (isinstance(model, str) and model.startswith(ROUTER_PREFIX))
 
 
 @dataclass(frozen=True)
@@ -109,12 +145,60 @@ def save_profile(profile: RouterProfile) -> RouterProfile:
     return profile
 
 
+def get_routers() -> list[NamedRouter]:
+    from storage.studio_db import get_app_setting
+
+    saved = run_as(OWNER, get_app_setting, ROUTERS_KEY, None)
+    try:
+        return NamedRouters.model_validate({"routers": saved or []}).routers
+    except ValueError as exc:
+        logger.warning("Ignoring saved routers: %s", exc)
+        return []
+
+
+def save_routers(routers: list[NamedRouter]) -> list[NamedRouter]:
+    from storage.studio_db import upsert_app_settings
+
+    routers = NamedRouters(routers=routers).routers
+    run_as(OWNER, upsert_app_settings, {ROUTERS_KEY: [router.model_dump() for router in routers]})
+    if any(len({slot for slot in router.slots if slot in CRITERIA}) > 1 for router in routers):
+        warm_laya()
+    return routers
+
+
+def find_router(model: str) -> NamedRouter | None:
+    router_id = model.removeprefix(ROUTER_PREFIX)
+    return next((router for router in get_routers() if router.id == router_id), None)
+
+
+def router_profile(router: NamedRouter, capabilities: dict[str, dict]) -> RouterProfile:
+    tasks_by_model: dict[str, list[str]] = {}
+    for slot in TASKS:
+        model = router.slots.get(slot)
+        if model:
+            tasks_by_model.setdefault(model, []).append(slot)
+    models = []
+    for model_id, tasks in tasks_by_model.items():
+        caps = capabilities.get(model_id) or {}
+        context = caps.get("context_length")
+        models.append(RouterModel(
+            id=model_id,
+            tasks=tasks,
+            vision=bool(caps.get("vision")) or "vision" in tasks,
+            tools=bool(caps.get("tools")),
+            context_length=context if isinstance(context, int) and context >= 256 else None,
+        ))
+    return RouterProfile(models=models, default_model=router.slots["general"], load_for_task=True)
+
+
 def needs_laya(profile: RouterProfile) -> bool:
     return len({task for model in profile.models for task in model.tasks if task in CRITERIA}) > 1
 
 
 def warm_if_configured() -> None:
-    if needs_laya(get_profile()):
+    if needs_laya(get_profile()) or any(
+        len({slot for slot in router.slots if slot in CRITERIA}) > 1 for router in get_routers()
+    ):
         warm_laya()
 
 
@@ -315,7 +399,12 @@ def _decide(
     ):
         return RouterDecision(current_model, "continuing with current model", task)
     if matches and not no_signal:
-        if current_model in by_id and current_model in resident and not any(m in resident for m in matches):
+        if (
+            not profile.load_for_task
+            and current_model in by_id
+            and current_model in resident
+            and not any(m in resident for m in matches)
+        ):
             return RouterDecision(current_model, f"{task} model is not loaded, keeping the current model", task)
         return RouterDecision(_prefer(matches, resident, profile.default_model), f"{task} task", task)
     if profile.default_model in by_id:

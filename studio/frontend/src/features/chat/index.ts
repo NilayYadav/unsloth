@@ -58,6 +58,7 @@ export {
 } from "./chat-settings-sheet";
 export { useChatRuntimeStore } from "./stores/chat-runtime-store";
 export {
+  isRouterModelId,
   setAutoRouterPin,
   useAutoRouterSelection,
 } from "./stores/auto-router-selection";

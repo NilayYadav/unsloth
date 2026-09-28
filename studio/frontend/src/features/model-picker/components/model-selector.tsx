@@ -852,16 +852,18 @@ export function ModelSelector({
     t,
   ]);
 
-  const autoSelected = autoOption?.selected === true;
-  const autoTriggerModel: ModelOption | undefined = autoOption?.selected
-    ? {
-        id: "auto",
-        name: autoOption.label,
-        description: autoOption.lastModel
-          ? modelDisplayName(autoOption.lastModel)
-          : undefined,
-      }
-    : undefined;
+  const selectedRouter = autoOption?.routers?.find((router) => router.selected);
+  const autoSelected = autoOption?.selected === true || selectedRouter !== undefined;
+  const autoTriggerModel: ModelOption | undefined =
+    autoOption && autoSelected
+      ? {
+          id: selectedRouter?.id ?? "auto",
+          name: selectedRouter?.label ?? autoOption.label,
+          description: autoOption.lastModel
+            ? modelDisplayName(autoOption.lastModel)
+            : undefined,
+        }
+      : undefined;
 
   function handleSelect(id: string, meta: ModelSelectorChangeMeta) {
     if (onValueChange) {
@@ -957,6 +959,13 @@ export function ModelSelector({
               autoOption.onSelect();
               setOpen(false);
             },
+            routers: autoOption.routers?.map((router) => ({
+              ...router,
+              onSelect: () => {
+                router.onSelect();
+                setOpen(false);
+              },
+            })),
           }
         }
       />

@@ -24,12 +24,21 @@ export interface ModelOption {
   audioType?: string | null;
 }
 
+export interface RouterModelOption {
+  id: string;
+  label: string;
+  description: string;
+  selected: boolean;
+  onSelect: () => void;
+}
+
 export interface AutoModelOption {
   selected: boolean;
   label: string;
   description: string;
   lastModel?: string | null;
   onSelect: () => void;
+  routers?: RouterModelOption[];
 }
 
 export interface LoraModelOption extends ModelOption {
