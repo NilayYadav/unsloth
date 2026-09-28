@@ -165,5 +165,48 @@ def test_fallbacks_prefer_loaded_then_default_and_skip_incapable_models(monkeypa
     assert decision.fallbacks == ("general",)
 
 
+def test_loaded_model_is_kept_when_the_task_model_is_not_loaded(monkeypatch):
+    monkeypatch.setattr(auto_router, "_classify", lambda prompt, choices: ("code", 0.95))
+    decision = choose_model(
+        profile(), prompt="Write a Python function", image=False, tools=False,
+        estimated_tokens=20, current_model="general", resident=frozenset({"general"}),
+    )
+    assert decision.model == "general"
+    assert decision.reason == "code model is not loaded, keeping the current model"
+    assert decision.task == "code"
+
+
+def test_loaded_task_model_takes_over_for_free(monkeypatch):
+    monkeypatch.setattr(auto_router, "_classify", lambda prompt, choices: ("code", 0.95))
+    decision = choose_model(
+        profile(), prompt="Write a Python function", image=False, tools=False,
+        estimated_tokens=20, current_model="general", resident=frozenset({"general", "coder"}),
+    )
+    assert decision.model == "coder"
+    assert decision.reason == "code task"
+
+
+def test_hard_requirement_still_loads_over_a_resident_model():
+    decision = choose_model(
+        profile(), prompt="what is in this picture", image=True, tools=False,
+        estimated_tokens=20, current_model="general", resident=frozenset({"general"}),
+    )
+    assert decision.model == "vision"
+
+
+def test_build_profile_defaults_to_a_loaded_model_and_skips_bad_rows():
+    built = auto_router.build_profile(
+        [
+            {"id": "coder", "tasks": ["code"], "tools": True, "context_length": 4096},
+            {"id": "general", "tasks": ["general"], "tools": True, "context_length": None},
+            {"id": "broken", "tasks": [], "context_length": 4},
+        ],
+        resident=frozenset({"general"}),
+    )
+    assert [model.id for model in built.models] == ["coder", "general"]
+    assert built.default_model == "general"
+    assert auto_router.build_profile([]).models == []
+
+
 def test_pinned_choice_has_no_fallbacks():
     assert route(pin="coder").fallbacks == ()

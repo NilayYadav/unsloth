@@ -34,11 +34,19 @@ def payload(**fields):
     return SimpleNamespace(model="auto", tools=None, thread_id=None, model_extra={}, **fields)
 
 
+def catalog(*ids):
+    async def objects():
+        return [{"id": model_id, "object": "model", "loaded": False} for model_id in ids]
+
+    return objects
+
+
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch):
     monkeypatch.setattr(auto_router, "_sessions", {})
     monkeypatch.setattr(auto_router, "get_profile", lambda: profile())
     monkeypatch.setattr(inference, "_openai_model_objects", lambda: [])
+    monkeypatch.setattr(inference, "_openai_catalog_objects", catalog("coder", "writer", "general"))
 
 
 def resolve(body, messages, request=None, **kwargs):
@@ -57,6 +65,52 @@ def test_api_conversation_keeps_its_model_without_a_session_header(monkeypatch):
     decision = resolve(payload(), later)
     assert decision.model == "coder"
     assert decision.reason == "continuing with current model"
+
+
+def test_auto_pools_every_downloaded_model_without_setup(monkeypatch):
+    import core.inference.auto_router_capabilities as capabilities
+
+    monkeypatch.setattr(auto_router, "get_profile", lambda: RouterProfile())
+    monkeypatch.setattr(
+        inference, "_openai_catalog_objects",
+        catalog_with_task({"Qwen3-Coder-30B": None, "Llama-3.1-8B": None, "Whisper": "speech"}),
+    )
+    monkeypatch.setattr(
+        capabilities, "detect_capabilities",
+        lambda model_id: {"vision": False, "tools": True, "context_length": 32768},
+    )
+    monkeypatch.setattr(inference, "_openai_model_objects", lambda: [{"id": "llama-3.1-8b"}])
+    monkeypatch.setattr(auto_router, "_classify", lambda prompt, choices: ("code", 0.9))
+
+    profile, automatic = asyncio.run(inference._effective_auto_profile({"llama-3.1-8b"}))
+    assert automatic
+    assert [model.id for model in profile.models] == ["Qwen3-Coder-30B", "Llama-3.1-8B"]
+    assert profile.default_model == "Llama-3.1-8B"
+
+    decision = resolve(payload(), [{"role": "user", "content": "Fix my Python bug"}])
+    assert decision.model == "Llama-3.1-8B"
+    assert decision.reason == "code model is not loaded, keeping the current model"
+
+
+def test_auto_without_downloaded_models_explains_itself(monkeypatch):
+    monkeypatch.setattr(auto_router, "get_profile", lambda: RouterProfile())
+    monkeypatch.setattr(inference, "_openai_catalog_objects", catalog())
+    with pytest.raises(HTTPException, match="no downloaded models"):
+        resolve(payload(), [{"role": "user", "content": "hi"}])
+
+
+def test_saved_profile_missing_its_default_falls_back_to_nothing(monkeypatch):
+    monkeypatch.setattr(inference, "_openai_catalog_objects", catalog("coder", "writer"))
+    profile, automatic = asyncio.run(inference._effective_auto_profile())
+    assert not automatic
+    assert profile.models == []
+
+
+def catalog_with_task(tasks):
+    async def objects():
+        return [{"id": model_id, "object": "model", "loaded": False, "task": task} for model_id, task in tasks.items()]
+
+    return objects
 
 
 def test_different_conversations_do_not_share_a_session(monkeypatch):

@@ -87,6 +87,19 @@ def get_profile() -> RouterProfile:
     return RouterProfile.model_validate(saved or {})
 
 
+def build_profile(candidates: list[dict], resident: frozenset[str] = frozenset()) -> RouterProfile:
+    models = []
+    for candidate in candidates:
+        try:
+            models.append(RouterModel.model_validate(candidate))
+        except ValueError:
+            continue
+    if not models:
+        return RouterProfile()
+    default = next((model.id for model in models if model.id in resident), models[0].id)
+    return RouterProfile(models=models, default_model=default)
+
+
 def save_profile(profile: RouterProfile) -> RouterProfile:
     from storage.studio_db import upsert_app_settings
 
@@ -209,7 +222,7 @@ def choose_model(
     resident: frozenset[str] = frozenset(),
 ) -> RouterDecision:
     if not profile.models:
-        raise ValueError("Auto has no models. Add downloaded models in Router settings.")
+        raise ValueError("Auto has no models. Download a model first.")
     capable = [
         model
         for model in profile.models
@@ -302,6 +315,8 @@ def _decide(
     ):
         return RouterDecision(current_model, "continuing with current model", task)
     if matches and not no_signal:
+        if current_model in by_id and current_model in resident and not any(m in resident for m in matches):
+            return RouterDecision(current_model, f"{task} model is not loaded, keeping the current model", task)
         return RouterDecision(_prefer(matches, resident, profile.default_model), f"{task} task", task)
     if profile.default_model in by_id:
         return RouterDecision(

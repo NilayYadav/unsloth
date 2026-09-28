@@ -1790,7 +1790,7 @@ export const it = {
         pinModel: "Tieni questa chat su {model}",
         unpinModel: "Non tenere più questa chat su {model}",
         title: "Unsloth Router",
-        description: "Scegli i modelli locali per Auto. Studio controlla di cosa ha bisogno ogni richiesta, poi Laya sceglie un'attività. Puoi modificare ogni scelta.",
+        description: "Auto usa i tuoi modelli scaricati. Studio controlla cosa serve a ogni richiesta, poi Laya sceglie un compito. Modifica l'elenco qui sotto solo se vuoi sovrascriverlo.",
         loadError: "Impossibile caricare le impostazioni del Router.",
         saveError: "Impossibile salvare le impostazioni del Router.",
         saved: "Impostazioni del Router salvate.",
@@ -1807,6 +1807,9 @@ export const it = {
         ruleText: "Se il prompt contiene",
         ruleModel: "Usa il modello",
         addRule: "Aggiungi regola",
+        automaticNote: "Auto sta usando tutti i modelli scaricati con le capacità rilevate. Salva una modifica qui sotto per personalizzarlo.",
+        customNote: "Auto sta usando il tuo elenco personalizzato. Ripristina per tornare a tutti i modelli scaricati.",
+        resetAutomatic: "Ripristina automatico",
         laya: {
           label: "Rilevamento attività",
           ready: "pronto",

@@ -23,6 +23,7 @@ export interface AutoRouterSettings {
   models: AutoRouterModel[];
   default_model: string | null;
   rules: { contains: string; model: string }[];
+  automatic?: boolean;
   laya?: AutoRouterLayaStatus;
 }
 
@@ -83,6 +84,10 @@ export async function saveAutoRouterSettings(
     body: JSON.stringify({ models, default_model, rules }),
   });
   return cacheSettings(await readJson<AutoRouterSettings>(response));
+}
+
+export function resetAutoRouterSettings(): Promise<AutoRouterSettings> {
+  return saveAutoRouterSettings({ models: [], default_model: null, rules: [] });
 }
 
 export async function listAutoRouterCandidates(): Promise<AutoRouterCandidate[]> {

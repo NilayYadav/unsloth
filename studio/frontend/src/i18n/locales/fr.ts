@@ -1826,7 +1826,7 @@ export const fr = {
         pinModel: "Garder cette discussion sur {model}",
         unpinModel: "Ne plus garder cette discussion sur {model}",
         title: "Unsloth Router",
-        description: "Choisissez les modèles locaux pour Auto. Studio vérifie ce dont chaque requête a besoin, puis Laya choisit une tâche. Vous pouvez modifier chaque choix.",
+        description: "Auto utilise vos modèles téléchargés. Studio vérifie ce dont chaque requête a besoin, puis Laya choisit une tâche. Modifiez la liste ci-dessous seulement pour la remplacer.",
         loadError: "Impossible de charger les réglages du Router.",
         saveError: "Impossible d'enregistrer les réglages du Router.",
         saved: "Réglages du Router enregistrés.",
@@ -1843,6 +1843,9 @@ export const fr = {
         ruleText: "Si le prompt contient",
         ruleModel: "Utiliser le modèle",
         addRule: "Ajouter une règle",
+        automaticNote: "Auto utilise tous vos modèles téléchargés avec leurs capacités détectées. Enregistrez une modification ci-dessous pour le personnaliser.",
+        customNote: "Auto utilise votre liste personnalisée. Réinitialisez pour revenir à tous les modèles téléchargés.",
+        resetAutomatic: "Revenir à automatique",
         laya: {
           label: "Détection de tâche",
           ready: "prête",

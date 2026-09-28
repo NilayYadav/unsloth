@@ -1776,7 +1776,7 @@ export const ja = {
         pinModel: "このチャットを {model} に固定",
         unpinModel: "このチャットの {model} への固定を解除",
         title: "Unsloth Router",
-        description: "自動で使うローカルモデルを選びます。Studio が各リクエストに必要なものを確認し、Laya がタスクを選びます。どの選択も変更できます。",
+        description: "Auto はダウンロード済みのモデルを使います。Studio が各リクエストに必要なものを確認し、Laya がタスクを選びます。上書きしたい場合だけ下のリストを編集してください。",
         loadError: "Router の設定を読み込めませんでした。",
         saveError: "Router の設定を保存できませんでした。",
         saved: "Router の設定を保存しました。",
@@ -1793,6 +1793,9 @@ export const ja = {
         ruleText: "プロンプトに含まれる場合",
         ruleModel: "使うモデル",
         addRule: "ルールを追加",
+        automaticNote: "Auto は検出した機能とともにダウンロード済みのすべてのモデルを使っています。下で変更を保存するとカスタマイズできます。",
+        customNote: "Auto はカスタムリストを使っています。リセットするとダウンロード済みのすべてのモデルに戻ります。",
+        resetAutomatic: "自動に戻す",
         laya: {
           label: "タスク検出",
           ready: "準備完了",

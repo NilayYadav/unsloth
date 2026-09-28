@@ -1752,7 +1752,7 @@ export const zhCN = {
         pinModel: "让此对话固定使用 {model}",
         unpinModel: "不再让此对话固定使用 {model}",
         title: "Unsloth Router",
-        description: "为自动模式选择本地模型。Studio 会检查每个请求的需求，然后由 Laya 选择任务。你可以更改任何选择。",
+        description: "Auto 使用你已下载的模型。Studio 先检查每个请求的需求，然后由 Laya 选择任务。只有想覆盖时才编辑下面的列表。",
         loadError: "无法加载 Router 设置。",
         saveError: "无法保存 Router 设置。",
         saved: "Router 设置已保存。",
@@ -1769,6 +1769,9 @@ export const zhCN = {
         ruleText: "如果提示词包含",
         ruleModel: "使用模型",
         addRule: "添加规则",
+        automaticNote: "Auto 正在使用所有已下载的模型及其检测到的能力。在下方保存任何更改即可自定义。",
+        customNote: "Auto 正在使用你的自定义列表。重置可回到所有已下载的模型。",
+        resetAutomatic: "重置为自动",
         laya: {
           label: "任务检测",
           ready: "就绪",

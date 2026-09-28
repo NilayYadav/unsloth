@@ -1788,7 +1788,7 @@ export const en = {
         pinModel: "Keep this chat on {model}",
         unpinModel: "Stop keeping this chat on {model}",
         title: "Unsloth Router",
-        description: "Choose local models for Auto. Studio checks what each request needs, then Laya picks a task. You can override any choice.",
+        description: "Auto uses your downloaded models. Studio checks what each request needs, then Laya picks a task. Edit the list below only if you want to override it.",
         loadError: "Could not load Router settings.",
         saveError: "Could not save Router settings.",
         saved: "Router settings saved.",
@@ -1805,6 +1805,9 @@ export const en = {
         ruleText: "If prompt contains",
         ruleModel: "Use model",
         addRule: "Add rule",
+        automaticNote: "Auto is using all your downloaded models with their detected capabilities. Save any change below to customize it.",
+        customNote: "Auto is using your custom list. Reset to go back to all downloaded models.",
+        resetAutomatic: "Reset to automatic",
         laya: {
           label: "Task detection",
           ready: "ready",

@@ -1786,7 +1786,7 @@ export const ko = {
         pinModel: "이 채팅을 {model}에 고정",
         unpinModel: "이 채팅의 {model} 고정 해제",
         title: "Unsloth Router",
-        description: "자동에 사용할 로컬 모델을 고르세요. Studio가 각 요청에 필요한 것을 확인한 뒤 Laya가 작업을 고릅니다. 모든 선택은 바꿀 수 있습니다.",
+        description: "Auto는 다운로드한 모델을 사용합니다. Studio가 각 요청에 필요한 것을 확인한 뒤 Laya가 작업을 고릅니다. 덮어쓰고 싶을 때만 아래 목록을 편집하세요.",
         loadError: "Router 설정을 불러오지 못했습니다.",
         saveError: "Router 설정을 저장하지 못했습니다.",
         saved: "Router 설정을 저장했습니다.",
@@ -1803,6 +1803,9 @@ export const ko = {
         ruleText: "프롬프트에 포함된 경우",
         ruleModel: "사용할 모델",
         addRule: "규칙 추가",
+        automaticNote: "Auto가 감지된 기능과 함께 다운로드한 모든 모델을 사용하고 있습니다. 아래에서 변경 사항을 저장하면 사용자 지정됩니다.",
+        customNote: "Auto가 사용자 지정 목록을 사용하고 있습니다. 재설정하면 다운로드한 모든 모델로 돌아갑니다.",
+        resetAutomatic: "자동으로 재설정",
         laya: {
           label: "작업 감지",
           ready: "준비됨",

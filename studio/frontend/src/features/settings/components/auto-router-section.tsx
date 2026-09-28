@@ -22,6 +22,7 @@ import {
   autoRouterModelFromCandidate,
   listAutoRouterCandidates,
   loadAutoRouterSettings,
+  resetAutoRouterSettings,
   saveAutoRouterSettings,
 } from "../api/auto-router";
 import { SettingsSection } from "./settings-section";
@@ -108,6 +109,21 @@ export function AutoRouterSection() {
     }
   };
 
+  const reset = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setSettings(await resetAutoRouterSettings());
+      toast.success(t("settings.chat.autoRouter.saved"));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("settings.chat.autoRouter.saveError");
+      setError(message);
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const available = candidates.filter((model) => !settings?.models.some((entry) => entry.id === model.id));
   const layaStatus = settings?.laya && settings.laya in LAYA_STATUS_KEYS
     ? LAYA_STATUS_KEYS[settings.laya as keyof typeof LAYA_STATUS_KEYS]
@@ -119,6 +135,11 @@ export function AutoRouterSection() {
       description={t("settings.chat.autoRouter.description")}
     >
       <div className="flex flex-col gap-3 py-3">
+        {settings && (
+          <p className="text-xs text-muted-foreground">
+            {t(settings.automatic ? "settings.chat.autoRouter.automaticNote" : "settings.chat.autoRouter.customNote")}
+          </p>
+        )}
         {layaStatus && (
           <p className="text-xs text-muted-foreground">
             {t("settings.chat.autoRouter.laya.label")}: {t(layaStatus)}
@@ -233,7 +254,12 @@ export function AutoRouterSection() {
         )}
         <div className="flex items-center justify-between gap-3">
           {error ? <span className="text-xs text-destructive" role="alert">{error}</span> : <span />}
-          <Button type="button" onClick={save} disabled={!settings || busy}>{busy ? t("common.saving") : t("common.save")}</Button>
+          <div className="flex items-center gap-2">
+            {settings && !settings.automatic && (
+              <Button type="button" variant="outline" onClick={reset} disabled={busy}>{t("settings.chat.autoRouter.resetAutomatic")}</Button>
+            )}
+            <Button type="button" onClick={save} disabled={!settings || busy}>{busy ? t("common.saving") : t("common.save")}</Button>
+          </div>
         </div>
       </div>
     </SettingsSection>
