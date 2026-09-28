@@ -208,5 +208,12 @@ def test_build_profile_defaults_to_a_loaded_model_and_skips_bad_rows():
     assert auto_router.build_profile([]).models == []
 
 
+def test_build_profile_handles_a_large_download_folder():
+    rows = [{"id": f"model-{i}", "tasks": ["general"], "context_length": 4096} for i in range(40)]
+    built = auto_router.build_profile(rows, resident=frozenset({"model-7"}))
+    assert len(built.models) == 40
+    assert built.default_model == "model-7"
+
+
 def test_pinned_choice_has_no_fallbacks():
     assert route(pin="coder").fallbacks == ()

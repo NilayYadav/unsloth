@@ -54,7 +54,7 @@ class RouterRule(BaseModel):
 
 
 class RouterProfile(BaseModel):
-    models: list[RouterModel] = Field(default_factory=list, max_length=16)
+    models: list[RouterModel] = Field(default_factory=list, max_length=256)
     default_model: str | None = None
     rules: list[RouterRule] = Field(default_factory=list, max_length=32)
 
