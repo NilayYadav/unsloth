@@ -1,0 +1,86 @@
+name: pr12011 port probe repro
+on:
+  push:
+    branches: ['pr12011-ci-*']
+permissions:
+  contents: read
+jobs:
+  repro:
+    name: repro (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      PORT: '18895'
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: PR tests (test_studio_pid_files.py)
+        run: |
+          python -m pip install -q -r studio/backend/requirements/studio.txt pytest pytest-timeout
+          python -m pytest -q --timeout=300 studio/backend/tests/test_studio_pid_files.py -k "port or wildcard or loopback" 2>&1 | tail -30
+      - name: Install Unsloth (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          New-Item -ItemType Directory -Force -Path logs | Out-Null
+          $child = '$ErrorActionPreference = ''Stop''; $ProgressPreference = ''SilentlyContinue''; & ./install.ps1 --local --no-torch; exit $LASTEXITCODE'
+          pwsh -NoProfile -ExecutionPolicy Bypass -Command $child 2>&1 | Tee-Object -FilePath logs/install.log | Select-Object -Last 20
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited with code $LASTEXITCODE" }
+          "$env:USERPROFILE\.unsloth\studio\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Install Unsloth (macOS)
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/install-unsloth-local
+        with:
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+          hf-token: ''
+      - name: Another app on 0.0.0.0, then unsloth studio -H 127.0.0.1
+        run: |
+          set -u
+          mkdir -p logs
+          python .github/pr12011/foreign_app.py "$PORT" > logs/foreign.log 2>&1 &
+          for i in $(seq 1 20); do curl -s "http://localhost:$PORT/" | grep -q FOREIGN-APP && break; sleep 1; done
+          echo "before studio: localhost:$PORT -> $(curl -s --max-time 5 http://localhost:$PORT/)"
+          echo "before studio: 127.0.0.1:$PORT -> $(curl -s --max-time 5 http://127.0.0.1:$PORT/)"
+          UNSLOTH_API_ONLY=1 unsloth studio -H 127.0.0.1 -p "$PORT" --api-only > logs/studio.log 2>&1 &
+          ok=""
+          for i in $(seq 1 180); do
+            for p in "$PORT" $((PORT+1)); do
+              if curl -s --max-time 2 "http://127.0.0.1:$p/api/health" | grep -q '"status"'; then ok="$p"; break 2; fi
+            done
+            sleep 2
+          done
+          echo "studio /api/health answered on port: ${ok:-none}"
+          echo "--- studio.log (port lines) ---"
+          grep -iE "port|running|http://|already|in use|10048" logs/studio.log | head -20
+          echo "after studio: localhost:$PORT -> $(curl -s --max-time 5 http://localhost:$PORT/ | head -c 200)"
+          echo "after studio: 127.0.0.1:$PORT -> $(curl -s --max-time 5 http://127.0.0.1:$PORT/ | head -c 200)"
+          if [ "$ok" = "$((PORT+1))" ] && curl -s --max-time 5 "http://127.0.0.1:$PORT/" | grep -q FOREIGN-APP; then
+            echo "RESULT: PASS studio fell back to $((PORT+1)); the other app still owns 127.0.0.1:$PORT"
+          else
+            echo "RESULT: FAIL studio took port ${ok:-none}; 127.0.0.1:$PORT now answers: $(curl -s --max-time 5 http://127.0.0.1:$PORT/ | head -c 80)"
+            exit 1
+          fi
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pr12011-logs-${{ matrix.os }}
+          path: logs/
