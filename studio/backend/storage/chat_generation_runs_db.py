@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import secrets
 import sqlite3
 import threading
@@ -52,7 +51,7 @@ class _PoolEntry:
         self.generation = generation
         # Runs when the last reference goes, which for a short-lived thread is when its thread-local
         # storage is torn down.
-        self._closer = weakref.finalize(self, _close_quietly, conn, os.getpid())
+        self._closer = weakref.finalize(self, _close_quietly, conn)
 
     def release(self) -> None:
         """Close now, and disarm the finalizer so it cannot close it a second time."""
@@ -122,14 +121,7 @@ _pool_generation = 0
 _pool_lock = threading.Lock()
 
 
-# Closing or freeing a handle in a forked child can block on a lock held when it forked.
-_inherited_by_fork: list[sqlite3.Connection] = []
-
-
-def _close_quietly(conn: sqlite3.Connection, owner_pid: int) -> None:
-    if os.getpid() != owner_pid:
-        _inherited_by_fork.append(conn)
-        return
+def _close_quietly(conn: sqlite3.Connection) -> None:
     try:
         conn.close()
     except Exception:
