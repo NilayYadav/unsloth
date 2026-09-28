@@ -62,7 +62,6 @@ import {
 } from "./api/chat-generation-api";
 import {
   TEXT_ATTACHMENT_ACCEPT,
-  decodeHtmlAttachmentBytes,
   extractDocxAttachmentText,
   extractHtmlAttachmentText,
   extractOfficeAttachmentText,
@@ -582,8 +581,7 @@ class HtmlAttachmentAdapter implements AttachmentAdapter {
   }
 
   async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
-    const bytes = new Uint8Array(await attachment.file.arrayBuffer());
-    const text = extractHtmlAttachmentText(decodeHtmlAttachmentBytes(bytes));
+    const text = extractHtmlAttachmentText(await attachment.file.text());
     return {
       id: attachment.id,
       type: "document",
