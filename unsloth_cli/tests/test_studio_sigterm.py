@@ -9,7 +9,10 @@ no stop-and-save for a running training job, no child cleanup.
 """
 
 import ast
+import os
 import signal
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -55,6 +58,22 @@ def test_sigterm_becomes_a_keyboard_interrupt_once(restore_sigterm):
     with pytest.raises(KeyboardInterrupt):
         handler(signal.SIGTERM, None)
     assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
+
+
+def test_a_windows_stop_request_becomes_a_keyboard_interrupt(
+    monkeypatch, tmp_path, restore_sigterm
+):
+    monkeypatch.setattr(studio_mod, "STUDIO_HOME", tmp_path)
+    monkeypatch.setattr(sys, "platform", "win32")
+    request = tmp_path / f"studio-{os.getpid()}.stop"
+    request.touch()
+
+    deadline = time.monotonic() + 10
+    with pytest.raises(KeyboardInterrupt):
+        studio_mod._graceful_shutdown_on_sigterm()
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
+    assert not request.exists()
 
 
 def test_both_server_wait_loops_install_the_handler():

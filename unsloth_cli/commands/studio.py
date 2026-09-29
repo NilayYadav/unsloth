@@ -3006,6 +3006,40 @@ def _graceful_shutdown_on_sigterm() -> None:
         raise KeyboardInterrupt
 
     _signal.signal(_signal.SIGTERM, _handler)
+    if sys.platform == "win32":
+        import threading
+
+        # Windows has no catchable SIGTERM from another process, so `stop` asks through a file.
+        threading.Thread(target = _watch_for_stop_request, daemon = True).start()
+
+
+def _stop_request_path(pid: int) -> Path:
+    return STUDIO_HOME / f"studio-{pid}.stop"
+
+
+def _watch_for_stop_request() -> None:
+    import _thread
+    request = _stop_request_path(os.getpid())
+    while True:
+        time.sleep(0.5)
+        if request.exists():
+            _unlink_quietly(request)
+            _thread.interrupt_main()
+            return
+
+
+def _request_graceful_stop(pid: int) -> bool:
+    request = _stop_request_path(pid)
+    try:
+        request.touch()
+    except OSError:
+        return False
+    for _ in range(10):
+        time.sleep(0.5)
+        if not request.exists():
+            return True
+    _unlink_quietly(request)
+    return False
 
 
 def _signal_stop(pid: int) -> "str | None":
@@ -3015,6 +3049,8 @@ def _signal_stop(pid: int) -> "str | None":
         return f"refusing to signal PID {pid}"
     try:
         if sys.platform == "win32":
+            if _request_graceful_stop(pid):
+                return None
             # /T also stops llama-server children, which otherwise keep GPU and port.
             subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], check = True)
         else:

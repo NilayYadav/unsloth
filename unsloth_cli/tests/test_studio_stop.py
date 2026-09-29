@@ -525,3 +525,45 @@ def test_a_record_whose_pid_is_not_ascii_digits_is_discarded(monkeypatch, tmp_pa
 
     assert result.exit_code == 0, result.output
     assert not (tmp_path / "studio-8901-1.pid").exists()
+
+
+def test_windows_stop_lets_the_server_save_before_it_exits(monkeypatch, tmp_path):
+    studio_mod, live, _killed = _install(monkeypatch, tmp_path, alive = {8550})
+    monkeypatch.setattr(sys, "platform", "win32")
+    taskkills = []
+    monkeypatch.setattr(studio_mod.subprocess, "run", lambda cmd, **_kw: taskkills.append(cmd))
+    request = tmp_path / "studio-8550.stop"
+
+    def server_takes_the_request(_seconds):
+        if request.exists():
+            request.unlink()
+            live.discard(8550)
+
+    monkeypatch.setattr(studio_mod.time, "sleep", server_takes_the_request)
+    _write_pid(tmp_path, "studio-8901-8550.pid", 8550)
+
+    result = _run_stop(studio_mod)
+
+    assert result.exit_code == 0, result.output
+    assert taskkills == []
+    assert live == set()
+    assert "stopped" in result.output
+
+
+def test_windows_stop_force_kills_a_server_that_ignores_the_request(monkeypatch, tmp_path):
+    studio_mod, live, _killed = _install(monkeypatch, tmp_path, alive = {8550})
+    monkeypatch.setattr(sys, "platform", "win32")
+    taskkills = []
+
+    def taskkill(cmd, **_kw):
+        taskkills.append(cmd)
+        live.discard(8550)
+
+    monkeypatch.setattr(studio_mod.subprocess, "run", taskkill)
+    _write_pid(tmp_path, "studio-8901-8550.pid", 8550)
+
+    result = _run_stop(studio_mod)
+
+    assert result.exit_code == 0, result.output
+    assert taskkills == [["taskkill", "/PID", "8550", "/T", "/F"]]
+    assert list(tmp_path.iterdir()) == []
