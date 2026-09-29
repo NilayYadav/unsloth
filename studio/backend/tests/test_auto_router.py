@@ -165,14 +165,14 @@ def test_fallbacks_prefer_loaded_then_default_and_skip_incapable_models(monkeypa
     assert decision.fallbacks == ("general",)
 
 
-def test_loaded_model_is_kept_when_the_task_model_is_not_loaded(monkeypatch):
+def test_task_model_is_loaded_over_a_resident_model_of_another_task(monkeypatch):
     monkeypatch.setattr(auto_router, "_classify", lambda prompt, choices: ("code", 0.95))
     decision = choose_model(
         profile(), prompt="Write a Python function", image=False, tools=False,
         estimated_tokens=20, current_model="general", resident=frozenset({"general"}),
     )
-    assert decision.model == "general"
-    assert decision.reason == "code model is not loaded, keeping the current model"
+    assert decision.model == "coder"
+    assert decision.reason == "code task"
     assert decision.task == "code"
 
 
@@ -237,7 +237,6 @@ def test_named_router_turns_slots_into_a_profile():
     assert by_id["qwen-vl"].vision
     assert by_id["glm"].context_length == 131072
     assert profile.default_model == "qwen"
-    assert profile.load_for_task
 
 
 def test_named_router_loads_the_model_the_user_chose_for_the_task(monkeypatch):

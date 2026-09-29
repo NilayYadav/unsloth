@@ -88,8 +88,8 @@ def test_auto_pools_every_downloaded_model_without_setup(monkeypatch):
     assert profile.default_model == "Llama-3.1-8B"
 
     decision = resolve(payload(), [{"role": "user", "content": "Fix my Python bug"}])
-    assert decision.model == "Llama-3.1-8B"
-    assert decision.reason == "code model is not loaded, keeping the current model"
+    assert decision.model == "Qwen3-Coder-30B"
+    assert decision.reason == "code task"
 
 
 def test_auto_without_downloaded_models_explains_itself(monkeypatch):

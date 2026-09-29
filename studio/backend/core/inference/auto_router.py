@@ -59,7 +59,6 @@ class RouterProfile(BaseModel):
     models: list[RouterModel] = Field(default_factory=list, max_length=256)
     default_model: str | None = None
     rules: list[RouterRule] = Field(default_factory=list, max_length=32)
-    load_for_task: bool = Field(default=False, exclude=True)
 
     @model_validator(mode="after")
     def validate_models(self):
@@ -188,7 +187,7 @@ def router_profile(router: NamedRouter, capabilities: dict[str, dict]) -> Router
             tools=bool(caps.get("tools")),
             context_length=context if isinstance(context, int) and context >= 256 else None,
         ))
-    return RouterProfile(models=models, default_model=router.slots["general"], load_for_task=True)
+    return RouterProfile(models=models, default_model=router.slots["general"])
 
 
 def needs_laya(profile: RouterProfile) -> bool:
@@ -399,13 +398,6 @@ def _decide(
     ):
         return RouterDecision(current_model, "continuing with current model", task)
     if matches and not no_signal:
-        if (
-            not profile.load_for_task
-            and current_model in by_id
-            and current_model in resident
-            and not any(m in resident for m in matches)
-        ):
-            return RouterDecision(current_model, f"{task} model is not loaded, keeping the current model", task)
         return RouterDecision(_prefer(matches, resident, profile.default_model), f"{task} task", task)
     if profile.default_model in by_id:
         return RouterDecision(
