@@ -20,6 +20,7 @@ from typing import Callable, Generator, Optional
 
 from loggers import get_logger
 
+from core.inference.llama_cpp import _has_answer_artifact
 from core.inference.tool_call_parser import (
     _GEMMA_BARE_TC_PREFIX_RE,
     _balanced_brace_end,
@@ -1210,6 +1211,7 @@ def run_safetensors_tool_loop(
                     and not any(record.executed for record in tool_controller.history)
                     and not is_reprompt_repeat(intent_text, last_reprompt_text)
                     and is_short_intent_without_action(intent_text)
+                    and not _has_answer_artifact(intent_text)
                 ):
                     reprompt_count += 1
                     last_reprompt_text = intent_text
