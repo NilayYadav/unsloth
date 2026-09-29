@@ -1,0 +1,227 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026-present the Unsloth AI Inc. team. All rights reserved.
+
+# Test-only: by-hand MLX check of H-004 (finished code answer re-prompted on non-GGUF models),
+# main vs branch on real Apple Silicon. Not for merging.
+
+name: repro-h004-mlx
+
+on:
+  push:
+    branches: [repro-h004-mlx]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mlx:
+    name: MLX chat (${{ matrix.side }})
+    runs-on: macos-15
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - side: main
+            repo: unslothai/unsloth
+            ref: fea95db5fc9b874eb9cf78a5c5258280c0fc539b
+          - side: branch
+            repo: NilayYadav/unsloth
+            ref: fd8c2a064c8ddb9988e6d5d73f66c92d4d2b6374
+    env:
+      STUDIO_PORT: '18950'
+      UNSLOTH_SKIP_AUTOSTART: '1'
+      SIDE: ${{ matrix.side }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Which code is under test
+        run: |
+          mkdir -p logs
+          {
+            echo "side=$SIDE repo=${{ matrix.repo }} head=$(git rev-parse HEAD)"
+            uname -a; sysctl -n hw.memsize; sysctl -n machdep.cpu.brand_string
+            echo "--- re-prompt condition in safetensors_agentic.py:"
+            grep -n "is_short_intent_without_action(intent_text)" -A1 studio/backend/core/inference/safetensors_agentic.py
+          } | tee logs/checkout.txt
+
+      - name: Install Studio (./install.sh --local)
+        timeout-minutes: 75
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          bash install.sh --local 2>&1 | tee logs/install.log | while IFS= read -r l || [ -n "$l" ]; do printf '[%4ds] %s\n' "$SECONDS" "$l"; done
+
+      - name: Start unsloth studio
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.unsloth/studio/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$HOME/.unsloth/studio/bin:$PATH"
+          PW=$(openssl rand -hex 12)
+          echo "::add-mask::$PW"
+          echo "STUDIO_PW=$PW" >> "$GITHUB_ENV"
+          UNSLOTH_STUDIO_PASSWORD="$PW" nohup unsloth studio -H 127.0.0.1 -p "$STUDIO_PORT" > logs/studio.log 2>&1 &
+          echo "STUDIO_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 300); do
+            if curl -fs --max-time 5 "http://127.0.0.1:$STUDIO_PORT/api/health" > logs/health.json 2>/dev/null; then
+              cat logs/health.json; echo; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::studio never became healthy"; tail -80 logs/studio.log; exit 1
+
+      - name: Chat like the UI (Search on, nudge default)
+        timeout-minutes: 80
+        run: |
+          cat > /tmp/drive.py <<'PY'
+          import json, os, re, sys, time, urllib.request, urllib.error
+
+          BASE = f"http://127.0.0.1:{os.environ['STUDIO_PORT']}"
+          LOG = "logs/studio.log"
+          OUT = "logs/transcripts.json"
+          MODELS = ["mlx-community/Qwen3-4B-4bit", "mlx-community/Qwen3-1.7B-4bit", "mlx-community/Qwen3-0.6B-4bit"]
+          TRIGGER = [
+              "Can you create a small Python function to flatten a nested list? Tell me what you'll do, then do it.",
+              "Write a Python function that converts Celsius to Fahrenheit. Start by saying what you will write.",
+          ]
+          PLAN_ONLY = [
+              "What is the latest stable Python release? Tell me what you'll do first.",
+          ]
+          PLAIN = ["What is 17 times 23?"]
+          ATTEMPTS = int(os.environ.get("ATTEMPTS", "3"))
+
+          def call(method, path, body=None, token=None, timeout=1800, headers=None):
+              h = {"Content-Type": "application/json"}
+              if token:
+                  h["Authorization"] = f"Bearer {token}"
+              h.update(headers or {})
+              req = urllib.request.Request(BASE + path, data=json.dumps(body).encode() if body is not None else None, headers=h, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=timeout) as r:
+                      return r.status, r.read().decode()
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read().decode()
+
+          def log_size():
+              return os.path.getsize(LOG) if os.path.exists(LOG) else 0
+
+          def log_since(off):
+              with open(LOG, "rb") as f:
+                  f.seek(off)
+                  return f.read().decode(errors="replace")
+
+          st, body = call("POST", "/api/auth/login", {"username": "unsloth", "password": os.environ["STUDIO_PW"]})
+          print("login", st)
+          token = json.loads(body)["access_token"]
+          st, sysinfo = call("GET", "/api/system", token=token)
+          print("system", st, sysinfo[:400])
+
+          loaded = None
+          load_attempts = []
+          for m in MODELS:
+              st, body = call("POST", "/api/inference/load", {"model_path": m, "force_cancel_active": True}, token=token, timeout=3600)
+              load_attempts.append({"model": m, "status": st, "body": body[:1500]})
+              print("load", m, st, body[:300], flush=True)
+              if st == 200:
+                  loaded = m
+                  break
+          if not loaded:
+              json.dump({"system": sysinfo, "load_attempts": load_attempts, "runs": []}, open(OUT, "w"), indent=1)
+              sys.exit("no MLX model loaded")
+
+          def fences(text):
+              return [b.strip() for b in re.findall(r"```[^\n`]*\n(.*?)```", text, re.S)]
+
+          def chat(prompt):
+              body = {
+                  "model": loaded, "stream": True,
+                  "messages": [{"role": "user", "content": prompt}],
+                  "enable_tools": True, "enabled_tools": ["web_search"],
+                  "permission_mode": "auto", "bypass_permissions": False,
+                  "auto_heal_tool_calls": True, "nudge_tool_calls": True,
+                  "max_tool_calls_per_message": 25, "tool_call_timeout": 300,
+              }
+              off = log_size()
+              req = urllib.request.Request(BASE + "/v1/chat/completions", data=json.dumps(body).encode(),
+                                           headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}", "X-Unsloth-Events": "1"}, method="POST")
+              raw, text, statuses, tools = [], "", [], []
+              t0 = time.time()
+              try:
+                  with urllib.request.urlopen(req, timeout=1500) as r:
+                      for line in r:
+                          line = line.decode(errors="replace").rstrip("\n")
+                          if not line.startswith("data: "):
+                              continue
+                          raw.append(line)
+                          if line == "data: [DONE]":
+                              continue
+                          try:
+                              ev = json.loads(line[6:])
+                          except Exception:
+                              continue
+                          if ev.get("type") == "tool_status":
+                              statuses.append(ev.get("content"))
+                          elif ev.get("type") in ("tool_start", "tool_end"):
+                              tools.append(ev.get("type") + ":" + str(ev.get("tool_name") or ev.get("name")))
+                          for ch in ev.get("choices") or []:
+                              text += (ch.get("delta") or {}).get("content") or ""
+              except Exception as e:
+                  statuses.append(f"CLIENT ERROR {e!r}")
+              time.sleep(1)
+              logs = log_since(off)
+              blocks = fences(text)
+              return {
+                  "prompt": prompt, "seconds": round(time.time() - t0, 1),
+                  "nudge_status": "Nudging tool calls" in statuses,
+                  "statuses": statuses, "tools": tools,
+                  "code_blocks": len(blocks),
+                  "duplicate_code_block": len(blocks) != len(set(blocks)),
+                  "reprompt_log_lines": [l for l in logs.splitlines() if "re-prompt" in l.lower()],
+                  "reply": text, "raw_sse": raw,
+              }
+
+          runs = []
+          for kind, prompts in (("trigger", TRIGGER), ("plan_only", PLAN_ONLY), ("plain", PLAIN)):
+              n = ATTEMPTS if kind != "plain" else 1
+              for p in prompts:
+                  for a in range(n):
+                      r = chat(p)
+                      r.update(kind=kind, attempt=a + 1)
+                      runs.append(r)
+                      print(json.dumps({k: r[k] for k in ("kind", "attempt", "prompt", "seconds", "nudge_status", "code_blocks", "duplicate_code_block", "reprompt_log_lines", "tools")}), flush=True)
+                      print("REPLY>>>", r["reply"][:3000].replace("\n", "\n        "), flush=True)
+                      json.dump({"side": os.environ["SIDE"], "model": loaded, "system": sysinfo, "load_attempts": load_attempts, "runs": runs}, open(OUT, "w"), indent=1)
+
+          print("\n==== SUMMARY side=%s model=%s ====" % (os.environ["SIDE"], loaded))
+          for r in runs:
+              print(f"{r['kind']:9} #{r['attempt']} nudge={r['nudge_status']!s:5} dup_code={r['duplicate_code_block']!s:5} blocks={r['code_blocks']} reprompts={len(r['reprompt_log_lines'])} | {r['prompt'][:60]}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as s:
+              s.write(f"### {os.environ['SIDE']} ({loaded})\n\n| kind | # | nudge | duplicate code | code blocks | re-prompt log lines | prompt |\n|---|---|---|---|---|---|---|\n")
+              for r in runs:
+                  s.write(f"| {r['kind']} | {r['attempt']} | {r['nudge_status']} | {r['duplicate_code_block']} | {r['code_blocks']} | {len(r['reprompt_log_lines'])} | {r['prompt'][:70]} |\n")
+          PY
+          python3 /tmp/drive.py
+
+      - name: Stop studio
+        if: always()
+        run: |
+          [ -n "${STUDIO_PID:-}" ] && kill "$STUDIO_PID" 2>/dev/null || true
+          grep -i "re-prompt\|mlx\|Loading\|Traceback" logs/studio.log | tail -80 || true
+
+      - name: Upload transcripts and logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: repro-h004-mlx-${{ matrix.side }}
+          path: logs/
+          retention-days: 14
