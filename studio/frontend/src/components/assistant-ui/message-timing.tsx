@@ -55,7 +55,7 @@ export const MessageTiming: FC<{
   // contextUsage.cachedTokens from a prior turn.
   const cacheHits =
     st?.cache_n ?? custom?.contextUsage?.cachedTokens ?? 0;
-  // Cache writes are reported by Anthropic and OpenRouter.
+  // Anthropic-only cache-write count.
   const cacheWrites = custom?.contextUsage?.cacheWriteTokens ?? 0;
   // DiffusionGemma reports separately-labelled throughput (no prefill, so no "prompt
   // speed"), matching the CLI: in-step parallel, effective (canvas*blocks/wall), and

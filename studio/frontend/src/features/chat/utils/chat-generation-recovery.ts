@@ -118,19 +118,10 @@ type RecoveryUsage = {
   prompt_tokens?: unknown;
   completion_tokens?: unknown;
   total_tokens?: unknown;
-  prompt_tokens_details?: { cached_tokens?: unknown; cache_write_tokens?: unknown };
+  prompt_tokens_details?: { cached_tokens?: unknown };
   cache_creation_input_tokens?: unknown;
   cache_read_input_tokens?: unknown;
 };
-
-/** Tokens billed at the cache-write premium: Anthropic reports them top-level, OpenRouter in the details. */
-export function usageCacheWriteTokens(usage: RecoveryUsage | undefined): number {
-  if (typeof usage?.cache_creation_input_tokens === "number") {
-    return usage.cache_creation_input_tokens;
-  }
-  const details = usage?.prompt_tokens_details?.cache_write_tokens;
-  return typeof details === "number" ? details : 0;
-}
 
 type RecoveryTimings = {
   cache_n?: unknown;
@@ -193,7 +184,10 @@ export function recoveredGenerationFinalMetadata(options: {
         (typeof usage.cache_read_input_tokens === "number"
           ? usage.cache_read_input_tokens
           : 0),
-      cacheWriteTokens: usageCacheWriteTokens(usage),
+      cacheWriteTokens:
+        typeof usage.cache_creation_input_tokens === "number"
+          ? usage.cache_creation_input_tokens
+          : 0,
       modelId,
     };
   }

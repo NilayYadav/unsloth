@@ -83,8 +83,8 @@ import {
   type ExternalProviderConfig,
   getExternalProviderApiKey,
   parseExternalModelId,
-  promptCacheTtlAppliesToModel,
-  promptCachingAppliesToModel,
+  supportsProviderPromptCacheTtl,
+  supportsProviderPromptCaching,
 } from "./external-providers";
 import {
   BUILTIN_PRESETS,
@@ -816,24 +816,18 @@ export function ChatSettingsPanel({
   const systemPromptEditorDirty =
     systemPromptDraft !== currentSystemPrompt ||
     systemVariablesDraft !== currentSystemVariables;
-  const externalSelection = currentCheckpoint
-    ? parseExternalModelId(currentCheckpoint)
-    : null;
   const showPromptCacheTtlControl = Boolean(
     activeExternalProvider &&
-      promptCacheTtlAppliesToModel(
-        activeExternalProvider.providerType,
-        externalSelection?.modelId,
-      ),
+      supportsProviderPromptCacheTtl(activeExternalProvider.providerType),
   );
   const showPromptCachingControl =
     activeExternalProvider != null &&
-    promptCachingAppliesToModel(
-      activeExternalProvider.providerType,
-      externalSelection?.modelId,
-    );
+    supportsProviderPromptCaching(activeExternalProvider.providerType);
   const promptCachingEnabled =
     activeExternalProvider?.enablePromptCaching !== false;
+  const externalSelection = currentCheckpoint
+    ? parseExternalModelId(currentCheckpoint)
+    : null;
   // The OpenRouter cap comes from the live catalog, which can land after this panel renders.
   useSyncExternalStore(subscribeModelCatalog, modelCatalogVersion);
   const maxTokensMax = isExternalModel
