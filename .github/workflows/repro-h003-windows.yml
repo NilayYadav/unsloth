@@ -1,0 +1,157 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026-present the Unsloth AI Inc. team. All rights reserved.
+
+# Test-only: `unsloth studio stop` on a real Windows install, main vs the fix branch.
+
+name: repro H-003 windows studio stop
+
+on:
+  push:
+    branches: [repro-h003-windows]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stop:
+    name: studio stop (${{ matrix.side }})
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - side: main
+            repository: unslothai/unsloth
+            ref: fea95db5fc9b874eb9cf78a5c5258280c0fc539b
+          - side: branch
+            repository: NilayYadav/unsloth
+            ref: da3c719e275ea00278463330590cf28705dac571
+    defaults:
+      run:
+        shell: bash
+    env:
+      STUDIO_PORT: '18895'
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: '1'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: ${{ matrix.repository }}
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+
+      - name: Show checked-out commit
+        run: |
+          git log --oneline -1
+          grep -n "_request_graceful_stop" unsloth_cli/commands/studio.py || echo "no graceful stop request in this tree"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Pre-install Windows tweaks (npm 11 + Defender exclusions)
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          npm install -g 'npm@^11' 2>&1 | Out-Host
+          foreach ($p in @(
+            "$env:USERPROFILE\.unsloth",
+            "$env:USERPROFILE\AppData\Local\uv",
+            "$env:GITHUB_WORKSPACE\studio\frontend\node_modules",
+            "$env:GITHUB_WORKSPACE\studio\frontend\dist"
+          )) {
+            try { Add-MpPreference -ExclusionPath $p -ErrorAction Stop } catch { Write-Host "skip $p" }
+          }
+
+      - name: Install Unsloth (install.ps1 --local --no-torch)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          New-Item -ItemType Directory -Force -Path logs | Out-Null
+          $child = '$ErrorActionPreference = ''Stop''; $ProgressPreference = ''SilentlyContinue''; & ./install.ps1 --local --no-torch; exit $LASTEXITCODE'
+          pwsh -NoProfile -ExecutionPolicy Bypass -Command $child 2>&1 | Tee-Object -FilePath logs/install.log | Select-Object -Last 40
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited with code $LASTEXITCODE" }
+
+      - name: Add Unsloth shim to GITHUB_PATH
+        run: |
+          SHIM_DIR=~/.unsloth/studio/bin
+          ls -la "$SHIM_DIR"
+          cygpath -w "$SHIM_DIR" >> "$GITHUB_PATH"
+
+      - name: Start unsloth studio in the background
+        run: |
+          mkdir -p logs
+          which unsloth
+          unsloth studio -H 127.0.0.1 -p "$STUDIO_PORT" > logs/studio.log 2>&1 &
+          echo "STUDIO_BASH_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for /api/health
+        run: |
+          for i in $(seq 1 180); do
+            if curl -fsS "http://127.0.0.1:$STUDIO_PORT/api/health" -o logs/health.json 2>/dev/null; then
+              cat logs/health.json; echo; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::server never became healthy"; tail -80 logs/studio.log; exit 1
+
+      - name: Process listing and STUDIO_HOME before stop
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'unsloth|run\.py|llama' } |
+            Select-Object ProcessId, ParentProcessId, Name, CommandLine | Format-Table -AutoSize -Wrap |
+            Out-String -Width 400 | Tee-Object -FilePath logs/processes-before.txt
+          Get-ChildItem "$env:USERPROFILE\.unsloth\studio" -File | Select-Object Name, Length |
+            Out-String | Tee-Object -FilePath logs/studio-home-before.txt
+
+      - name: unsloth studio stop (from a second shell)
+        run: |
+          start=$(date +%s)
+          unsloth studio stop > logs/stop-output.txt 2>&1
+          echo $? > logs/stop-exit.txt
+          end=$(date +%s)
+          echo "$((end - start))" > logs/stop-seconds.txt
+          echo "--- stop output (exit $(cat logs/stop-exit.txt), $(cat logs/stop-seconds.txt)s):"
+          cat logs/stop-output.txt
+
+      - name: Wait, then capture the aftermath
+        if: always()
+        shell: pwsh
+        run: |
+          Start-Sleep -Seconds 20
+          Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'unsloth|run\.py|llama' } |
+            Select-Object ProcessId, ParentProcessId, Name, CommandLine | Format-Table -AutoSize -Wrap |
+            Out-String -Width 400 | Tee-Object -FilePath logs/processes-after.txt
+          $home_dir = "$env:USERPROFILE\.unsloth\studio"
+          $left = Get-ChildItem $home_dir -File | Where-Object { $_.Name -like '*.pid' -or $_.Name -like '*.stop' }
+          "pid/.stop files left in ${home_dir}:" | Tee-Object -FilePath logs/studio-home-after.txt
+          if ($left) { $left | Select-Object Name, Length | Out-String | Tee-Object -FilePath logs/studio-home-after.txt -Append }
+          else { "none" | Tee-Object -FilePath logs/studio-home-after.txt -Append }
+
+      - name: Key lines
+        if: always()
+        run: |
+          echo "=== side: ${{ matrix.side }} (${{ matrix.ref }})"
+          echo "=== stop exit: $(cat logs/stop-exit.txt 2>/dev/null), seconds: $(cat logs/stop-seconds.txt 2>/dev/null)"
+          echo "=== stop output:"; cat logs/stop-output.txt 2>/dev/null
+          echo "=== shutdown lines in the server log:"
+          grep -nE "Graceful shutdown initiated|All subprocesses cleaned up|Shutting down|Stopping training|saving a checkpoint" logs/studio.log || echo "(none)"
+          echo "=== last 25 server log lines:"; tail -25 logs/studio.log
+          echo "=== pid/.stop files after:"; cat logs/studio-home-after.txt 2>/dev/null
+          echo "=== processes after:"; cat logs/processes-after.txt 2>/dev/null
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: repro-h003-${{ matrix.side }}
+          path: logs/
+          retention-days: 7
