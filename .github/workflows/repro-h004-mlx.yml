@@ -88,8 +88,9 @@ jobs:
 
           BASE = f"http://127.0.0.1:{os.environ['STUDIO_PORT']}"
           LOG = "logs/studio.log"
-          OUT = "logs/transcripts.json"
-          MODELS = ["mlx-community/Qwen3-4B-4bit", "mlx-community/Qwen3-1.7B-4bit", "mlx-community/Qwen3-0.6B-4bit"]
+          OUT = os.environ.get("OUT", "logs/transcripts.json")
+          PHASE = os.environ.get("PHASE", "trigger")
+          MODELS = os.environ.get("MODELS", "mlx-community/Qwen3-4B-4bit,mlx-community/Qwen3-1.7B-4bit,mlx-community/Qwen3-0.6B-4bit").split(",")
           TRIGGER = [
               "Can you create a small Python function to flatten a nested list? Tell me what you'll do, then do it.",
               "Write a Python function that converts Celsius to Fahrenheit. Start by saying what you will write.",
@@ -190,10 +191,17 @@ jobs:
                   "reply": text, "raw_sse": raw,
               }
 
+          PLAN = [
+              ("plan_only", "Write a Python function that converts Celsius to Fahrenheit. Start by saying what you will write.", ATTEMPTS),
+              ("plan_only", "What is the latest stable Python release? Tell me what you'll do first.", 2),
+          ]
+          if PHASE == "plan":
+              sets = PLAN
+          else:
+              sets = [("trigger", p, ATTEMPTS) for p in TRIGGER] + [("plan_only", p, ATTEMPTS) for p in PLAN_ONLY] + [("plain", p, 1) for p in PLAIN]
           runs = []
-          for kind, prompts in (("trigger", TRIGGER), ("plan_only", PLAN_ONLY), ("plain", PLAIN)):
-              n = ATTEMPTS if kind != "plain" else 1
-              for p in prompts:
+          for kind, p, n in sets:
+              if True:
                   for a in range(n):
                       r = chat(p)
                       r.update(kind=kind, attempt=a + 1)
@@ -202,15 +210,24 @@ jobs:
                       print("REPLY>>>", r["reply"][:3000].replace("\n", "\n        "), flush=True)
                       json.dump({"side": os.environ["SIDE"], "model": loaded, "system": sysinfo, "load_attempts": load_attempts, "runs": runs}, open(OUT, "w"), indent=1)
 
-          print("\n==== SUMMARY side=%s model=%s ====" % (os.environ["SIDE"], loaded))
+          print("\n==== SUMMARY side=%s phase=%s model=%s ====" % (os.environ["SIDE"], PHASE, loaded))
           for r in runs:
               print(f"{r['kind']:9} #{r['attempt']} nudge={r['nudge_status']!s:5} dup_code={r['duplicate_code_block']!s:5} blocks={r['code_blocks']} reprompts={len(r['reprompt_log_lines'])} | {r['prompt'][:60]}")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as s:
-              s.write(f"### {os.environ['SIDE']} ({loaded})\n\n| kind | # | nudge | duplicate code | code blocks | re-prompt log lines | prompt |\n|---|---|---|---|---|---|---|\n")
+              s.write(f"### {os.environ['SIDE']} {PHASE} ({loaded})\n\n| kind | # | nudge | duplicate code | code blocks | re-prompt log lines | prompt |\n|---|---|---|---|---|---|---|\n")
               for r in runs:
                   s.write(f"| {r['kind']} | {r['attempt']} | {r['nudge_status']} | {r['duplicate_code_block']} | {r['code_blocks']} | {len(r['reprompt_log_lines'])} | {r['prompt'][:70]} |\n")
           PY
           python3 /tmp/drive.py
+
+      - name: Plan-only adjacent flow (MLX Qwen2.5-3B)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 45
+        env:
+          PHASE: plan
+          MODELS: mlx-community/Qwen2.5-3B-Instruct-4bit,mlx-community/Qwen2.5-1.5B-Instruct-4bit
+          OUT: logs/transcripts-plan.json
+        run: python3 /tmp/drive.py
 
       - name: Stop studio
         if: always()
