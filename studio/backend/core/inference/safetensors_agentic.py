@@ -20,7 +20,6 @@ from typing import Callable, Generator, Optional
 
 from loggers import get_logger
 
-from core.inference.llama_cpp import _has_answer_artifact
 from core.inference.tool_call_parser import (
     _GEMMA_BARE_TC_PREFIX_RE,
     _balanced_brace_end,
@@ -357,12 +356,7 @@ def _status_for_tool(tool_name: str, arguments: dict) -> str:
     return status_for_tool(tool_name, arguments)
 
 
-def _reprompt_intent_text(
-    text: str,
-    *,
-    reasoning_prefilled: bool = False,
-    visible_only: bool = False,
-) -> str:
+def _reprompt_intent_text(text: str, *, reasoning_prefilled: bool = False) -> str:
     """Return visible answer text for the plan-without-action classifier.
 
     Safetensors reasoning shares the cumulative text channel with the answer.
@@ -375,11 +369,11 @@ def _reprompt_intent_text(
     if reasoning_prefilled:
         close = _THINK_CLOSE_RE.search(text)
         if close is None:
-            return "" if visible_only else text.strip()
+            return text.strip()
         prefilled_reasoning = text[: close.end()].strip()
         text = text[close.end() :].strip()
         if not text:
-            return "" if visible_only else prefilled_reasoning
+            return prefilled_reasoning
 
     spans = _think_spans_outside_tool_markup(text)
     if not spans:
@@ -396,7 +390,7 @@ def _reprompt_intent_text(
 
     visible_text = "".join(visible).strip()
     reasoning_text = "".join(reasoning).strip()
-    if visible_text or visible_only:
+    if visible_text:
         return visible_text
     return "\n".join(part for part in (prefilled_reasoning, reasoning_text) if part).strip()
 
@@ -1216,17 +1210,6 @@ def run_safetensors_tool_loop(
                     and not any(record.executed for record in tool_controller.history)
                     and not is_reprompt_repeat(intent_text, last_reprompt_text)
                     and is_short_intent_without_action(intent_text)
-                    and not _has_answer_artifact(
-                        strip_tool_markup(
-                            _reprompt_intent_text(
-                                content_accum,
-                                reasoning_prefilled = reasoning_prefilled,
-                                visible_only = True,
-                            ),
-                            final = True,
-                            enabled_tool_names = _enabled_tool_names,
-                        )
-                    )
                 ):
                     reprompt_count += 1
                     last_reprompt_text = intent_text
