@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
 import {
   Unzip,
   UnzipInflate,
@@ -30,6 +31,7 @@ const {
   isTextAttachment,
   parseAttachmentText,
   readAttachmentText,
+  readDocxNotesText,
   repackDocxAttachmentArchive,
   repackDocxPreviewArchive,
   truncateAttachmentPreviewText,
@@ -1040,6 +1042,81 @@ test("repackDocxAttachmentArchive refuses an archive that unpacks past the ceili
     () => repackDocxAttachmentArchive("wide.docx", archive),
     /DOCX file is too large: wide\.docx/,
   );
+});
+
+test("readDocxNotesText reads the footnotes and endnotes extractRawText skips", () => {
+  const w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const notes = (kind: string, text: string) =>
+    strToU8(
+      `<w:${kind}s ${w}>` +
+        `<w:${kind} w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:${kind}>` +
+        `<w:${kind} w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:${kind}>` +
+        `<w:${kind} w:id="1"><w:p><w:r><w:${kind}Ref/></w:r><w:r><w:t xml:space="preserve"> ${text}</w:t></w:r></w:p></w:${kind}>` +
+        `</w:${kind}s>`,
+    );
+  const archive = repackDocxAttachmentArchive(
+    "paper.docx",
+    zipSync({
+      "[Content_Types].xml": strToU8("<Types/>"),
+      "_rels/.rels": relationships([["officeDocument", "word/document.xml"]]),
+      "word/document.xml": strToU8(
+        `<w:document ${w}><w:body><w:p><w:r><w:t>Claim FNREF.</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r></w:p></w:body></w:document>`,
+      ),
+      "word/_rels/document.xml.rels": relationships([
+        ["footnotes", "notes/foot.xml"],
+        ["endnotes", "endnotes.xml"],
+      ]),
+      "word/notes/foot.xml": notes("footnote", "Source: FOOTNOTEBODY"),
+      "word/endnotes.xml": notes("endnote", "Source: ENDNOTEBODY"),
+    }),
+  );
+  const original = (globalThis as { DOMParser?: unknown }).DOMParser;
+  (globalThis as { DOMParser?: unknown }).DOMParser = XmlDomParser;
+  try {
+    assert.equal(
+      readDocxNotesText(archive),
+      "Footnotes\n[1] Source: FOOTNOTEBODY\n\nEndnotes\n[1] Source: ENDNOTEBODY",
+    );
+  } finally {
+    (globalThis as { DOMParser?: unknown }).DOMParser = original;
+  }
+});
+
+test("readDocxNotesText skips move sources, deletions and text box fallbacks", () => {
+  const w = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const mc = 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"';
+  const run = (text: string) => `<w:r><w:t xml:space="preserve">${text}</w:t></w:r>`;
+  const box = `<w:txbxContent><w:p>${run("BOX")}</w:p></w:txbxContent>`;
+  const archive = repackDocxAttachmentArchive(
+    "moved.docx",
+    zipSync({
+      "[Content_Types].xml": strToU8("<Types/>"),
+      "_rels/.rels": relationships([["officeDocument", "word/document.xml"]]),
+      "word/document.xml": strToU8(`<w:document ${w}><w:body/></w:document>`),
+      "word/_rels/document.xml.rels": relationships([["footnotes", "footnotes.xml"]]),
+      "word/footnotes.xml": strToU8(
+        `<w:footnotes ${w} ${mc}><w:footnote w:id="1"><w:p>` +
+          run("Keep") +
+          `<w:moveFrom w:id="7">${run(" MOVED")}</w:moveFrom>` +
+          `<w:del w:id="8"><w:r><w:delText> GONE</w:delText></w:r></w:del>` +
+          run(" COVID") + "<w:r><w:noBreakHyphen/></w:r>" + run("19") +
+          `<w:moveTo w:id="9">${run(" MOVED")}</w:moveTo>` +
+          `<w:r><mc:AlternateContent><mc:Choice Requires="wps">${box}</mc:Choice>` +
+          `<mc:Fallback>${box}</mc:Fallback></mc:AlternateContent></w:r>` +
+          "</w:p></w:footnote></w:footnotes>",
+      ),
+    }),
+  );
+  const original = (globalThis as { DOMParser?: unknown }).DOMParser;
+  (globalThis as { DOMParser?: unknown }).DOMParser = XmlDomParser;
+  try {
+    assert.equal(
+      readDocxNotesText(archive),
+      "Footnotes\n[1] Keep COVID-19 MOVED BOX",
+    );
+  } finally {
+    (globalThis as { DOMParser?: unknown }).DOMParser = original;
+  }
 });
 
 /** A preview only colours what the filename says is source; extracted document text is prose whatever the file was called. */

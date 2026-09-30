@@ -757,6 +757,79 @@ export function repackDocxAttachmentArchive(
   return zipSync(archive.entries, { level: 0 });
 }
 
+const WORDPROCESSINGML_NAMESPACE =
+  "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const DOCX_NOTE_BREAKS = new Set(["p", "tab", "br", "cr"]);
+const DOCX_NOTE_SKIP = new Set(["del", "moveFrom", "rt", "Fallback"]);
+
+function docxNoteText(node: Node): string {
+  let text = "";
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType !== 1) continue;
+    const element = child as Element;
+    const name = element.localName;
+    if (DOCX_NOTE_SKIP.has(name)) continue;
+    if (name === "t" && element.namespaceURI === WORDPROCESSINGML_NAMESPACE) {
+      text += element.textContent ?? "";
+    } else if (name === "noBreakHyphen") {
+      text += "-";
+    } else {
+      text += (DOCX_NOTE_BREAKS.has(name) ? " " : "") + docxNoteText(element);
+    }
+  }
+  return text;
+}
+
+export function readDocxNotesText(archive: Uint8Array): string {
+  const names = new Set<string>();
+  const read = (name: string) =>
+    unzipSync(archive, {
+      filter: (entry) => {
+        names.add(entry.name);
+        return entry.name === name;
+      },
+    })[name];
+  const targetsOf = (path: string) =>
+    readDocxXmlTargets(
+      read(docxRelationshipsPath(path)),
+      path.slice(0, Math.max(0, path.lastIndexOf("/"))),
+    );
+  const resolve = (targets: string[] | undefined, fallback: string) =>
+    targets?.find((path) => names.has(path)) ?? fallback;
+  const main = resolve(
+    targetsOf("").get(DOCX_MAIN_DOCUMENT_TYPE),
+    DOCX_MAIN_DOCUMENT_FALLBACK,
+  );
+  const mainTargets = targetsOf(main);
+  const sections: string[] = [];
+  for (const [kind, heading] of [
+    ["footnote", "Footnotes"],
+    ["endnote", "Endnotes"],
+  ]) {
+    const xml = read(
+      resolve(
+        mainTargets.get(`${DOCX_RELATIONSHIP_NAMESPACE}${kind}s`),
+        `word/${kind}s.xml`,
+      ),
+    );
+    if (!xml) continue;
+    const doc = new DOMParser().parseFromString(strFromU8(xml), "application/xml");
+    const lines = [heading];
+    let number = 0;
+    for (const note of Array.from(
+      doc.getElementsByTagNameNS(WORDPROCESSINGML_NAMESPACE, kind),
+    )) {
+      const type = note.getAttributeNS(WORDPROCESSINGML_NAMESPACE, "type");
+      if (type && type !== "normal") continue;
+      number++;
+      const text = docxNoteText(note).replace(/\s+/g, " ").trim();
+      if (text) lines.push(`[${number}] ${text}`);
+    }
+    if (lines.length > 1) sections.push(lines.join("\n"));
+  }
+  return sections.join("\n\n");
+}
+
 const XML_TOKEN_RE =
   /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<[?!][\s\S]*?>|<(\/?)([^\s/>]+)(?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*(\/?)>/g;
 const PARAGRAPH_RE = /<(?:[\w.-]+:)?p[\s/>]/;
@@ -1067,7 +1140,7 @@ export async function extractDocxAttachmentText(file: File): Promise<string> {
   const { value } = await mammoth.extractRawText({
     arrayBuffer: toArrayBuffer(repacked),
   });
-  return value;
+  return value + readDocxNotesText(repacked);
 }
 
 const HTML_PRESCAN_BYTES = 1024;
