@@ -269,7 +269,6 @@ export type { ChatModelLoadedInput } from "./lib/chat-model-loaded";
 export {
   customProviderDisplayName,
   isCustomProviderType,
-  isDecisionConnection,
   isExternalModelId,
   parseExternalModelId,
 } from "./external-providers";
