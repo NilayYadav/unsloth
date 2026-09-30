@@ -322,10 +322,12 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             const cptTargetOverrides = shouldApplyCptTargetDefaults
               ? { targetModules: cptDefaultsPatch.targetModules }
               : {};
+            // Only trainOnCompletions: CPT's forced adapter values are not the model's.
             // Targets are pinned to what cptDefaultsPatch resolved FROM, so the summary's
             // resolveCptTargetModules(baseline) reproduces the live set even when the model
             // config carries none and cptTargetModules falls back to live state.
             const cptBaselineOverride = {
+              trainOnCompletions: cptDefaultsPatch.trainOnCompletions,
               targetModules: [...cptTargetModules],
             };
             const modelDefaultsBaseline = {
@@ -381,17 +383,9 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
                     : {}),
                 }
               : {};
-            const cptCompletionProvenanceRefresh =
-              inCpt && modelDefaultsPatch.trainOnCompletions !== undefined
-                ? {
-                    trainOnCompletionsBeforeCpt:
-                      modelDefaultsPatch.trainOnCompletions,
-                  }
-                : {};
             const cptProvenanceRefresh = {
               ...cptTargetProvenanceRefresh,
               ...cptLoraProvenanceRefresh,
-              ...cptCompletionProvenanceRefresh,
             };
             const cptFallbackProvenanceRefresh = {
               ...(shouldApplyCptTargetDefaults
@@ -399,10 +393,6 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
                 : {}),
               ...(requestedSelectionOwnsLoraSnapshot
                 ? cptLoraProvenanceRefresh
-                : {}),
-              ...(requestedSelectionOwnsLoraSnapshot &&
-              !_trainOnCompletionsManuallySet
-                ? cptCompletionProvenanceRefresh
                 : {}),
             };
 
@@ -602,12 +592,6 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
               // Audio-capable vision model (e.g. gemma3n) + audio dataset → uncheck.
               if (isAudioModel && isVisionModel && isAudio) {
                 updates.trainOnCompletions = false;
-              }
-              if (updates.trainOnCompletions === false) {
-                updates.trainingMethodProvenance = {
-                  ...current.trainingMethodProvenance,
-                  trainOnCompletionsBeforeCpt: null,
-                };
               }
             }
             set(updates);
@@ -868,7 +852,6 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
           modelDefaultsAppliedFor?: string | null;
           advancedSettingsBaseline?: null;
           trainOnCompletionsDefaultPendingFor?: null;
-          trainingMethodProvenance?: TrainingConfigState["trainingMethodProvenance"];
         } = {
           selectedModel,
           modelDefaultsError: null,
@@ -895,10 +878,6 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
           patch.modelDefaultsAppliedFor = null;
           patch.advancedSettingsBaseline = null;
           patch.trainOnCompletionsDefaultPendingFor = null;
-          patch.trainingMethodProvenance = {
-            ...currentState.trainingMethodProvenance,
-            trainOnCompletionsBeforeCpt: null,
-          };
         }
         setUserEdit(patch);
 
