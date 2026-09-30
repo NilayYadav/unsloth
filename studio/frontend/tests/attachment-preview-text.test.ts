@@ -493,6 +493,7 @@ test("extractPdfAttachmentText destroys the PDF proxy after success and failure"
           ],
         }),
       }),
+      getFieldObjects: async () => null,
       destroy: async () => {
         destroyed.push("success");
       },
@@ -527,11 +528,17 @@ test("extractPdfAttachmentText destroys the PDF proxy after success and failure"
   }
 });
 
-function singlePagePdf(content: string, resources: string, extra: string[]) {
+function singlePagePdf(
+  content: string,
+  resources: string,
+  extra: string[],
+  pageEntries = "",
+  catalogEntries = "",
+) {
   const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Catalog /Pages 2 0 R ${catalogEntries}>>`,
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources ${resources} /Contents 4 0 R >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources ${resources} /Contents 4 0 R ${pageEntries}>>`,
     `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
     ...extra,
   ];
@@ -592,6 +599,84 @@ test("a scanned pdf is refused unless the python tool can open it", async () => 
   );
   assert.equal(getPdfAttachmentTextError(scan.name, scanText, true), null);
   assert.equal(getPdfAttachmentTextError(typed.name, typedText, false), null);
+});
+
+test("a filled pdf form keeps the values typed into its fields", async () => {
+  const font = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+  const field = (name: string, value: string, y: number) =>
+    `<< /Type /Annot /Subtype /Widget /FT /Tx /T (${name}) /V (${value}) /Rect [60 ${y} 190 ${y + 20}] /P 3 0 R >>`;
+  const checkbox = (name: string, state: string, y: number) =>
+    `<< /Type /Annot /Subtype /Widget /FT /Btn /T (${name}) /V /${state} /AS /${state} /AP << /N << /Yes 10 0 R /Off 11 0 R >> >> /Rect [60 ${y} 70 ${y + 10}] /P 3 0 R >>`;
+  const blank = "<< /Length 0 >>\nstream\n\nendstream";
+  const filled = new File(
+    [
+      singlePagePdf(
+        "BT /F1 12 Tf 20 100 Td (Name:) Tj ET",
+        "<< /Font << /F1 5 0 R >> >>",
+        [
+          font,
+          field("name", "Oscar Papa Quebec", 95),
+          field("notes", "", 60),
+          checkbox("agree", "Yes", 30),
+          checkbox("newsletter", "Off", 10),
+          blank,
+          blank,
+          `<< /Type /Annot /Subtype /Widget /FT /Tx /F 2 /T (internal) /V (hidden) /Rect [0 0 1 1] /P 3 0 R >>`,
+          `<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 131072 /T (status) /Opt [[(1) (Single)] [(2) (Married)]] /V (2) /Rect [60 150 190 170] /P 3 0 R >>`,
+          `<< /Type /Annot /Subtype /Widget /FT /Tx /Ff 8192 /T (pin) /V (4321) /Rect [60 175 190 195] /P 3 0 R >>`,
+        ],
+        "/Annots [6 0 R 7 0 R 8 0 R 9 0 R 12 0 R 13 0 R 14 0 R] ",
+        "/AcroForm << /Fields [6 0 R 7 0 R 8 0 R 9 0 R 12 0 R 13 0 R 14 0 R] >> ",
+      ),
+    ],
+    "filled.pdf",
+    { type: "application/pdf" },
+  );
+  const fieldsOnly = new File(
+    [
+      singlePagePdf(
+        "",
+        "<< >>",
+        [field("name", "Romeo Sierra", 95)],
+        "/Annots [5 0 R] ",
+        "/AcroForm << /Fields [5 0 R] >> ",
+      ),
+    ],
+    "fields-only.pdf",
+    { type: "application/pdf" },
+  );
+
+  assert.equal(
+    await extractPdfAttachmentText(filled),
+    "Name:\nname: Oscar Papa Quebec\nagree: Yes\nstatus: Married",
+  );
+  const fieldsOnlyText = await extractPdfAttachmentText(fieldsOnly);
+  assert.equal(fieldsOnlyText, "name: Romeo Sierra");
+  assert.equal(
+    getPdfAttachmentTextError(fieldsOnly.name, fieldsOnlyText, false),
+    null,
+  );
+});
+
+test("a pdf with a damaged form field still reads its text", async () => {
+  const damaged = new File(
+    [
+      singlePagePdf(
+        "BT /F1 12 Tf 20 100 Td (Budget: 4200) Tj ET",
+        "<< /Font << /F1 5 0 R >> >>",
+        [
+          "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+          "<< /Type /Annot /Subtype /Widget /FT /Tx /T null /V (x) /Rect [60 20 190 40] >>",
+        ],
+        "/Annots [6 0 R] ",
+        "/AcroForm << /Fields [6 0 R] >> ",
+      ),
+    ],
+    "damaged.pdf",
+    { type: "application/pdf" },
+  );
+
+  assert.equal(await extractPdfAttachmentText(damaged), "Budget: 4200");
 });
 
 // The bytes are requested synchronously, so the extractor is reached without
