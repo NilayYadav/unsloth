@@ -412,7 +412,6 @@ export function useTauriUpdate(isExternalServer = false) {
       if (!update) return;
 
       const { invoke } = await import("@tauri-apps/api/core");
-      if (!(await invoke<boolean>("confirm_backend_update"))) return;
       setUpdatePhase("backend");
       updateStatus("updating-backend");
       replaceLogs([]);
