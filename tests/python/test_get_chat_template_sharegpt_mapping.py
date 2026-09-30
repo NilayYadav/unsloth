@@ -72,3 +72,26 @@ def test_custom_template_reading_sharegpt_keys_keeps_working():
     mapped = get_chat_template(_tokenizer(), (template, "eos_token"), mapping = SHAREGPT)
 
     assert _render(mapped, sharegpt, False) == "<s>User: Hi\nBot: Hello!</s>\nUser: Bye\n"
+
+
+TOOL_CALL = [{"type": "function", "function": {"name": "get_weather", "arguments": {"city": "Paris"}}}]
+
+
+@pytest.mark.parametrize("name", ["llama-3.1", "qwen-2.5"])
+def test_sharegpt_mapping_keeps_other_message_keys(name):
+    sharegpt = [
+        {"from": "human", "value": "Weather in Paris?"},
+        {"from": "gpt", "value": "", "tool_calls": TOOL_CALL},
+        {"from": "tool", "value": "20C"},
+    ]
+    role_content = [
+        {"role": "user", "content": "Weather in Paris?"},
+        {"role": "assistant", "content": "", "tool_calls": TOOL_CALL},
+        {"role": "tool", "content": "20C"},
+    ]
+
+    expected = _render(get_chat_template(_tokenizer(), name), role_content, True)
+    mapped = get_chat_template(_tokenizer(), name, mapping = SHAREGPT)
+
+    assert "get_weather" in expected
+    assert _render(mapped, sharegpt, True) == expected
