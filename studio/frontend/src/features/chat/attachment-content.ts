@@ -1178,19 +1178,12 @@ export function extractHtmlAttachmentText(html: string): string {
   for (const el of doc.querySelectorAll("script, style, noscript, template")) {
     el.remove();
   }
-  const preformatted: string[] = [];
-  return normalizeExtractedText(collectHtmlBlockText(doc.body, preformatted))
-    .split("\u0000")
-    .map((text, index) => text + (preformatted[index] ?? ""))
-    .join("");
+  return normalizeExtractedText(collectHtmlBlockText(doc.body));
 }
 
 /** Text with the line structure the source had. `textContent` runs a whole page together, so
  *  every block-level element and every `<br>` contributes a break of its own. */
-function collectHtmlBlockText(
-  node: Node | null,
-  preformatted?: string[],
-): string {
+function collectHtmlBlockText(node: Node | null): string {
   if (!node) {
     return "";
   }
@@ -1207,20 +1200,8 @@ function collectHtmlBlockText(
     return "\n";
   }
 
-  if (tag === "pre" && preformatted) {
-    const code = Array.from(element.childNodes)
-      .map((child) => collectHtmlBlockText(child))
-      .join("")
-      .trimEnd();
-    if (!code.trim()) {
-      return "\n";
-    }
-    preformatted.push(code);
-    return "\n\u0000\n";
-  }
-
   const text = Array.from(element.childNodes)
-    .map((child) => collectHtmlBlockText(child, preformatted))
+    .map(collectHtmlBlockText)
     .join("");
   return HTML_BLOCK_TAGS.has(tag) ? `\n${text}\n` : text;
 }
