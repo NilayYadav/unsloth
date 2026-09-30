@@ -53,7 +53,6 @@ export interface TrainingMethodProvenance {
   loraRankBeforeCpt: number | null;
   loraAlphaBeforeCpt: number | null;
   loraVariantBeforeCpt: LoraVariant | null;
-  trainOnCompletionsBeforeCpt: boolean | null;
 }
 
 /** Column-to-role mapping, e.g. { "problem": "user", "solution": "assistant", "context": "system" } */

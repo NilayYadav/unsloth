@@ -386,12 +386,6 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             const cptProvenanceRefresh = {
               ...cptTargetProvenanceRefresh,
               ...cptLoraProvenanceRefresh,
-              ...(inCpt && modelDefaultsPatch.trainOnCompletions !== undefined
-                ? {
-                    trainOnCompletionsBeforeCpt:
-                      modelDefaultsPatch.trainOnCompletions,
-                  }
-                : {}),
             };
             const cptFallbackProvenanceRefresh = {
               ...(shouldApplyCptTargetDefaults
@@ -598,12 +592,6 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
               // Audio-capable vision model (e.g. gemma3n) + audio dataset → uncheck.
               if (isAudioModel && isVisionModel && isAudio) {
                 updates.trainOnCompletions = false;
-              }
-              if (updates.trainOnCompletions === false) {
-                updates.trainingMethodProvenance = {
-                  ...current.trainingMethodProvenance,
-                  trainOnCompletionsBeforeCpt: null,
-                };
               }
             }
             set(updates);
@@ -864,7 +852,6 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
           modelDefaultsAppliedFor?: string | null;
           advancedSettingsBaseline?: null;
           trainOnCompletionsDefaultPendingFor?: null;
-          trainingMethodProvenance?: TrainingConfigState["trainingMethodProvenance"];
         } = {
           selectedModel,
           modelDefaultsError: null,
@@ -891,10 +878,6 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
           patch.modelDefaultsAppliedFor = null;
           patch.advancedSettingsBaseline = null;
           patch.trainOnCompletionsDefaultPendingFor = null;
-          patch.trainingMethodProvenance = {
-            ...currentState.trainingMethodProvenance,
-            trainOnCompletionsBeforeCpt: null,
-          };
         }
         setUserEdit(patch);
 
