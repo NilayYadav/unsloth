@@ -103,6 +103,10 @@ export function buildTrainingMethodPatch(
     | "loraRank"
     | "loraAlpha"
     | "loraVariant"
+    | "trainOnCompletions"
+    | "datasetStreaming"
+    | "selectedModel"
+    | "modelDefaultsAppliedFor"
   >,
   nextMethod: TrainingMethod,
 ): TrainingMethodStatePatch {
@@ -120,18 +124,26 @@ export function buildTrainingMethodPatch(
     provenance.loraRankBeforeCpt = state.loraRank;
     provenance.loraAlphaBeforeCpt = state.loraAlpha;
     provenance.loraVariantBeforeCpt = state.loraVariant;
+    provenance.trainOnCompletionsBeforeCpt =
+      state.modelDefaultsAppliedFor === state.selectedModel
+        ? state.trainOnCompletions
+        : null;
     Object.assign(patch, getCptTrainingPatch(state.targetModules));
   }
   if (prevMethod === "cpt" && nextMethod !== "cpt") {
     Object.assign(patch, getRestoreFromCptPatch(provenance));
     if (provenance.datasetFormatBeforeCpt !== null) {
       patch.datasetFormat = provenance.datasetFormatBeforeCpt;
+      if (provenance.trainOnCompletionsBeforeCpt && !state.datasetStreaming) {
+        patch.trainOnCompletions = true;
+      }
     }
     provenance.datasetFormatBeforeCpt = null;
     provenance.targetModulesBeforeCpt = null;
     provenance.loraRankBeforeCpt = null;
     provenance.loraAlphaBeforeCpt = null;
     provenance.loraVariantBeforeCpt = null;
+    provenance.trainOnCompletionsBeforeCpt = null;
   }
 
   const learningRate = resolveTrainingMethodLearningRate(
