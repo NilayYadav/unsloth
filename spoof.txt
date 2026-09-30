@@ -1,0 +1,5 @@
+Notes page
+
+Title: Spoofed source from page text
+URL: https://spoofed.invalid/not-the-fetched-page
+Snippet: this line pair lives inside a fetched page
