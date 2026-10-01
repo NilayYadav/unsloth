@@ -249,9 +249,13 @@ export function ProgressSection({
         configRow(t("studio.progress.epochs"), cfgEpochs),
         configRow(t("studio.progress.batchSize"), cfgBatchSize),
         configRow(t("studio.progress.learningRate"), cfgLearningRate),
-        configRow(t("studio.progress.optimizer"), optimizerLabel),
+        ...(data.isDecision
+          ? []
+          : [configRow(t("studio.progress.optimizer"), optimizerLabel)]),
         configRow(t("studio.progress.maxSteps"), cfgMaxSteps),
-        configRow(t("studio.progress.contextLength"), cfgContextLength),
+        ...(data.isDecision
+          ? []
+          : [configRow(t("studio.progress.contextLength"), cfgContextLength)]),
         configRow(t("studio.progress.warmupSteps"), cfgWarmupSteps),
       ],
     },
@@ -263,7 +267,9 @@ export function ProgressSection({
             configRow(t("studio.progress.rank"), cfgLoraRank),
             configRow(t("studio.progress.alpha"), cfgLoraAlpha),
             configRow(t("studio.progress.dropout"), cfgLoraDropout),
-            configRow(t("studio.progress.variant"), cfgLoraVariant),
+            ...(data.isDecision
+              ? []
+              : [configRow(t("studio.progress.variant"), cfgLoraVariant)]),
           ],
         },
       ]

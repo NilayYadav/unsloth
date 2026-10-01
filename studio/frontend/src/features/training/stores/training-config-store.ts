@@ -3,6 +3,8 @@
 
 import {
   DEFAULT_HYPERPARAMS,
+  LR_DEFAULT_DECISION_FULL,
+  LR_DEFAULT_DECISION_LORA,
   LR_DEFAULT_FULL,
   LR_DEFAULT_LORA,
 } from "@/config/training";
@@ -242,15 +244,48 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             if (!requestMatchesSelection()) return;
 
             const isDecision = modelDetails.model_type === "decision";
-            if (
-              isDecision &&
-              get().trainingMethod !== "lora" &&
-              get().trainingMethod !== "full"
-            ) {
-              set(buildTrainingMethodPatch(get(), "lora"));
+            const shouldApplyTrainingDefaults = canApplyTrainingDefaults();
+            const defaultsAlreadyApplied =
+              get().modelDefaultsAppliedFor === modelName;
+            const settingsBeforeDecision = get().settingsBeforeDecision;
+            if (isDecision) {
+              const method = get().trainingMethod;
+              const switchToLora =
+                shouldApplyTrainingDefaults && !defaultsAlreadyApplied
+                  ? method !== "lora"
+                  : method !== "lora" && method !== "full";
+              set({
+                ...(switchToLora
+                  ? buildTrainingMethodPatch(
+                      { ...get(), modelType: "decision" },
+                      "lora",
+                    )
+                  : {}),
+                settingsBeforeDecision: settingsBeforeDecision ?? {
+                  trainingMethod: method,
+                  datasetStreaming: get().datasetStreaming,
+                },
+              });
+            } else if (settingsBeforeDecision) {
+              const restoredMethod = settingsBeforeDecision.trainingMethod;
+              set({
+                ...(get().trainingMethod !== restoredMethod
+                  ? buildTrainingMethodPatch(
+                      {
+                        ...get(),
+                        modelType: null,
+                        trainingMethodProvenance: {
+                          ...get().trainingMethodProvenance,
+                          modelAdapterLearningRate: null,
+                        },
+                      },
+                      restoredMethod,
+                    )
+                  : {}),
+                settingsBeforeDecision: null,
+              });
             }
 
-            const shouldApplyTrainingDefaults = canApplyTrainingDefaults();
             const shouldApplyCptTargetDefaults =
               applyTrainingDefaults &&
               !shouldApplyTrainingDefaults &&
@@ -299,11 +334,21 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             // Treat a model-config LR as authoritative so async auto-select won't overwrite it.
             const modelConfigHasLR =
               modelDefaultsPatch.learningRate !== undefined;
-            const modelAdapterLearningRate =
-              modelDefaultsPatch.learningRate ?? null;
+            const modelAdapterLearningRate = isDecision
+              ? LR_DEFAULT_DECISION_LORA
+              : (modelDefaultsPatch.learningRate ?? null);
 
-            // YAML LRs are tuned for adapters (LoRA/QLoRA); full fine-tune uses its own default.
-            if (modelConfigHasLR && !isAdapterMethod(get().trainingMethod)) {
+            if (isDecision) {
+              modelDefaultsPatch.learningRate = isAdapterMethod(
+                get().trainingMethod,
+              )
+                ? LR_DEFAULT_DECISION_LORA
+                : LR_DEFAULT_DECISION_FULL;
+            } else if (
+              modelConfigHasLR &&
+              !isAdapterMethod(get().trainingMethod)
+            ) {
+              // YAML LRs are tuned for adapters (LoRA/QLoRA); full fine-tune uses its own default.
               modelDefaultsPatch.learningRate = LR_DEFAULT_FULL;
             }
 
@@ -336,7 +381,7 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             const modelSubfolder = resolveDecisionSubfolder(
               decisionCheckpoints,
               get().modelSubfolder,
-              !shouldApplyTrainingDefaults,
+              defaultsAlreadyApplied,
             );
 
             const modelSizeBytes = modelDetails.model_size_bytes;
@@ -454,12 +499,34 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
                 : {}),
             };
 
+            const nextStreamingState = {
+              ...get(),
+              ...patch,
+              ...cptOverrides,
+              ...deferredCompletionDefault,
+              datasetStreaming: true,
+            };
+            const restoreStreaming =
+              !isDecision &&
+              settingsBeforeDecision?.datasetStreaming === true &&
+              nextStreamingState.datasetSource === "huggingface" &&
+              nextStreamingState.maxSteps > 0;
+
             set({
               ...patch,
               ...cptOverrides,
               ...cptTargetOverrides,
               ...deferredCompletionDefault,
               ...(isDecision ? { datasetStreaming: false } : {}),
+              ...(restoreStreaming
+                ? {
+                    ...streamingCompatiblePatch(nextStreamingState),
+                    datasetStreaming: true,
+                    isDatasetImage: null,
+                    isDatasetAudio: false,
+                    datasetCheckFailed: false,
+                  }
+                : {}),
               ...(shouldApplyTrainingDefaults
                 ? {
                     trainingMethodProvenance: {
@@ -502,6 +569,10 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
               maxPositionEmbeddings:
                 modelDetails.max_position_embeddings ?? null,
             });
+            if (restoreStreaming) {
+              trainingDatasetCacheRejections.reset(get().dataset);
+              recheckSelectedDatasetForStreamingMode(true);
+            }
 
             if (autoSelectionPromise) {
               void autoSelectionPromise.then((method) => {

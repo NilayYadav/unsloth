@@ -1182,6 +1182,14 @@ def _validate_decision_request(request: TrainingStartRequest) -> None:
 
     if not request.is_decision:
         return
+    from utils.account_context import is_owner_context
+
+    if not is_owner_context():
+        raise HTTPException(
+            status_code = 403,
+            detail = "Only the Studio owner can fine-tune decision models, since only the "
+            "owner's fine-tunes can be served by the Decision API.",
+        )
     if request.training_type == "Continued Pretraining":
         raise HTTPException(
             status_code = 400,

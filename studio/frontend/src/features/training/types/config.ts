@@ -68,6 +68,10 @@ export interface TrainingConfigState {
   modelFormat: ModelInventoryFormat | null;
   modelSubfolder: string | null;
   decisionCheckpoints: DecisionCheckpoint[] | null;
+  settingsBeforeDecision: {
+    trainingMethod: TrainingMethod;
+    datasetStreaming: boolean;
+  } | null;
   projectName: string;
   trainingMethod: TrainingMethod;
   trainingMethodProvenance: TrainingMethodProvenance;

@@ -118,4 +118,12 @@ def resolve(model: str) -> Checkpoint | None:
     if name == LOCAL_NAME:
         checkpoint = default_checkpoint()
         return checkpoint if checkpoint.name == LOCAL_NAME else None
-    return CHECKPOINTS.get(name) or fine_tune(name)
+    if name in CHECKPOINTS:
+        return CHECKPOINTS[name]
+    from utils.account_context import is_owner_context
+
+    checkpoint = fine_tune(name)
+    # Other accounts reach only the fine-tune the owner configured, not the owner's other outputs.
+    if checkpoint is None or is_owner_context() or checkpoint == default_checkpoint():
+        return checkpoint
+    return None

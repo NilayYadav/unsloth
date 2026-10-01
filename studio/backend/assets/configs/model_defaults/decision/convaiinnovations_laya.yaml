@@ -1,5 +1,5 @@
 # Model defaults for convaiinnovations/laya decision models
-# Based on Laya's single-device fine-tuning recipe (RLCD + per-type calibration), trained with 16-bit LoRA
+# 16-bit LoRA with soft cross-entropy; full fine-tuning runs default to 2.5e-5, as in Laya's own recipe
 # Local Laya checkpoints, earlier Studio decision fine-tunes included, use these too
 
 training:
@@ -14,7 +14,7 @@ training:
   packing: false
   train_on_completions: false
   gradient_checkpointing: "unsloth"
-  optim: "adamw_8bit"
+  optim: "adamw_torch"
   lr_scheduler_type: "cosine"
 
 lora:

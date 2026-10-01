@@ -5,6 +5,7 @@ import json
 import shutil
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -216,7 +217,7 @@ def _decide(client, model = "default"):
 
 @needs_worker
 def test_fine_tune_is_calibrated_saved_and_served(base, studio_home, client):
-    rows = [_row(i) for i in range(120)]
+    rows = [_row(i) for i in range(200)]
     rows += [
         {"state": "slow login", "questions": "not json", "gold": "{}"},
         {"state": "slow login", "questions": json.dumps(QUESTIONS), "gold": json.dumps({})},
@@ -233,7 +234,7 @@ def test_fine_tune_is_calibrated_saved_and_served(base, studio_home, client):
     assert [e["step"] for e in progress] == [1, 2, 3]
     assert all(e["total_steps"] == 3 and e["loss"] > 0 for e in progress)
     assert progress[-1]["eval_loss"] is not None
-    assert _of(events, "warning")[0]["message"].startswith("Skipped 5 of 365 decisions: row 121")
+    assert _of(events, "warning")[0]["message"].startswith("Skipped 5 of 605 decisions: row 201")
     complete = _of(events, "complete")[-1]
     assert complete["status_message"].startswith("Held-out accuracy ")
     output = complete["output_dir"]
@@ -246,10 +247,11 @@ def test_fine_tune_is_calibrated_saved_and_served(base, studio_home, client):
     cfg = json.loads((folder / "rl_agent_config.json").read_text(encoding = "utf-8"))
     assert cfg["fine_tuned"] is True
     assert "temperature_by_options" not in cfg
-    assert cfg["max_len"] == 96 and cfg["head_max_len"] == 48
+    assert cfg["max_len"] == 1024 and cfg["head_max_len"] == 256
     assert all(0.5 <= t <= 5.0 for t in cfg["temperature"])
     assert cfg["temperature"] != [1.2, 1.1, 1.3]
-    assert cfg["training"]["heldout_decisions"] == 36
+    assert cfg["training"]["heldout_decisions"] == 60
+    assert cfg["training"]["objective"] == "soft_cross_entropy"
     assert cfg["training"]["steps"] == 3
     with safe_open(str(folder / "model.safetensors"), "pt") as weights:
         assert {weights.get_tensor(k).dtype for k in weights.keys()} == {torch.float16}
@@ -286,9 +288,10 @@ def test_lora_run_merges_into_the_served_layout(base, studio_home, client):
     )
 
     assert not _of(events, "error"), _of(events, "error")
-    folder = catalog.fine_tune(
+    checkpoint = catalog.fine_tune(
         catalog.FINE_TUNE_PREFIX + _of(events, "complete")[-1]["output_dir"].rsplit("/", 1)[-1]
     )
+    folder = Path(checkpoint.source)
     cfg = json.loads((folder / "rl_agent_config.json").read_text(encoding = "utf-8"))
     assert cfg["training"]["method"] == "lora"
     tuned = load_file(str(folder / "model.safetensors"))
@@ -341,8 +344,11 @@ def test_stop_with_save_leaves_a_servable_checkpoint(base, studio_home, training
     complete = _of(events, "complete")[-1]
     last = _of(events, "progress")[-1]
     assert last["step"] < last["total_steps"]
-    folder = catalog.fine_tune(catalog.FINE_TUNE_PREFIX + complete["output_dir"].rsplit("/", 1)[-1])
-    assert folder is not None and laya_runtime.is_cached(folder)
+    checkpoint = catalog.fine_tune(
+        catalog.FINE_TUNE_PREFIX + complete["output_dir"].rsplit("/", 1)[-1]
+    )
+    assert checkpoint is not None and laya_runtime.is_cached(checkpoint)
+    folder = Path(checkpoint.source)
     with (
         safe_open(str(folder / "model.safetensors"), "pt") as tuned,
         safe_open(str(base / "model.safetensors"), "pt") as original,
@@ -432,6 +438,7 @@ def test_model_config_classifies_a_local_laya_folder(base):
     )
     assert result.model_type == "decision" and result.is_decision is True
     assert float(result.config["training"]["learning_rate"]) == 8e-4
+    assert result.config["training"]["optim"] == "adamw_torch"
     assert result.config["lora"]["lora_r"] == 64
     assert result.decision_checkpoints is None
 
@@ -448,3 +455,126 @@ def test_start_preflight_accepts_a_local_laya_folder(base):
         format_type = "auto",
     )
     assert _reject_untrainable_model_request(request).model_name == str(base.resolve())
+
+
+def _internal(question):
+    return laya_runtime._laya().agent.Agent._to_internal(question)
+
+
+def test_noul_gold_accepts_one_sided_and_response_shaped_probabilities():
+    from core.training.decision_trainer import _target
+
+    noul = _internal(QUESTIONS["urgent"])
+    assert _target(noul, {"probabilities": {"true": 0.3}}) == ([pytest.approx(0.7), 0.3], 0)
+    assert _target(noul, {"noul": 0.8}) == ([pytest.approx(0.2), 0.8], 1)
+    assert _target(_internal(QUESTIONS["mood"]), {"label": 1.6})[1] == 2
+
+
+def test_arrow_merged_criteria_are_not_trained_as_options(tmp_path):
+    pa = pytest.importorskip("pyarrow")
+    import pyarrow.parquet as pq
+
+    from core.training.decision_trainer import _read_local_rows
+    from utils.datasets.cache_safe import load_dataset_cache_safe
+
+    rows = [
+        {
+            "state": "refund my card",
+            "questions": {"q": {"type": "choice", "instructions": "Team?", "criteria": crit}},
+            "gold": {"q": {"label": label, "probabilities": probs}},
+        }
+        for crit, label, probs in (
+            ({"billing": "charges", "outage": ""}, "billing", {"billing": 0.9, "outage": 0.1}),
+            ({"login": "accounts", "slow": "speed"}, "slow", {"login": 0.2, "slow": 0.8}),
+        )
+    ]
+    path = tmp_path / "decisions.parquet"
+    pq.write_table(pa.Table.from_pylist(rows), str(path))
+
+    loaded = _read_local_rows([str(path)], load_dataset_cache_safe)
+    assert [row["questions"]["q"]["criteria"] for row in loaded] == [
+        {"billing": "charges", "outage": ""},
+        {"login": "accounts", "slow": "speed"},
+    ]
+    assert loaded[1]["gold"]["q"]["probabilities"] == {"login": 0.2, "slow": 0.8}
+
+
+def test_holdout_takes_whole_rows():
+    from core.training.decision_trainer import _split_holdout
+
+    items = [{"row": row, "q": q} for row in range(50) for q in range(3)]
+    train, held = _split_holdout(items, 3407)
+    assert len(held) == 15
+    assert not {i["row"] for i in train} & {i["row"] for i in held}
+    assert _split_holdout([{"row": 0}] * 30, 1) == ([{"row": 0}] * 30, [])
+
+
+def test_reported_calibration_is_fitted_on_the_other_half():
+    from core.training.decision_trainer import _calibrate
+
+    common = laya_runtime._laya().common
+    items = [{"row": i, "qtype": 2, "label": int(i % 3 == 0)} for i in range(200)]
+    for item in items:
+        item["target"] = [1.0 - item["label"], float(item["label"])]
+    # Confident and right only by chance: the fit wants the softest temperature allowed.
+    logits = [torch.tensor([0.0, 12.0 if i % 2 else -12.0]) for i in range(200)]
+    temperature, fitted, (accuracy, ece) = _calibrate(
+        logits, items, [1.0, 1.0, 1.0], common.clamp_temperature, common.ece_score
+    )
+    assert fitted == {2} and 0 < accuracy < 1
+    assert temperature == [1.0, 1.0, 5.0]
+    assert ece > 0
+
+
+def test_eval_interval_follows_studio_semantics():
+    from core.training.decision_trainer import _eval_interval
+
+    assert _eval_interval(0, 100) is None
+    assert _eval_interval(25, 100) == 25
+    assert _eval_interval(0.1, 228) == 23
+
+
+def test_other_accounts_reach_only_the_configured_fine_tune(studio_home, client):
+    from utils.account_context import AccountContext, bind_account, reset_account
+    from utils.paths import outputs_root
+
+    root = outputs_root()
+    _fake_output(root, "laya_done_1")
+    _fake_output(root, "laya_done_2")
+    assert (
+        client.put("/api/settings/systemone", json = {"model": "laya-ft:laya_done_1"}).status_code
+        == 200
+    )
+
+    token = bind_account(AccountContext("b" * 32, "bob"))
+    try:
+        assert catalog.resolve("laya-ft:laya_done_1") is not None
+        assert catalog.resolve("laya-ft:laya_done_2") is None
+    finally:
+        reset_account(token)
+    assert catalog.resolve("laya-ft:laya_done_2") is not None
+
+
+def test_only_the_owner_can_start_decision_training():
+    from fastapi import HTTPException
+
+    from models.training import TrainingStartRequest
+    from routes.training import _validate_decision_request
+    from utils.account_context import AccountContext, bind_account, reset_account
+
+    request = TrainingStartRequest(
+        model_name = catalog.LAYA_REPO,
+        model_subfolder = "multilingual",
+        training_type = "Full Finetuning",
+        is_decision = True,
+        hf_dataset = "org/decisions",
+        format_type = "auto",
+    )
+    _validate_decision_request(request)
+    token = bind_account(AccountContext("b" * 32, "bob"))
+    try:
+        with pytest.raises(HTTPException) as refused:
+            _validate_decision_request(request)
+    finally:
+        reset_account(token)
+    assert refused.value.status_code == 403

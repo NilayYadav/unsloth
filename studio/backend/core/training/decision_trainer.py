@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
-"""Full fine-tuning of Laya decision models (RLCD + per-type temperature calibration)."""
+"""Fine-tuning of Laya decision models (soft cross-entropy + per-type temperature calibration)."""
 
 from __future__ import annotations
 
@@ -19,9 +19,11 @@ from loggers import get_logger
 logger = get_logger(__name__)
 
 HOLDOUT_MAX = 400
+EVAL_MAX = 2000
 MIN_CALIBRATION_ITEMS = 10
-GROUP_SIZE = 4
-SIGMA_START, SIGMA_END = 0.4, 0.1
+MIN_REPORTED_ITEMS = 50
+# Laya's fine-tuning recipe trains every checkpoint with this context.
+TRAIN_MAX_LEN, TRAIN_HEAD_MAX_LEN = 1024, 256
 HEAD_LR_SCALE = 4.0
 LORA_HEAD_LR = 1e-4
 LORA_TARGET_MODULES = ["Wqkv", "Wo", "Wi"]
@@ -54,10 +56,23 @@ def _target(internal: dict, gold) -> tuple[list[float], int]:
     if isinstance(label, bool) or (internal["t"] == "noul" and isinstance(label, str)):
         label = str(label).lower()
     elif isinstance(label, (int, float)) and internal["t"] == "score":
-        label = str(int(label))
+        label = str(round(label))
     elif label is not None:
         label = str(label)
     probabilities = gold.get("probabilities") if isinstance(gold, dict) else None
+    if internal["t"] == "noul" and isinstance(gold, dict):
+        noul = gold.get("noul")
+        if not isinstance(probabilities, dict) and isinstance(noul, (int, float)):
+            probabilities = {"true": noul}
+        if isinstance(probabilities, dict) and len(probabilities.keys() & {"false", "true"}) == 1:
+            known = "true" if "true" in probabilities else "false"
+            try:
+                probabilities = {
+                    known: float(probabilities[known]),
+                    ({"false", "true"} - {known}).pop(): 1.0 - float(probabilities[known]),
+                }
+            except (TypeError, ValueError):
+                probabilities = None
     if isinstance(probabilities, dict):
         try:
             target = [max(0.0, float(probabilities.get(key, 0.0))) for key in keys]
@@ -132,9 +147,34 @@ def _build_items(rows, tok, cfg: dict) -> tuple[list[dict], int, int, str | None
                     "qtype": laya.common.QTYPES[internal["t"]],
                     "target": target,
                     "label": label,
+                    "row": index,
                 }
             )
     return items, total, skipped, first_reason
+
+
+def _without_nulls(value):
+    if isinstance(value, dict):
+        return {k: _without_nulls(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_without_nulls(v) for v in value]
+    return value
+
+
+def _from_arrow(rows) -> list[dict]:
+    # Arrow gives every row the union of all rows' keys, filled with None; a null criterion
+    # description is therefore read as absent, and "" means an option without one.
+    return [
+        {
+            **row,
+            **{
+                key: _without_nulls(row[key])
+                for key in ("questions", "gold", "answers")
+                if isinstance(row.get(key), dict)
+            },
+        }
+        for row in rows
+    ]
 
 
 def _read_local_rows(paths: list[str], load_dataset) -> list[dict]:
@@ -158,7 +198,9 @@ def _read_local_rows(paths: list[str], load_dataset) -> list[dict]:
             except ValueError:
                 rows.extend(json.loads(line) for line in text.splitlines() if line.strip())
         elif suffix in (".csv", ".parquet"):
-            rows.extend(load_dataset(suffix[1:], data_files = [str(path)], split = "train"))
+            rows.extend(
+                _from_arrow(load_dataset(suffix[1:], data_files = [str(path)], split = "train"))
+            )
         else:
             raise ValueError(f"Unsupported local dataset format: {path.name}")
     return [row for row in rows if isinstance(row, dict)]
@@ -174,9 +216,9 @@ def _load_rows(config: dict, should_stop: Callable[[], bool], status) -> tuple[l
     evaluate = evaluation_enabled(config.get("eval_steps"))
     eval_rows = None
     if hf_dataset:
-        rows = list(_load_embedding_hf_dataset(config, load_dataset, status))
+        rows = _from_arrow(_load_embedding_hf_dataset(config, load_dataset, status))
         if evaluate and config.get("eval_split"):
-            eval_rows = list(
+            eval_rows = _from_arrow(
                 load_dataset(
                     hf_dataset,
                     config.get("subset") or None,
@@ -262,13 +304,13 @@ def _soft_ce(logits, items) -> float:
     return sum(losses) / max(1, len(losses))
 
 
-def _metrics(logits, items, temperature_for, ece_score) -> tuple[float, float]:
+def _metrics(logits, items, temperatures, ece_score) -> tuple[float, float]:
     import numpy as np
     import torch
 
     conf, correct = [], []
-    for z, item in zip(logits, items):
-        p = torch.softmax(z / temperature_for(item["qtype"], len(z)), -1)
+    for z, item, temperature in zip(logits, items, temperatures):
+        p = torch.softmax(z / temperature, -1)
         conf.append(float(p.max()))
         correct.append(float(int(p.argmax()) == item["label"]))
     return float(np.mean(correct)), ece_score(np.array(conf), np.array(correct))
@@ -294,6 +336,65 @@ def _fit_temperature(logits, items) -> float:
 
     optimizer.step(closure)
     return float(log_t.exp().item())
+
+
+def _fit_temperatures(logits, items, indices, fallback: list[float], clamp) -> tuple[list, set]:
+    temperature, fitted = list(fallback), set()
+    for qtype in range(3):
+        chosen = [i for i in indices if items[i]["qtype"] == qtype]
+        if len(chosen) >= MIN_CALIBRATION_ITEMS:
+            temperature[qtype] = clamp(
+                _fit_temperature([logits[i] for i in chosen], [items[i] for i in chosen])
+            )
+            fitted.add(qtype)
+    return temperature, fitted
+
+
+def _calibrate(logits, items, fallback: list[float], clamp, ece_score):
+    # Temperatures ship fitted on every held-out decision; the reported numbers use, for each
+    # half of the held-out rows, temperatures fitted on the other half.
+    rows = sorted({item["row"] for item in items})
+    half = {row: i % 2 for i, row in enumerate(rows)}
+    everything = range(len(items))
+    temperature, fitted = _fit_temperatures(logits, items, everything, fallback, clamp)
+    per_item = [1.0] * len(items)
+    for side in (0, 1):
+        other = [i for i in everything if half[items[i]["row"]] != side]
+        side_temperature, _ = _fit_temperatures(logits, items, other, fallback, clamp)
+        for i in everything:
+            if half[items[i]["row"]] == side:
+                per_item[i] = side_temperature[items[i]["qtype"]]
+    return temperature, fitted, _metrics(logits, items, per_item, ece_score)
+
+
+def _split_holdout(items: list[dict], seed: int) -> tuple[list[dict], list[dict]]:
+    # Whole rows, so no held-out decision shares its state with a trained one.
+    target = min(HOLDOUT_MAX, len(items) // 10)
+    rows = sorted({item["row"] for item in items})
+    random.Random(seed).shuffle(rows)
+    sizes: dict[int, int] = {}
+    for item in items:
+        sizes[item["row"]] = sizes.get(item["row"], 0) + 1
+    held: set[int] = set()
+    count = 0
+    for row in rows[:-1]:
+        if count >= target:
+            break
+        held.add(row)
+        count += sizes[row]
+    return (
+        [item for item in items if item["row"] not in held],
+        [item for item in items if item["row"] in held],
+    )
+
+
+def _eval_interval(value, total_steps: int) -> int | None:
+    from core.training.eval_dataset import evaluation_enabled
+
+    if not evaluation_enabled(value):
+        return None
+    value = float(value)
+    return max(1, math.ceil(value * total_steps) if value < 1 else int(value))
 
 
 def _optimizer(groups: list[dict], name: str, weight_decay: float, device):
@@ -365,6 +466,13 @@ def run_decision_training(event_queue: Any, stop_queue: Any, config: dict) -> No
 
 def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
     import torch
+
+    if torch.cuda.is_available():
+        from core.import_guards import ensure_real_packages
+
+        # Before peft: unsloth also patches peft's torchao dispatch for newer torchao releases.
+        ensure_real_packages("unsloth_zoo", "unsloth")
+        import unsloth  # noqa: F401
     from safetensors.torch import load_file
     from transformers import AutoTokenizer, get_scheduler
 
@@ -425,6 +533,11 @@ def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
     model.load_state_dict(load_file(str(folder / "model.safetensors")), strict = True)
     # As laya does at load: ModernBERT would otherwise torch.compile parts of the encoder.
     model.encoder.config.reference_compile = False
+    positions = int(getattr(model.encoder.config, "max_position_embeddings", TRAIN_MAX_LEN))
+    cfg["max_len"] = min(positions, max(int(cfg.get("max_len", 512)), TRAIN_MAX_LEN))
+    cfg["head_max_len"] = min(
+        cfg["max_len"] // 2, max(int(cfg.get("head_max_len", 192)), TRAIN_HEAD_MAX_LEN)
+    )
     if stopped_before_training():
         return
 
@@ -453,11 +566,11 @@ def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
         send("warning", message = f"Skipped {skipped:,} of {total:,} decisions: {reason}.")
 
     if eval_items is None:
-        order = list(range(len(items)))
-        random.Random(seed).shuffle(order)
-        held = set(order[: min(HOLDOUT_MAX, len(items) // 10)])
-        eval_items = [item for i, item in enumerate(items) if i in held]
-        items = [item for i, item in enumerate(items) if i not in held]
+        items, eval_items = _split_holdout(items, seed)
+        if eval_items:
+            status(f"Holding out {len(eval_items):,} decisions to calibrate confidence...")
+    elif len(eval_items) > EVAL_MAX:
+        eval_items = random.Random(seed).sample(eval_items, EVAL_MAX)
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -470,13 +583,8 @@ def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
     frozen_dtype = torch.float16 if amp_dtype is not None else torch.float32
     use_lora = config.get("training_type") == "LoRA/QLoRA"
     checkpointing = str(config.get("gradient_checkpointing") or "none").lower()
-    if checkpointing == "unsloth":
-        from core.import_guards import ensure_real_packages
-
-        ensure_real_packages("unsloth_zoo", "unsloth")
-        import unsloth  # noqa: F401
+    if checkpointing == "unsloth" and device.type == "cuda":
         from unsloth_zoo.gradient_checkpointing import patch_unsloth_smart_gradient_checkpointing
-
         patch_unsloth_smart_gradient_checkpointing(dtype = amp_dtype)
     if checkpointing not in ("none", "false"):
         model.encoder.gradient_checkpointing_enable(
@@ -516,7 +624,12 @@ def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
         base_metrics = _metrics(
             logits,
             eval_items,
-            lambda qt, k: base_buckets.get(temp_bucket(qt, k), base_temperature[qt]),
+            [
+                base_buckets.get(
+                    temp_bucket(item["qtype"], len(z)), base_temperature[item["qtype"]]
+                )
+                for z, item in zip(logits, eval_items)
+            ],
             laya.common.ece_score,
         )
         logger.info("Base held-out accuracy %.4f, ECE %.4f", *base_metrics)
@@ -556,6 +669,7 @@ def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
     )
     scaler = torch.amp.GradScaler("cuda", enabled = amp_dtype == torch.float16)
     max_grad_norm = float(config.get("max_grad_norm") or 1.0)
+    eval_every = _eval_interval(config.get("eval_steps"), total_steps)
 
     output_dir = str(
         resolve_output_dir(
@@ -593,7 +707,6 @@ def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
         for epoch in range(epochs):
             if step >= total_steps or stop["requested"]:
                 break
-            sigma = SIGMA_START + (SIGMA_END - SIGMA_START) * (epoch / max(1, epochs - 1))
             chunks = _length_grouped_batches(items, batch_size, seed + epoch)
             losses: list[float] = []
             for index, chunk in enumerate(chunks):
@@ -603,28 +716,11 @@ def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
                 logits = _forward(model, batch, device, amp_dtype)
                 mask = batch["marker_mask"].to(device)
                 target = batch["target"].to(device)
-                options = mask.sum(-1, keepdim = True).float()
-                noise = torch.randn((GROUP_SIZE,) + logits.shape, device = device) * sigma * mask
-                noise = (noise - noise.sum(-1, keepdim = True) / options) * mask
-                sampled = logits.detach().unsqueeze(0) + noise
-                with torch.no_grad():
-                    reward = laya.common.proper_reward(
-                        torch.softmax(sampled.masked_fill(~mask, -1e4), -1),
-                        target.unsqueeze(0),
-                        batch["qtype"].to(device),
-                        mask,
-                        w_sph = 0.75,
-                        w_rps = 1.0,
-                    )
-                    advantage = reward - reward.mean(0, keepdim = True)
-                    advantage = advantage / (advantage.std() + 1e-6)
-                log_prob = -(((sampled - logits.unsqueeze(0)) ** 2) * mask).sum(-1) / (2 * sigma**2)
-                soft_ce = (
+                loss = (
                     -(target * torch.log_softmax(logits.masked_fill(~mask, -1e4), -1))
                     .sum(-1)
                     .mean()
                 )
-                loss = -(advantage * log_prob).mean() + soft_ce
                 scaler.scale(loss / accumulation).backward()
                 losses.append(loss.item())
                 if (index + 1) % accumulation and index + 1 < len(chunks):
@@ -648,7 +744,7 @@ def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
                 }
                 last_of_epoch = index + 1 == len(chunks) or step >= total_steps
                 eval_loss = None
-                if last_of_epoch and eval_items:
+                if eval_items and (last_of_epoch or (eval_every and step % eval_every == 0)):
                     eval_loss = _soft_ce(
                         _heldout_logits(model, eval_items, collate, device, amp_dtype),
                         eval_items,
@@ -681,18 +777,13 @@ def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
         model.encoder = model.encoder.merge_and_unload()
 
     status("Calibrating confidence...")
-    temperature = list(cfg.get("temperature", [1.0, 1.0, 1.0]))
+    temperature = list(base_temperature)
     tuned_metrics = None
+    fitted: set[int] = set()
     if eval_items:
         logits = _heldout_logits(model, eval_items, collate, device, amp_dtype)
-        for qtype in range(3):
-            chosen = [i for i, item in enumerate(eval_items) if item["qtype"] == qtype]
-            if len(chosen) >= MIN_CALIBRATION_ITEMS:
-                temperature[qtype] = clamp(
-                    _fit_temperature([logits[i] for i in chosen], [eval_items[i] for i in chosen])
-                )
-        tuned_metrics = _metrics(
-            logits, eval_items, lambda qt, k: temperature[qt], laya.common.ece_score
+        temperature, fitted, tuned_metrics = _calibrate(
+            logits, eval_items, base_temperature, clamp, laya.common.ece_score
         )
         logger.info("Fine-tuned held-out accuracy %.4f, ECE %.4f", *tuned_metrics)
 
@@ -700,11 +791,18 @@ def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
     cfg["fine_tuned"] = True
     cfg["temperature"] = temperature
     # Inherited per-bucket temperatures take precedence at load and would mask the new fit.
-    cfg.pop("temperature_by_options", None)
+    buckets = {
+        key: value
+        for key, value in cfg.pop("temperature_by_options", {}).items()
+        if laya.common.QTYPES.get(key.split(":")[0]) not in fitted
+    }
+    if buckets:
+        cfg["temperature_by_options"] = buckets
     cfg["training"] = {
         "base": model_name,
         "subfolder": subfolder,
         "method": "lora" if use_lora else "full",
+        "objective": "soft_cross_entropy",
         "dataset": config.get("hf_dataset")
         or [Path(path).name for path in config.get("local_datasets") or []],
         "steps": step,
@@ -722,7 +820,7 @@ def _run(event_queue: Any, stop_queue: Any, config: dict) -> None:
     logger.info("Decision model saved to %s: %s", output_dir, cfg["training"])
 
     message = "Decision training completed"
-    if base_metrics and tuned_metrics:
+    if base_metrics and tuned_metrics and len(eval_items) >= MIN_REPORTED_ITEMS:
         message = (
             f"Held-out accuracy {base_metrics[0]:.2f} -> {tuned_metrics[0]:.2f}, "
             f"calibration error {tuned_metrics[1]:.2f}"

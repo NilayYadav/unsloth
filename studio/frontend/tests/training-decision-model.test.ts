@@ -6,6 +6,7 @@ import test, { after } from "node:test";
 
 import {
   installLocalStorageFake,
+  readText,
   registerStoreStubResolver,
 } from "./helpers/kit.ts";
 
@@ -22,8 +23,11 @@ const { buildTrainingStartPayload } = await import(
 const { validateTrainingConfig } = await import(
   "../src/features/training/lib/validation.ts"
 );
-const { missingDecisionColumns } = await import(
+const { checkDecisionDatasetColumns, missingDecisionColumns } = await import(
   "../src/features/training/lib/decision-dataset.ts"
+);
+const { countNonDefaultAdvancedSettings } = await import(
+  "../src/features/studio/wizard/advanced-settings-summary.ts"
 );
 
 const LAYA = "convaiinnovations/laya";
@@ -32,7 +36,7 @@ const LAYA_CONFIG = {
   id: LAYA,
   config: {
     training: {
-      learning_rate: 8e-4,
+      learning_rate: 2.5e-5,
       batch_size: 8,
       gradient_accumulation_steps: 8,
       num_epochs: 4,
@@ -62,6 +66,21 @@ const LAYA_CONFIG = {
   max_position_embeddings: null,
 };
 
+const LLM = "unsloth/Qwen3-0.6B";
+
+const LLM_CONFIG = {
+  id: LLM,
+  config: { training: { max_steps: 60 } },
+  is_vision: false,
+  is_embedding: false,
+  is_audio: false,
+  audio_type_known: true,
+  is_lora: false,
+  model_type: "text",
+  model_size_bytes: 1_200_000_000,
+  max_position_embeddings: 32768,
+};
+
 async function waitForModelDefaults(model: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const state = useTrainingConfigStore.getState();
@@ -76,16 +95,21 @@ async function waitForModelDefaults(model: string): Promise<void> {
   throw new Error("model defaults did not settle");
 }
 
-async function selectLaya(): Promise<string[]> {
+async function selectModel(model: string): Promise<string[]> {
   const requested: string[] = [];
   setAuthFetchHandler((input) => {
     requested.push(input);
-    return Promise.resolve(Response.json(LAYA_CONFIG));
+    if (input.startsWith("/api/models/config/")) {
+      return Response.json(input.includes("laya") ? LAYA_CONFIG : LLM_CONFIG);
+    }
+    return Response.json({});
   });
-  useTrainingConfigStore.getState().selectTrainingModel(LAYA, "text");
-  await waitForModelDefaults(LAYA);
+  useTrainingConfigStore.getState().selectTrainingModel(model, "text");
+  await waitForModelDefaults(model);
   return requested;
 }
+
+const selectLaya = () => selectModel(LAYA);
 
 after(() => setAuthFetchHandler(null));
 
@@ -128,24 +152,90 @@ test("leaving CPT for a decision model does not keep CPT's learning rate", async
   assert.equal(state.learningRate, 8e-4);
 });
 
-test("a decision model can switch to full fine-tuning at the full learning rate", async () => {
+test("a fresh decision pick defaults to LoRA even from full fine-tuning", async () => {
   useTrainingConfigStore.getState().reset();
-  await selectLaya();
   useTrainingConfigStore.getState().setTrainingMethod("full");
 
-  const payload = buildTrainingStartPayload(
+  await selectLaya();
+
+  const state = useTrainingConfigStore.getState();
+  assert.equal(state.trainingMethod, "lora");
+  assert.equal(state.learningRate, 8e-4);
+});
+
+test("toggling a decision model between full and LoRA uses the decision learning rates", async () => {
+  useTrainingConfigStore.getState().reset();
+  await selectLaya();
+
+  useTrainingConfigStore.getState().setTrainingMethod("lora");
+  let payload = buildTrainingStartPayload(
     useTrainingConfigStore.getState(),
     null,
   );
+  assert.equal(payload.training_type, "LoRA/QLoRA");
+  assert.equal(payload.use_lora, true);
+  assert.equal(payload.learning_rate, "0.0008");
 
+  useTrainingConfigStore.getState().setTrainingMethod("full");
+  payload = buildTrainingStartPayload(useTrainingConfigStore.getState(), null);
   assert.equal(payload.training_type, "Full Finetuning");
   assert.equal(payload.use_lora, false);
-  assert.equal(payload.learning_rate, "0.00002");
+  assert.equal(payload.learning_rate, "0.000025");
 });
 
-test("a decision run sends the decision fields and nothing the recipe ignores", async () => {
+test("a checkpoint pick survives defaults reloads and resets on a model change", async () => {
   useTrainingConfigStore.getState().reset();
   await selectLaya();
+  useTrainingConfigStore.getState().setModelSubfolder(null);
+
+  useTrainingConfigStore.getState().ensureModelDefaultsLoaded();
+  await waitForModelDefaults(LAYA);
+  assert.equal(useTrainingConfigStore.getState().modelSubfolder, null);
+
+  useTrainingConfigStore.getState().setSelectedModelCacheReference(LAYA, {
+    localPath: "/cache/convaiinnovations/laya",
+    modelFormat: null,
+  });
+  await waitForModelDefaults(LAYA);
+  assert.equal(useTrainingConfigStore.getState().modelSubfolder, null);
+
+  await selectModel(LLM);
+  await selectLaya();
+  assert.equal(
+    useTrainingConfigStore.getState().modelSubfolder,
+    "multilingual",
+  );
+});
+
+test("leaving a decision model restores the method and streaming it overrode", async () => {
+  useTrainingConfigStore.getState().reset();
+  useTrainingConfigStore.setState({
+    datasetSource: "huggingface",
+    dataset: "roneneldan/TinyStories",
+    maxSteps: 60,
+    datasetStreaming: true,
+  });
+  useTrainingConfigStore.getState().setTrainingMethod("cpt");
+
+  await selectLaya();
+  assert.equal(useTrainingConfigStore.getState().trainingMethod, "lora");
+  assert.equal(useTrainingConfigStore.getState().datasetStreaming, false);
+  useTrainingConfigStore.getState().setTrainingMethod("full");
+
+  await selectModel(LLM);
+
+  const state = useTrainingConfigStore.getState();
+  assert.equal(state.modelType, "text");
+  assert.equal(state.trainingMethod, "cpt");
+  assert.equal(state.learningRate, 5e-5);
+  assert.equal(state.datasetStreaming, true);
+  assert.equal(state.settingsBeforeDecision, null);
+});
+
+test("a decision run sends the decision fields and switches off the LLM-only options", async () => {
+  useTrainingConfigStore.getState().reset();
+  await selectLaya();
+  useTrainingConfigStore.getState().setTrainingMethod("lora");
   useTrainingConfigStore.getState().setModelSubfolder(null);
   useTrainingConfigStore.setState({
     datasetSource: "huggingface",
@@ -230,4 +320,56 @@ test("the start check names the decision columns a dataset lacks", () => {
     "gold",
   ]);
   assert.deepEqual(missingDecisionColumns(["state", "gold"]), ["questions"]);
+});
+
+test("a decision start is not blocked when the generic format check cannot parse the rows", async () => {
+  assert.deepEqual(
+    await checkDecisionDatasetColumns(() =>
+      Promise.reject(new Error("Failed to load dataset: ArrowInvalid")),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    await checkDecisionDatasetColumns(() =>
+      Promise.resolve({ columns: ["messages"] }),
+    ),
+    ["state", "questions", "gold"],
+  );
+  assert.equal(
+    await checkDecisionDatasetColumns(() => Promise.resolve(null)),
+    null,
+  );
+  assert.ok(
+    readText(
+      "../src/features/training/lib/start-fresh-training-run.ts",
+    ).includes("checkDecisionDatasetColumns("),
+    "the start flow must run decision datasets through the tolerant check",
+  );
+});
+
+test("the run summary does not count settings the decision trainer ignores", async () => {
+  useTrainingConfigStore.getState().reset();
+  await selectLaya();
+  useTrainingConfigStore.getState().setTrainingMethod("lora");
+  useTrainingConfigStore.setState({
+    packing: true,
+    trainOnCompletions: true,
+    saveSteps: 50,
+    optimizerType: "paged_adamw_8bit",
+    loraVariant: "dora",
+    targetModules: ["q_proj"],
+  });
+  const state = useTrainingConfigStore.getState();
+
+  assert.equal(
+    countNonDefaultAdvancedSettings(state, state.advancedSettingsBaseline),
+    0,
+  );
+  assert.equal(
+    countNonDefaultAdvancedSettings(
+      { ...state, modelType: "text" },
+      state.advancedSettingsBaseline,
+    ),
+    6,
+  );
 });
