@@ -203,7 +203,7 @@ def _build_local_dataset_items() -> list[LocalDatasetItem]:
     return items
 
 
-def _stream_file_preview_slice(path: Path, preview_size: int, **load_kwargs):
+def _stream_file_preview_slice(path: Path, preview_size: int):
     """Stream the first ``preview_size`` rows so a large file is never fully parsed into Arrow; returns ``(Dataset, None)`` or ``None`` if empty/unsupported."""
     from itertools import islice
 
@@ -228,7 +228,6 @@ def _stream_file_preview_slice(path: Path, preview_size: int, **load_kwargs):
         data_files = str(path),
         split = "train",
         streaming = True,
-        **load_kwargs,
     )
     rows = list(islice(streamed, preview_size))
     if not rows:
@@ -239,7 +238,6 @@ def _stream_file_preview_slice(path: Path, preview_size: int, **load_kwargs):
 def _load_local_preview_slice(*, dataset_path: Path, train_split: str, preview_size: int):
     # Non-streaming loads take the cached builder lock; use the EACCES-safe wrapper.
     from utils.datasets.cache_safe import load_dataset_cache_safe as load_dataset
-    from utils.datasets.cells import csv_as_text_kwargs
 
     if dataset_path.is_dir():
         parquet_dir = (
@@ -277,9 +275,7 @@ def _load_local_preview_slice(*, dataset_path: Path, train_split: str, preview_s
         return preview_slice, total_rows
 
     if suffix in (".json", ".jsonl", ".csv"):
-        preview = _stream_file_preview_slice(
-            dataset_path, preview_size, **csv_as_text_kwargs([dataset_path])
-        )
+        preview = _stream_file_preview_slice(dataset_path, preview_size)
         if preview is None:
             raise HTTPException(
                 status_code = 400,
