@@ -76,7 +76,6 @@ from utils.models.model_identity import restore_hf_cache_repo_identity
 from utils.models.unsloth_mirror import unsloth_public_mirror
 from utils.models.model_config import _env_offline
 from utils.datasets import format_and_template_dataset
-from utils.datasets.cells import csv_as_text_kwargs
 from utils.datasets.chat_templates import get_training_chat_template
 from utils.datasets.completion_masking import apply_completion_masking
 from utils.datasets.iterable import is_streaming_dataset as detect_streaming_dataset
@@ -2808,12 +2807,7 @@ class UnslothTrainer:
 
                 if all_files:
                     loader = self._loader_for_files(all_files)
-                    dataset = load_dataset(
-                        loader,
-                        data_files = all_files,
-                        split = "train",
-                        **csv_as_text_kwargs(all_files, raw_text_mode),
-                    )
+                    dataset = load_dataset(loader, data_files = all_files, split = "train")
 
                     if self.should_stop:
                         logger.info("Stopped during dataset loading\n")
@@ -2830,10 +2824,7 @@ class UnslothTrainer:
                     if eval_all_files:
                         eval_loader = self._loader_for_files(eval_all_files)
                         eval_dataset = load_dataset(
-                            eval_loader,
-                            data_files = eval_all_files,
-                            split = "train",
-                            **csv_as_text_kwargs(eval_all_files, raw_text_mode),
+                            eval_loader, data_files = eval_all_files, split = "train"
                         )
                         has_separate_eval_source = True
                         logger.info(
