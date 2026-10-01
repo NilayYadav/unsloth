@@ -28,6 +28,7 @@ import {
   createDatasetCacheUsabilityIdentity,
   trainingDatasetCacheRejections,
 } from "./dataset-cache-rejection";
+import { missingDecisionColumns } from "./decision-dataset";
 import { shouldUseVisionDatasetCheck } from "./fresh-dataset-check";
 import { isMissingLocalDatasetCacheError } from "./local-cache-errors";
 import { isRawTextDatasetFormat } from "./training-methods";
@@ -386,6 +387,17 @@ async function prepareSelectedDataset(
   }
   if (hasIncompatibleTrainingModalities(attempt.config)) {
     return attempt.cancel();
+  }
+  if (attempt.config.modelType === "decision") {
+    const missing = missingDecisionColumns(check.columns);
+    return (
+      missing.length === 0 ||
+      attempt.cancel(
+        translate("studio.training.validation.decisionColumnsMissing", {
+          columns: missing.join(", "),
+        }),
+      )
+    );
   }
   if (!needsManualMapping(attempt.config, check, isVlm, isAudio)) {
     return true;

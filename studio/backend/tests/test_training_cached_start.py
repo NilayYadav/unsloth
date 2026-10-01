@@ -1326,6 +1326,7 @@ def test_streaming_rejects_cached_dataset_hints(cache_overrides):
         ({"is_embedding": True}, "Embedding model training"),
         ({"is_dataset_audio": True}, "Audio dataset training"),
         ({"use_loftq": True}, "LoftQ"),
+        ({"is_decision": True, "training_type": "Full Finetuning"}, "Decision model training"),
     ],
 )
 def test_mlx_start_rejects_unsupported_training_config(request_overrides, expected):
@@ -1343,6 +1344,52 @@ def test_mlx_start_rejects_unsupported_training_config(request_overrides, expect
 
     assert exc_info.value.status_code == 400
     assert expected in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("request_overrides", "expected"),
+    [
+        ({"training_type": "Continued Pretraining"}, "continued pretraining is not available"),
+        ({"resume_from_checkpoint": "outputs/run"}, "cannot be resumed"),
+        ({"dataset_streaming": True, "max_steps": 10}, "dataset_streaming"),
+        ({"model_subfolder": "../other"}, "Unknown checkpoint"),
+        ({"model_name": "org/laya-fork", "model_subfolder": "multilingual"}, "Unknown checkpoint"),
+    ],
+)
+def test_decision_start_rejects_what_the_recipe_cannot_run(request_overrides, expected):
+    route = _load_route_module(f"training_route_decision_reject_{expected}")
+    request = _request(
+        **{
+            "model_name": "convaiinnovations/laya",
+            "is_decision": True,
+            "training_type": "Full Finetuning",
+            **request_overrides,
+        }
+    )
+
+    with (
+        patch.object(route, "get_training_backend", return_value = _refusing_backend()),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        _start(route, request)
+
+    assert exc_info.value.status_code == 400
+    assert expected in exc_info.value.detail
+
+
+def test_decision_start_takes_lora_in_16_bit():
+    route = _load_route_module("training_route_decision_lora")
+    request = _request(
+        model_name = "convaiinnovations/laya",
+        is_decision = True,
+        training_type = "LoRA/QLoRA",
+        load_in_4bit = True,
+    )
+
+    route._validate_decision_request(request)
+
+    assert request.training_type == "LoRA/QLoRA"
+    assert request.load_in_4bit is False
 
 
 def test_mlx_start_accepts_dora():

@@ -55,6 +55,48 @@ CHECKPOINTS = {
 # Names TypeSafe's and OpenJev's SDKs send by default, so an unmodified client reaches the configured model.
 DEFAULT_ALIASES = frozenset({"default", "laya", "jev-latest", "jev-preview", "openjev-latest"})
 LOCAL_NAME = "laya-local"
+FINE_TUNE_PREFIX = "laya-ft:"
+
+
+def _owner_outputs() -> Path:
+    from utils.account_context import OWNER, bind_account, reset_account
+    from utils.paths import outputs_root
+
+    token = bind_account(OWNER)
+    try:
+        return outputs_root().resolve()
+    finally:
+        reset_account(token)
+
+
+def _fine_tune_in(root: Path, folder_name: str) -> Checkpoint | None:
+    from .laya_runtime import is_cached
+
+    folder = root / folder_name
+    if folder_name in ("", ".", "..") or folder.resolve().parent != root:
+        return None
+    checkpoint = Checkpoint(
+        FINE_TUNE_PREFIX + folder_name, str(folder), None, "Laya fine-tuned in Studio."
+    )
+    return checkpoint if is_cached(checkpoint) else None
+
+
+def fine_tune(name: str) -> Checkpoint | None:
+    if not name.startswith(FINE_TUNE_PREFIX):
+        return None
+    folder_name = name[len(FINE_TUNE_PREFIX) :]
+    if "/" in folder_name or "\\" in folder_name:
+        return None
+    return _fine_tune_in(_owner_outputs(), folder_name)
+
+
+def fine_tunes() -> list[Checkpoint]:
+    root = _owner_outputs()
+    try:
+        folders = sorted(p.name for p in root.iterdir() if p.is_dir())
+    except OSError:
+        return []
+    return [c for name in folders if (c := _fine_tune_in(root, name)) is not None]
 
 
 def default_checkpoint() -> Checkpoint:
@@ -63,6 +105,8 @@ def default_checkpoint() -> Checkpoint:
     configured = get_model()
     if configured in CHECKPOINTS:
         return CHECKPOINTS[configured]
+    if (checkpoint := fine_tune(configured)) is not None:
+        return checkpoint
     subfolder = os.environ.get("UNSLOTH_SYSTEMONE_SUBFOLDER", "").strip() or None
     return Checkpoint(LOCAL_NAME, configured, subfolder, "Local Laya checkpoint.")
 
@@ -74,4 +118,4 @@ def resolve(model: str) -> Checkpoint | None:
     if name == LOCAL_NAME:
         checkpoint = default_checkpoint()
         return checkpoint if checkpoint.name == LOCAL_NAME else None
-    return CHECKPOINTS.get(name)
+    return CHECKPOINTS.get(name) or fine_tune(name)

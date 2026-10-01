@@ -2716,6 +2716,10 @@ def _run_mlx_training(event_queue, stop_queue, config):
         message = "Embedding model training is not supported for MLX training yet."
         _send("error", error = message)
         raise NotImplementedError(message)
+    if config.get("is_decision"):
+        message = "Decision model training is not supported for MLX training yet."
+        _send("error", error = message)
+        raise NotImplementedError(message)
     if config.get("training_type") == "Continued Pretraining":
         message = "Continued Pretraining is not supported for MLX training yet."
         _send("error", error = message)
@@ -4155,6 +4159,21 @@ def run_training_process(*, event_queue: Any, stop_queue: Any, config: dict) -> 
                     )
             except Exception as _cap_err:
                 logger.debug("Could not set GPU memory fraction: %s", _cap_err)
+
+    if config.get("is_decision", False):
+        try:
+            from core.training.decision_trainer import run_decision_training
+            run_decision_training(event_queue, stop_queue, config)
+        except Exception as exc:
+            event_queue.put(
+                {
+                    "type": "error",
+                    "error": str(exc),
+                    "stack": traceback.format_exc(limit = 20),
+                    "ts": time.time(),
+                }
+            )
+        return
 
     # ── 2. Now import ML libraries (fresh in this clean process) ──
     try:

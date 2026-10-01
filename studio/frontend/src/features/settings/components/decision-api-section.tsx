@@ -134,8 +134,13 @@ export function DecisionApiSection(): ReactElement | null {
     };
   }, [enabled, model, downloadDone]);
 
-  const modelLabel = (name: string) =>
-    MODEL_LABELS[name] ? t(MODEL_LABELS[name]) : name;
+  const modelLabel = (name: string) => {
+    const option = settings?.models.find((m) => m.name === name);
+    if (option?.kind === "fine_tune" && option.label) {
+      return option.label;
+    }
+    return MODEL_LABELS[name] ? t(MODEL_LABELS[name]) : name;
+  };
 
   const resyncSettingsAfterError = async (message: string) => {
     try {
@@ -310,6 +315,10 @@ export function DecisionApiSection(): ReactElement | null {
 
   const current = settings.models.find((m) => m.name === settings.model);
   const knownModel = current !== undefined;
+  const modelOptions = [
+    ...settings.models.filter((m) => m.kind !== "fine_tune"),
+    ...settings.models.filter((m) => m.kind === "fine_tune"),
+  ];
   const sizeBytes = plan?.sizeBytes || current?.downloadBytes || 0;
 
   let tone: "pending" | "ready" | "error" | null = null;
@@ -346,7 +355,10 @@ export function DecisionApiSection(): ReactElement | null {
     action = "download";
   } else {
     tone = "ready";
-    status = t("settings.apiKeys.decisionApi.downloaded");
+    status =
+      current?.kind === "fine_tune"
+        ? t("settings.apiKeys.decisionApi.ready")
+        : t("settings.apiKeys.decisionApi.downloaded");
   }
 
   return (
@@ -448,13 +460,15 @@ export function DecisionApiSection(): ReactElement | null {
                   <SelectValue>{modelLabel(settings.model)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {settings.models.map((option) => (
+                  {modelOptions.map((option) => (
                     <SelectItem key={option.name} value={option.name}>
                       <span className="flex items-center gap-2">
                         {modelLabel(option.name)}
-                        <span className="text-ui-10 tabular-nums text-muted-foreground">
-                          {formatBytes(option.downloadBytes)}
-                        </span>
+                        {option.kind === "fine_tune" ? null : (
+                          <span className="text-ui-10 tabular-nums text-muted-foreground">
+                            {formatBytes(option.downloadBytes)}
+                          </span>
+                        )}
                         {option.name === RECOMMENDED_MODEL ? (
                           <span className="rounded-full bg-emerald-500/12 px-1.5 py-px text-ui-9 font-medium text-emerald-600 dark:text-emerald-400">
                             {t("settings.apiKeys.decisionApi.recommended")}

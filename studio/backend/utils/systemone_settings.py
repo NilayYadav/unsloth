@@ -72,10 +72,12 @@ def get_enabled() -> bool:
 def get_model() -> str:
     if model_locked():
         return _env(ENV_MODEL)
-    from core.systemone.catalog import CHECKPOINTS
+    from core.systemone.catalog import CHECKPOINTS, fine_tune
 
     stored = _owner_setting(MODEL_KEY)
-    return stored if stored in CHECKPOINTS else DEFAULT_MODEL
+    if stored in CHECKPOINTS or (isinstance(stored, str) and fine_tune(stored) is not None):
+        return stored
+    return DEFAULT_MODEL
 
 
 def get_device() -> str:
@@ -91,7 +93,7 @@ def validate(
     model: str | None = None,
     device: str | None = None,
 ) -> dict[str, Any]:
-    from core.systemone.catalog import CHECKPOINTS
+    from core.systemone.catalog import CHECKPOINTS, fine_tune
 
     values: dict[str, Any] = {}
     if enabled is not None:
@@ -103,7 +105,7 @@ def validate(
     if model is not None:
         if model_locked():
             raise ValueError(f"The Decision API model is set by {ENV_MODEL}.")
-        if model not in CHECKPOINTS:
+        if model not in CHECKPOINTS and fine_tune(model) is None:
             raise ValueError(f"Unknown Decision API model: {model}")
         values[MODEL_KEY] = model
     if device is not None:

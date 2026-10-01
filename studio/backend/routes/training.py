@@ -62,7 +62,11 @@ try:
         training_run_config,
     )
     from storage.studio_db import get_resumable_run_by_output_dir
-    from utils.models.model_config import detect_gguf_model, load_model_defaults
+    from utils.models.model_config import (
+        detect_gguf_model,
+        is_decision_model,
+        load_model_defaults,
+    )
     from utils.paths import is_local_path, normalize_path, resolve_dataset_path
 except ImportError:
     parent_backend = backend_path.parent / "backend"
@@ -84,7 +88,11 @@ except ImportError:
         training_run_config,
     )
     from storage.studio_db import get_resumable_run_by_output_dir
-    from utils.models.model_config import detect_gguf_model, load_model_defaults
+    from utils.models.model_config import (
+        detect_gguf_model,
+        is_decision_model,
+        load_model_defaults,
+    )
     from utils.paths import is_local_path, normalize_path, resolve_dataset_path
 
 from auth.authentication import authenticated_via_api_key, get_current_subject
@@ -1098,6 +1106,10 @@ def _reject_untrainable_model_request(
                 "training_remote_model_adapter_only",
                 "Adapter models are inference-only and cannot be trained as base models.",
             )
+    if request.is_decision and (
+        not is_local_path(request.model_name) or is_decision_model(str(path))
+    ):
+        return _ModelPreflightResult(model_name, model_local_path, cached_model_pin)
     has_trainable_weights = _has_trainable_local_weights(path, request.model_name)
     if has_trainable_weights:
         return _ModelPreflightResult(model_name, model_local_path, cached_model_pin)
@@ -1148,6 +1160,11 @@ def _validate_training_platform(request: TrainingStartRequest) -> None:
             status_code = 400,
             detail = "Embedding model training is not supported for MLX training yet.",
         )
+    if request.is_decision:
+        raise HTTPException(
+            status_code = 400,
+            detail = "Decision model training is not supported for MLX training yet.",
+        )
     if request.is_dataset_audio:
         raise HTTPException(
             status_code = 400,
@@ -1158,6 +1175,37 @@ def _validate_training_platform(request: TrainingStartRequest) -> None:
             status_code = 400,
             detail = "LoftQ is not supported for MLX training yet.",
         )
+
+
+def _validate_decision_request(request: TrainingStartRequest) -> None:
+    from core.systemone.catalog import CHECKPOINTS, LAYA_REPO
+
+    if not request.is_decision:
+        return
+    if request.training_type == "Continued Pretraining":
+        raise HTTPException(
+            status_code = 400,
+            detail = "Decision models train with LoRA or full fine-tuning; continued "
+            "pretraining is not available for them.",
+        )
+    if request.resume_from_checkpoint:
+        raise HTTPException(
+            status_code = 400,
+            detail = "Decision model runs cannot be resumed; start a new run instead.",
+        )
+    if request.dataset_streaming:
+        raise HTTPException(
+            status_code = 400,
+            detail = "dataset_streaming is not supported for decision model training.",
+        )
+    subfolders = {c.subfolder for c in CHECKPOINTS.values() if c.source == LAYA_REPO}
+    allowed = subfolders if request.model_name == LAYA_REPO else {None}
+    if request.model_subfolder not in allowed:
+        raise HTTPException(
+            status_code = 400,
+            detail = f"Unknown checkpoint {request.model_subfolder!r} for {request.model_name}.",
+        )
+    request.load_in_4bit = False
 
 
 _RESUME_DATASET_DEFAULTS = {
@@ -1538,6 +1586,7 @@ async def start_training(
                 error = "Diffusion training already active",
             )
 
+        _validate_decision_request(request)
         resume_output_dir: Optional[str] = None
         resume_run: Optional[dict] = None
         resume_actual_model_repo_id: Optional[str] = None
@@ -1797,6 +1846,8 @@ async def start_training(
             "is_dataset_image": request.is_dataset_image,
             "is_dataset_audio": request.is_dataset_audio,
             "is_embedding": request.is_embedding,
+            "is_decision": request.is_decision,
+            "model_subfolder": request.model_subfolder,
             "enable_wandb": request.enable_wandb,
             "wandb_token": request.wandb_token or "",
             "wandb_project": request.wandb_project or "",
@@ -1917,6 +1968,14 @@ async def start_training(
                 gpu_arbiter.release(gpu_arbiter.VIDEO)
             except Exception as e:
                 logger.warning("Could not unload video model for training: %s", e)
+
+            try:
+                from core.systemone import laya_runtime
+                if laya_runtime.status()["device"] not in (None, "cpu"):
+                    logger.info("Unloading the Decision API model to free GPU memory for training")
+                    laya_runtime.unload()
+            except Exception as e:
+                logger.warning("Could not unload the Decision API model for training: %s", e)
 
             try:
                 from routes.training_vram import (

@@ -15,7 +15,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { DatasetFormatError, checkDatasetFormat } from "../api/datasets-api";
 import { checkVisionModel, getModelConfig } from "../api/models-api";
-import type { BackendModelConfig } from "../api/models-api";
+import type { BackendModelConfig, DecisionCheckpoint } from "../api/models-api";
 import { cacheReferenceMatchesSelection } from "../lib/cache-reference";
 import {
   createDatasetCacheUsabilityIdentity,
@@ -103,6 +103,25 @@ function canReapplyModelDefaults(modelName: string): boolean {
     _modelDefaultsEditBaseline?.modelName === modelName &&
     _modelDefaultsEditBaseline.editGeneration === _modelDefaultsEditGeneration
   );
+}
+
+const DEFAULT_DECISION_CHECKPOINT = "laya-multilingual";
+
+function resolveDecisionSubfolder(
+  checkpoints: DecisionCheckpoint[] | null,
+  current: string | null,
+  keepCurrent: boolean,
+): string | null {
+  if (!checkpoints || checkpoints.length === 0) {
+    return null;
+  }
+  if (keepCurrent && checkpoints.some((c) => c.subfolder === current)) {
+    return current;
+  }
+  const preferred =
+    checkpoints.find((c) => c.name === DEFAULT_DECISION_CHECKPOINT) ??
+    checkpoints[0];
+  return preferred.subfolder;
 }
 
 // streamingCompatiblePatch can silently flip streaming-coupled fields, so toast when it does,
@@ -222,6 +241,15 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             if (controller.signal.aborted) return;
             if (!requestMatchesSelection()) return;
 
+            const isDecision = modelDetails.model_type === "decision";
+            if (
+              isDecision &&
+              get().trainingMethod !== "lora" &&
+              get().trainingMethod !== "full"
+            ) {
+              set(buildTrainingMethodPatch(get(), "lora"));
+            }
+
             const shouldApplyTrainingDefaults = canApplyTrainingDefaults();
             const shouldApplyCptTargetDefaults =
               applyTrainingDefaults &&
@@ -298,12 +326,22 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
             const inferredModelType = resolveTrainingModelType({
               modelType: modelDetails.model_type,
               isEmbedding,
+              isDecision,
               isVision: modelDetails.is_vision,
               isAudio: modelDetails.is_audio,
             });
+            const decisionCheckpoints = isDecision
+              ? (modelDetails.decision_checkpoints ?? null)
+              : null;
+            const modelSubfolder = resolveDecisionSubfolder(
+              decisionCheckpoints,
+              get().modelSubfolder,
+              !shouldApplyTrainingDefaults,
+            );
 
             const modelSizeBytes = modelDetails.model_size_bytes;
             const autoSelectionPromise =
+              !isDecision &&
               shouldApplyTrainingDefaults &&
               typeof modelSizeBytes === "number" &&
               modelSizeBytes > 0 &&
@@ -421,6 +459,7 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
               ...cptOverrides,
               ...cptTargetOverrides,
               ...deferredCompletionDefault,
+              ...(isDecision ? { datasetStreaming: false } : {}),
               ...(shouldApplyTrainingDefaults
                 ? {
                     trainingMethodProvenance: {
@@ -447,6 +486,8 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
                     }
                   : advancedSettingsBaseline,
               modelType: inferredModelType,
+              modelSubfolder,
+              decisionCheckpoints,
               isVisionModel: modelDetails.is_vision,
               isEmbeddingModel: isEmbedding,
               isAudioModel: isAudio,
@@ -525,6 +566,7 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
                 set({
                   modelType: inferTrainingModelTypeFromFlags({
                     isEmbedding: state.isEmbeddingModel,
+                    isDecision: state.modelType === "decision",
                     isAudio: state.isAudioModel,
                     isVision,
                   }),
@@ -1049,6 +1091,7 @@ export const useTrainingConfigStore = create<TrainingConfigStore>()(
               canReapplyModelDefaults(state.selectedModel),
           });
         },
+        setModelSubfolder: (modelSubfolder) => setUserEdit({ modelSubfolder }),
         setProjectName: (projectName) => setUserEdit({ projectName }),
         setTrainingMethod: (trainingMethod) => {
           _trainingMethodEditGeneration += 1;

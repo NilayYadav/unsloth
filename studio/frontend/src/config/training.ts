@@ -198,6 +198,7 @@ export const MODEL_TYPE_TO_HF_TASKS: Record<
     "text-to-audio",
   ],
   embeddings: ["feature-extraction"],
+  decision: ["text-classification"],
 };
 
 export const PRIORITY_TRAINING_MODELS: readonly string[] = [

@@ -15,6 +15,7 @@ export { loadOpenAIAutoSwitchSettings } from "./api/openai-auto-switch";
 export {
   loadSystemOneSettings,
   subscribeSystemOneSettings,
+  updateSystemOneSettings,
 } from "./api/systemone";
 export {
   loadHuggingFaceCacheSettings,

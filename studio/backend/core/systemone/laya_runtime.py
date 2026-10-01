@@ -58,7 +58,8 @@ def _device() -> str:
     from utils.systemone_settings import get_device as preferred_device
 
     # CPU unless asked: a CUDA context opened in the backend process is never returned (see core.rag.embeddings._device).
-    if preferred_device() != "gpu":
+    # New loads also stay on CPU while a training job owns the GPU, as dictation does.
+    if preferred_device() != "gpu" or _training_active():
         return "cpu"
     from utils.hardware.hardware import DeviceType, get_device
 
@@ -74,6 +75,14 @@ def _device() -> str:
     from utils.torch_device_probe import device_can_allocate
 
     return candidate if device_can_allocate(candidate) else "cpu"
+
+
+def _training_active() -> bool:
+    try:
+        from core.training import get_training_backend
+        return bool(get_training_backend().is_training_active())
+    except Exception:
+        return False
 
 
 def _mlx_available() -> bool:
@@ -201,7 +210,7 @@ def is_cached(checkpoint: Checkpoint) -> bool:
 def download_plan(checkpoint: Checkpoint) -> dict[str, Any]:
     cached = is_cached(checkpoint)
     plan = {"repo": None, "files": [], "size_bytes": 0, "cached": cached, "error": None}
-    if checkpoint.name == LOCAL_NAME:
+    if checkpoint.name == LOCAL_NAME or checkpoint.is_local:
         if not cached:
             plan["error"] = f"No complete Laya checkpoint at {checkpoint.source}"
         return plan
