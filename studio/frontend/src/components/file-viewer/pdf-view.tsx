@@ -4,7 +4,7 @@
 import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/i18n";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs, usePageContext } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import { queueParse } from "./parse-queue";
@@ -226,6 +226,37 @@ function useParseSlot(enabled: boolean, file: Blob): { ready: boolean; release: 
   return { ready: !enabled || ready === file, release };
 }
 
+type PdfWorker = {
+  worker: InstanceType<typeof pdfjs.PDFWorker>;
+  loaded: Set<{ destroy(): Promise<void> }>;
+};
+
+/**
+ * One worker per document. unpdf sets globalThis.pdfjsWorker to its own PDF.js build, which PDF.js
+ * then adopts and fails on (version mismatch). Passing a worker skips that lookup.
+ */
+function usePdfWorker(enabled: boolean): PdfWorker | null {
+  const [state, setState] = useState<PdfWorker | null>(null);
+  useEffect(() => {
+    // Queued thumbnails and failed loads hold no worker.
+    if (!enabled) return;
+    const port = new Worker(pdfjs.GlobalWorkerOptions.workerSrc, { type: "module" });
+    const next: PdfWorker = { worker: pdfjs.PDFWorker.create({ port }), loaded: new Set() };
+    // External resource owned by this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setState(next);
+    return () => {
+      setState(null);
+      // PDF.js frees a document's fonts only once the worker answers its Terminate.
+      void Promise.allSettled([...next.loaded].map((doc) => doc.destroy())).then(() => {
+        next.worker.destroy();
+        port.terminate();
+      });
+    };
+  }, [enabled]);
+  return state;
+}
+
 export default function PdfView({
   file,
   scale,
@@ -244,17 +275,20 @@ export default function PdfView({
   const [failed, setFailed] = useState<Blob | null>(null);
   const width = Math.max(200, Math.min(available, MAX_PAGE_WIDTH)) * scale;
   const slot = useParseSlot(firstPageOnly, file);
+  const pdfWorker = usePdfWorker(slot.ready && failed !== file);
+  const options = useMemo(() => (pdfWorker ? { ...PDF_OPTIONS, worker: pdfWorker.worker } : null), [pdfWorker]);
 
   if (failed === file) {
     return <p className="m-auto text-sm text-muted-foreground">{t("library.preview.cannotPreview")}</p>;
   }
-  if (!slot.ready) return <div className="size-full bg-muted/60" />;
+  if (!slot.ready || !options) return <div className="size-full bg-muted/60" />;
   return (
     <div ref={setContainer} className="size-full overflow-auto bg-muted/60">
       <Document
         file={file}
-        options={PDF_OPTIONS}
+        options={options}
         onLoadSuccess={(document) => {
+          pdfWorker?.loaded.add(document);
           slot.release();
           setPdf(document);
           setPages(document.numPages);
