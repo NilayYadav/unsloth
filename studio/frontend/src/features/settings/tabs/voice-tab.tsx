@@ -27,7 +27,6 @@ import {
   fetchSttStatus,
   generateCustomTtsAudio,
   generateStudioTtsAudio,
-  isDecisionConnection,
   loadSttModel,
   releaseTtsAudioUrl,
   startSttDownload,
@@ -437,12 +436,7 @@ export function VoiceTab() {
   const setTtsProviderVoice = useVoiceSettingsStore(
     (s) => s.setTtsProviderVoice,
   );
-  const connections = useExternalProvidersStore((s) => s.providers);
-  const ttsConnections = useMemo(
-    () =>
-      connections.filter((connection) => !isDecisionConnection(connection)),
-    [connections],
-  );
+  const ttsConnections = useExternalProvidersStore((s) => s.providers);
   const hasSelectedTtsConnection = ttsConnections.some(
     (connection) => connection.id === ttsProviderId,
   );
@@ -452,7 +446,7 @@ export function VoiceTab() {
   const setTtsPitch = useVoiceSettingsStore((s) => s.setTtsPitch);
   const ttsVolume = useVoiceSettingsStore((s) => s.ttsVolume);
   const setTtsVolume = useVoiceSettingsStore((s) => s.setTtsVolume);
-  const sttConnections = ttsConnections;
+  const sttConnections = useExternalProvidersStore((s) => s.providers);
   const connectionsEnabled = useExternalProvidersStore(
     (s) => s.connectionsEnabled,
   );

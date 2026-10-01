@@ -30,7 +30,6 @@ export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 export type SettingsScrollTarget =
   | "about-updates"
-  | "api-keys-decision-api"
   | "appearance-sidebar-nav"
   | "chat-composer"
   | "chat-canvas-network"
@@ -133,7 +132,6 @@ function loadInitialTab(): SettingsTab {
 const SCROLL_TARGET_TAB: Record<SettingsScrollTarget, SettingsTab> = {
   "chat-composer": "chat",
   "about-updates": "about",
-  "api-keys-decision-api": "api-keys",
   "appearance-sidebar-nav": "appearance",
   "chat-canvas-network": "chat",
   "general-hub": "general",

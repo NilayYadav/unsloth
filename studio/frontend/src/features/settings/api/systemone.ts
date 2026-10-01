@@ -29,13 +29,6 @@ export type SystemOneSettings = {
   mcpUrl: string;
 };
 
-export type SystemOneConnection = {
-  name: string;
-  providerId: string;
-  provider: string;
-  model: string;
-};
-
 export type SystemOneDownloadPlan = {
   repo: string | null;
   files: string[];
@@ -50,14 +43,6 @@ export type SystemOneSettingsPatch = {
   device?: SystemOneDevice;
   expectedEnabled?: boolean;
   expectedModel?: string;
-};
-
-type ApiSystemOneConnection = {
-  name: string;
-  // biome-ignore lint/style/useNamingConvention: API schema
-  provider_id: string;
-  provider: string;
-  model: string;
 };
 
 type ApiSystemOneSettings = {
@@ -201,24 +186,6 @@ export async function unloadSystemOneModel(): Promise<SystemOneSettings> {
     await authFetch(`${SETTINGS_PATH}/unload`, { method: "POST" }),
     "Failed to unload the Decision API model",
   );
-}
-
-export async function loadSystemOneConnections(): Promise<
-  SystemOneConnection[]
-> {
-  const res = await authFetch(`${SETTINGS_PATH}/connections`);
-  if (!res.ok) {
-    throw new Error(
-      await readFastApiError(res, "Failed to load Decision API connections"),
-    );
-  }
-  const options = (await res.json()) as ApiSystemOneConnection[];
-  return options.map((option) => ({
-    name: option.name,
-    providerId: option.provider_id,
-    provider: option.provider,
-    model: option.model,
-  }));
 }
 
 export async function resolveSystemOneDownload(
