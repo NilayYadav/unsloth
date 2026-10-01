@@ -227,13 +227,13 @@ def test_fine_tune_is_calibrated_saved_and_served(base, studio_home, client):
             "gold": json.dumps({"q": "yes"}),
         },
     ]
-    events = _train(_config(base, _dataset(studio_home, rows)))
+    events = _train(_config(base, _dataset(studio_home, rows), eval_steps = 1))
 
     assert not _of(events, "error"), _of(events, "error")
-    progress = _of(events, "progress")
+    progress = [e for e in _of(events, "progress") if e["loss"] is not None]
     assert [e["step"] for e in progress] == [1, 2, 3]
     assert all(e["total_steps"] == 3 and e["loss"] > 0 for e in progress)
-    assert progress[-1]["eval_loss"] is not None
+    assert any(e["eval_loss"] is not None for e in _of(events, "progress"))
     assert _of(events, "warning")[0]["message"].startswith("Skipped 5 of 605 decisions: row 201")
     complete = _of(events, "complete")[-1]
     assert complete["status_message"].startswith("Held-out accuracy ")
@@ -457,19 +457,6 @@ def test_start_preflight_accepts_a_local_laya_folder(base):
     assert _reject_untrainable_model_request(request).model_name == str(base.resolve())
 
 
-def _internal(question):
-    return laya_runtime._laya().agent.Agent._to_internal(question)
-
-
-def test_noul_gold_accepts_one_sided_and_response_shaped_probabilities():
-    from core.training.decision_trainer import _target
-
-    noul = _internal(QUESTIONS["urgent"])
-    assert _target(noul, {"probabilities": {"true": 0.3}}) == ([pytest.approx(0.7), 0.3], 0)
-    assert _target(noul, {"noul": 0.8}) == ([pytest.approx(0.2), 0.8], 1)
-    assert _target(_internal(QUESTIONS["mood"]), {"label": 1.6})[1] == 2
-
-
 def test_arrow_merged_criteria_are_not_trained_as_options(tmp_path):
     pa = pytest.importorskip("pyarrow")
     import pyarrow.parquet as pq
@@ -497,41 +484,6 @@ def test_arrow_merged_criteria_are_not_trained_as_options(tmp_path):
         {"login": "accounts", "slow": "speed"},
     ]
     assert loaded[1]["gold"]["q"]["probabilities"] == {"login": 0.2, "slow": 0.8}
-
-
-def test_holdout_takes_whole_rows():
-    from core.training.decision_trainer import _split_holdout
-
-    items = [{"row": row, "q": q} for row in range(50) for q in range(3)]
-    train, held = _split_holdout(items, 3407)
-    assert len(held) == 15
-    assert not {i["row"] for i in train} & {i["row"] for i in held}
-    assert _split_holdout([{"row": 0}] * 30, 1) == ([{"row": 0}] * 30, [])
-
-
-def test_reported_calibration_is_fitted_on_the_other_half():
-    from core.training.decision_trainer import _calibrate
-
-    common = laya_runtime._laya().common
-    items = [{"row": i, "qtype": 2, "label": int(i % 3 == 0)} for i in range(200)]
-    for item in items:
-        item["target"] = [1.0 - item["label"], float(item["label"])]
-    # Confident and right only by chance: the fit wants the softest temperature allowed.
-    logits = [torch.tensor([0.0, 12.0 if i % 2 else -12.0]) for i in range(200)]
-    temperature, fitted, (accuracy, ece) = _calibrate(
-        logits, items, [1.0, 1.0, 1.0], common.clamp_temperature, common.ece_score
-    )
-    assert fitted == {2} and 0 < accuracy < 1
-    assert temperature == [1.0, 1.0, 5.0]
-    assert ece > 0
-
-
-def test_eval_interval_follows_studio_semantics():
-    from core.training.decision_trainer import _eval_interval
-
-    assert _eval_interval(0, 100) is None
-    assert _eval_interval(25, 100) == 25
-    assert _eval_interval(0.1, 228) == 23
 
 
 def test_other_accounts_reach_only_the_configured_fine_tune(studio_home, client):

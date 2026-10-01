@@ -3685,10 +3685,6 @@ def is_decision_model(
     hf_token: Optional[str] = None,
     local_files_only: bool = False,
 ) -> bool:
-    from core.systemone.catalog import LAYA_REPO
-
-    if model_name == LAYA_REPO:
-        return True
     if is_local_path(model_name):
         folder = Path(normalize_path(model_name))
         return all(

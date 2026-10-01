@@ -1178,8 +1178,6 @@ def _validate_training_platform(request: TrainingStartRequest) -> None:
 
 
 def _validate_decision_request(request: TrainingStartRequest) -> None:
-    from core.systemone.catalog import CHECKPOINTS, LAYA_REPO
-
     if not request.is_decision:
         return
     from utils.account_context import is_owner_context
@@ -1206,12 +1204,13 @@ def _validate_decision_request(request: TrainingStartRequest) -> None:
             status_code = 400,
             detail = "dataset_streaming is not supported for decision model training.",
         )
-    subfolders = {c.subfolder for c in CHECKPOINTS.values() if c.source == LAYA_REPO}
-    allowed = subfolders if request.model_name == LAYA_REPO else {None}
-    if request.model_subfolder not in allowed:
+    subfolder = request.model_subfolder
+    if subfolder is not None and (
+        subfolder in ("", ".", "..") or "/" in subfolder or "\\" in subfolder
+    ):
         raise HTTPException(
             status_code = 400,
-            detail = f"Unknown checkpoint {request.model_subfolder!r} for {request.model_name}.",
+            detail = f"Invalid checkpoint subfolder {subfolder!r} for {request.model_name}.",
         )
     request.load_in_4bit = False
 

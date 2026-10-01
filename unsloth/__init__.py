@@ -379,6 +379,13 @@ if _IS_MLX:
                 "Unsloth: FastSentenceTransformer is not yet supported on MLX."
             )
 
+    class FastDecisionModel:
+        @staticmethod
+        def from_pretrained(*args, **kwargs):
+            raise NotImplementedError(
+                "Unsloth: FastDecisionModel training is not yet supported on MLX."
+            )
+
     def is_bfloat16_supported():
         try:
             import mlx.core as mx

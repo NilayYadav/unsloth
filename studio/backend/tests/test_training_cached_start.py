@@ -1352,8 +1352,7 @@ def test_mlx_start_rejects_unsupported_training_config(request_overrides, expect
         ({"training_type": "Continued Pretraining"}, "continued pretraining is not available"),
         ({"resume_from_checkpoint": "outputs/run"}, "cannot be resumed"),
         ({"dataset_streaming": True, "max_steps": 10}, "dataset_streaming"),
-        ({"model_subfolder": "../other"}, "Unknown checkpoint"),
-        ({"model_name": "org/laya-fork", "model_subfolder": "multilingual"}, "Unknown checkpoint"),
+        ({"model_subfolder": "../other"}, "Invalid checkpoint subfolder"),
     ],
 )
 def test_decision_start_rejects_what_the_recipe_cannot_run(request_overrides, expected):
