@@ -9,7 +9,6 @@ from .cells import cell_text
 from .format_detection import detect_dataset_format, detect_multimodal_dataset, detect_custom_format_heuristic
 from .iterable import is_streaming_dataset
 from .model_mappings import MODEL_TO_TEMPLATE_MAPPER
-from core.inference.chat_template_helpers import _normalize_tool_call_arguments
 from loggers import get_logger
 logger = get_logger(__name__)
 
@@ -164,35 +163,15 @@ def _set_chat_template(tokenizer, chat_template):
         inner.chat_template = chat_template
 
 
-def _drop_none_values(value):
-    if isinstance(value, dict):
-        return {key: _drop_none_values(item) for key, item in value.items() if item is not None}
-    if isinstance(value, list):
-        return [_drop_none_values(item) for item in value]
-    return value
-
-
-def _render_conversation(tokenizer, conversation):
-    attempts = []
-    for messages in (_drop_none_values(conversation), conversation):
-        for attempt in (_normalize_tool_call_arguments(messages), messages):
-            if not any(attempt is seen for seen in attempts):
-                attempts.append(attempt)
-    for attempt in attempts[:-1]:
-        try:
-            return tokenizer.apply_chat_template(
-                attempt, tokenize = False, add_generation_prompt = False
-            )
-        except Exception:
-            pass
-    return tokenizer.apply_chat_template(attempts[-1], tokenize = False, add_generation_prompt = False)
-
-
 def _count_renderable(tokenizer, conversations):
     rendered = 0
     for conversation in conversations:
         try:
-            _render_conversation(tokenizer, conversation)
+            tokenizer.apply_chat_template(
+                conversation,
+                tokenize = False,
+                add_generation_prompt = False,
+            )
             rendered += 1
         except Exception:
             pass
@@ -514,7 +493,11 @@ def apply_chat_template_to_dataset(
 
             for convo in convos:
                 try:
-                    text = _render_conversation(tokenizer, convo)
+                    text = tokenizer.apply_chat_template(
+                        convo,
+                        tokenize = False,
+                        add_generation_prompt = False
+                    )
 
                     if remove_bos_prefix:
                         text = text.removeprefix('<bos>')
