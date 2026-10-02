@@ -106,7 +106,7 @@ def test_local_csv_seed_keeps_its_values_as_written(monkeypatch, tmp_path):
     ("filename", "package"),
     [
         ("paper.pdf", "pymupdf4llm"),
-        ("notes.docx", "mammoth"),
+        ("notes.docx", "docx"),
     ],
 )
 def test_unstructured_upload_names_missing_extractor_dependency(
@@ -138,6 +138,31 @@ def test_unstructured_upload_keeps_txt_path_working(monkeypatch, tmp_path):
     assert result.error is None
     assert any(name.endswith(".txt") for name in _block_files(seed_route))
     assert any(name.endswith(".extracted.txt") for name in _block_files(seed_route))
+
+
+def test_unstructured_docx_upload_extracts_plain_text(monkeypatch, tmp_path):
+    docx = pytest.importorskip("docx")
+    seed_route = _load_seed_route(monkeypatch, tmp_path, inline_extraction = False)
+    document = docx.Document()
+    document.add_heading("Refunds", 1)
+    document.add_paragraph("Within 30 days (see section 4.2) - email support@example.com!")
+    address = document.add_paragraph("Ship to:")
+    address.add_run().add_break()
+    address.add_run("221B Baker Street")
+    document.add_paragraph("Prices: $5.99 + tax. Use file_name.py")
+    source = tmp_path / "policy.docx"
+    document.save(source)
+
+    result = _run_upload(seed_route, "policy.docx", source.read_bytes())
+
+    assert result.status == "ok"
+    extracted = seed_route.UNSTRUCTURED_UPLOAD_ROOT / "block" / f"{result.file_id}.extracted.txt"
+    assert extracted.read_text(encoding = "utf-8").strip() == (
+        "Refunds\n"
+        "Within 30 days (see section 4.2) - email support@example.com!\n"
+        "Ship to:\n221B Baker Street\n"
+        "Prices: $5.99 + tax. Use file_name.py"
+    )
 
 
 @pytest.mark.parametrize(
