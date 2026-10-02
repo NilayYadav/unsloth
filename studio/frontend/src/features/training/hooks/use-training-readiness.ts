@@ -2,7 +2,6 @@
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { usePlatformStore } from "@/config/env";
-import { useIsAccountOwner } from "@/features/auth";
 import { useMemo } from "react";
 import {
   type StartValidationResult,
@@ -28,9 +27,8 @@ export interface TrainingReadiness {
 function deriveTrainingReadiness(
   state: TrainingConfigState,
   deviceType: string,
-  isOwner: boolean,
 ): TrainingReadiness {
-  const configValidation = validateTrainingConfig(state, deviceType, isOwner);
+  const configValidation = validateTrainingConfig(state, deviceType);
   const hasModel = !!state.selectedModel;
   const hasDataset =
     state.datasetSource === "upload"
@@ -88,7 +86,7 @@ function readinessEqual(
   );
 }
 
-function createTrainingReadinessSelector(deviceType: string, isOwner: boolean) {
+function createTrainingReadinessSelector(deviceType: string) {
   let cachedReadiness: Readonly<TrainingReadiness> | null = null;
   let cachedState: TrainingConfigState | null = null;
 
@@ -96,7 +94,7 @@ function createTrainingReadinessSelector(deviceType: string, isOwner: boolean) {
     if (state === cachedState && cachedReadiness) {
       return cachedReadiness;
     }
-    const next = deriveTrainingReadiness(state, deviceType, isOwner);
+    const next = deriveTrainingReadiness(state, deviceType);
     if (!(cachedReadiness && readinessEqual(cachedReadiness, next))) {
       cachedReadiness = Object.freeze(next);
     }
@@ -107,10 +105,9 @@ function createTrainingReadinessSelector(deviceType: string, isOwner: boolean) {
 
 export function useTrainingReadiness(): Readonly<TrainingReadiness> {
   const deviceType = usePlatformStore((state) => state.deviceType);
-  const isOwner = useIsAccountOwner();
   const selector = useMemo(
-    () => createTrainingReadinessSelector(deviceType, isOwner),
-    [deviceType, isOwner],
+    () => createTrainingReadinessSelector(deviceType),
+    [deviceType],
   );
   return useTrainingConfigStore(selector);
 }

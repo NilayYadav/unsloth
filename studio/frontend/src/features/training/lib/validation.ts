@@ -161,7 +161,6 @@ function validateDatasetSelection(
 export function validateTrainingConfig(
   config: TrainingConfigState,
   deviceType?: string,
-  isOwner = true,
 ): StartValidationResult {
   if (!config.selectedModel) {
     return {
@@ -196,12 +195,6 @@ export function validateTrainingConfig(
     return {
       ok: false,
       errorKey: "studio.params.notSupportedAppleSilicon",
-    };
-  }
-  if (config.modelType === "decision" && !isOwner) {
-    return {
-      ok: false,
-      errorKey: "studio.training.validation.decisionOwnerOnly",
     };
   }
 

@@ -138,7 +138,7 @@ type AiAssistMappingArgs = {
   datasetName?: string | null;
   hfToken?: string | null;
   modelName?: string | null;
-  modelType?: "text" | "vision" | "audio" | "embeddings" | "decision" | null;
+  modelType?: "text" | "vision" | "audio" | "embeddings" | null;
   signal?: AbortSignal;
 };
 
