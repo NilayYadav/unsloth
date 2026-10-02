@@ -1217,8 +1217,10 @@ def _extract_text_from_file(file_path: Path, ext: str) -> str:
         from core.rag import config, pdf_ocr
         raw = pdf_ocr.extract_text(str(file_path), config.OCR_SCANNED, config.OCR_MAX_PAGES)
     elif ext == ".docx":
-        from core.rag import parsers
-        raw = "\n\n".join(page.text for page in parsers.parse(str(file_path)))
+        import mammoth
+        with open(str(file_path), "rb") as f:
+            result = mammoth.convert_to_markdown(f)
+            raw = result.value
     else:
         raise ValueError(f"Unsupported file type: {ext}")
 
@@ -1384,7 +1386,7 @@ async def upload_unstructured_file(
         raw_path.unlink(missing_ok = True)
         extracted_path.unlink(missing_ok = True)
         missing = getattr(e, "name", None)
-        expected_missing = {".pdf": "pymupdf4llm", ".docx": "docx"}.get(ext)
+        expected_missing = {".pdf": "pymupdf4llm", ".docx": "mammoth"}.get(ext)
         if isinstance(e, ModuleNotFoundError) and missing == expected_missing:
             logger.error(
                 "data_recipe.seed.text_extraction_dependency_missing",
