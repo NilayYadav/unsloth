@@ -767,10 +767,6 @@ def _docx_mark_notes(document):
     return label_notes
 
 
-_HIGH_BYTES = bytes(range(0x80, 0x100))
-_ASCII_LETTERS = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-
-
 def _declared_charset(data: bytes) -> str | None:
     # Lazy: tools is heavy, and only HTML that is not UTF-8 gets here.
     from ..inference.tools import _META_CHARSET_SCAN_BYTES, _sniff_meta_charset
@@ -806,16 +802,6 @@ def _decode_text(data: bytes, *, html: bool = False) -> str:
     non_ascii = len(text) - len(text.encode("ascii", "ignore"))
     if non_ascii >= 2 * text.count("\ufffd"):
         return text
-    high = len(data) - len(data.translate(None, _HIGH_BYTES))
-    letters = len(data) - len(data.translate(None, _ASCII_LETTERS))
-    # A Latin-alphabet text never has half as many accented letters as plain ones; a few bytes say nothing.
-    if high >= 8 and 2 * high > letters:
-        from charset_normalizer import from_bytes
-
-        legacy = ["cp1252", "gb18030", "cp950", "cp932", "cp949", "cp1251"]
-        match = from_bytes(data, cp_isolation = legacy).best()
-        if match is not None:
-            return str(match)
     return data.decode("cp1252", errors = "replace")
 
 
