@@ -15,9 +15,7 @@ export { loadOpenAIAutoSwitchSettings } from "./api/openai-auto-switch";
 export {
   loadSystemOneSettings,
   subscribeSystemOneSettings,
-  updateSystemOneSettings,
 } from "./api/systemone";
-export { DECISION_MODEL_LABELS } from "./lib/decision-model-labels";
 export {
   loadHuggingFaceCacheSettings,
   updateHuggingFaceCacheSettings,

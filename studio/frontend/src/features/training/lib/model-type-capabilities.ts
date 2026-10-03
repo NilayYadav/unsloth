@@ -5,7 +5,6 @@ import type { ModelType } from "@/types/training";
 
 export interface ModelTypeCapabilityFlags {
   isEmbedding?: boolean | null;
-  isDecision?: boolean | null;
   isAudio?: boolean | null;
   isVision?: boolean | null;
   hasModelTypeSignal?: boolean;
@@ -13,13 +12,9 @@ export interface ModelTypeCapabilityFlags {
 
 export function inferTrainingModelTypeFromFlags({
   isEmbedding,
-  isDecision,
   isAudio,
   isVision,
 }: ModelTypeCapabilityFlags): ModelType {
-  if (isDecision) {
-    return "decision";
-  }
   if (isEmbedding) {
     return "embeddings";
   }
