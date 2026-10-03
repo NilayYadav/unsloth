@@ -78,7 +78,6 @@ import {
 import { notifyChatHistoryUpdated } from "../api/chat-api";
 import { toolResultModelText } from "../api/chat-adapter";
 import { toolCallReplayArguments } from "../tool-call-arguments";
-import { codexLocalToolRoundId, startsNewCodexToolRound } from "../codex-reasoning";
 import { usePlusMenuPrefsStore } from "../stores/plus-menu-prefs-store";
 import type { ThreadRecord, MessageRecord } from "../types";
 import {
@@ -337,46 +336,20 @@ function messageToOpenAI(msg: { role: unknown; content: unknown; attachments?: u
   ];
 
   if (role === "assistant") {
-    const out: OAIMessage[] = [];
-    let textParts: string[] = [];
-    let toolCalls: OAIToolCall[] = [];
-    let toolResults: OAIMessage[] = [];
-    let callCount = 0;
-    let roundId: number | null = null;
-
-    const flush = () => {
-      const content = textParts.join("\n\n") || null;
-      out.push(
-        toolCalls.length > 0
-          ? { role: "assistant", content, tool_calls: toolCalls }
-          : { role: "assistant", content: content ?? "" },
-        ...toolResults,
-      );
-      textParts = [];
-      toolCalls = [];
-      toolResults = [];
-      roundId = null;
-    };
-    const pushText = (text: string) => {
-      if (!text.trim()) return;
-      if (toolCalls.length > 0) flush();
-      textParts.push(text);
-    };
+    const textParts: string[] = [];
+    const toolCalls: OAIToolCall[] = [];
+    const toolResults: OAIMessage[] = [];
 
     for (const p of allParts) {
       if (p.type === "text" && typeof p.text === "string") {
-        pushText(p.text);
+        textParts.push(p.text);
       } else if (p.type === "reasoning" || p.type === "thinking") {
         const t = typeof p.thinking === "string" ? p.thinking : typeof p.text === "string" ? p.text : "";
-        if (t) pushText(`<thinking>\n${t}\n</thinking>`);
+        if (t) textParts.push(`<thinking>\n${t}\n</thinking>`);
       } else if (p.type === "image" && typeof p.image === "string" && p.image) {
-        pushText("[image attachment]");
+        textParts.push("[image attachment]");
       } else if (p.type === "tool-call") {
-        const callRoundId = codexLocalToolRoundId(p.provenance);
-        if (toolCalls.length > 0 && startsNewCodexToolRound(roundId, callRoundId)) flush();
-        if (callRoundId !== null) roundId = callRoundId;
-        const id = typeof p.toolCallId === "string" ? p.toolCallId : `call_${callCount}`;
-        callCount++;
+        const id = typeof p.toolCallId === "string" ? p.toolCallId : `call_${toolCalls.length}`;
         const name = typeof p.toolName === "string" ? p.toolName : "unknown";
         const argsStr = toolCallReplayArguments(
           typeof p.argsText === "string" ? p.argsText : undefined,
@@ -389,13 +362,18 @@ function messageToOpenAI(msg: { role: unknown; content: unknown; attachments?: u
           const resultStr =
             typeof modelText === "string" ? modelText : JSON.stringify(modelText);
           toolResults.push({ role: "tool", tool_call_id: id, name, content: resultStr });
-          if (callRoundId === null && (p.provenance as { source?: unknown } | undefined)?.source === "local") flush();
         }
       }
     }
 
-    if (out.length === 0 || textParts.length > 0 || toolCalls.length > 0) flush();
-    return out;
+    const content = textParts.join("\n\n") || null;
+    const assistantMsg: OAIMessage = toolCalls.length > 0
+      ? { role: "assistant", content, tool_calls: toolCalls }
+      : { role: "assistant", content: content ?? "" };
+
+    return toolResults.length > 0
+      ? [assistantMsg, ...toolResults]
+      : [assistantMsg];
   }
 
   const contentParts: OAIContentPart[] = [];
