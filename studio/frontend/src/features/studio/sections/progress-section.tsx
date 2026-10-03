@@ -21,9 +21,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { usePlatformStore } from "@/config/env";
 import { MLX_OPTIMIZER_OPTIONS, OPTIMIZER_OPTIONS } from "@/config/training";
-import { useIsAccountOwner } from "@/features/auth";
 import { setTrainingCompareHandoff } from "@/features/chat";
-import { updateSystemOneSettings } from "@/features/settings";
 import {
   getTrainingMethodLabel,
   type TrainingViewData,
@@ -34,7 +32,6 @@ import {
 import { useGpuUtilization } from "@/hooks";
 import type { GpuUtilization } from "@/hooks/use-gpu-utilization";
 import { type TranslationKey, useT } from "@/i18n";
-import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   Alert02Icon,
@@ -44,7 +41,6 @@ import {
   Notebook01Icon,
   RamMemoryIcon,
   StopIcon,
-  TaskDone01Icon,
   TemperatureIcon,
   ZapIcon,
 } from "@hugeicons/core-free-icons";
@@ -102,7 +98,6 @@ export function ProgressSection({
   const t = useT();
   const navigate = useNavigate();
   const platformDeviceType = usePlatformStore((s) => s.deviceType);
-  const isOwner = useIsAccountOwner();
   const trainingMethodLabel = getTrainingMethodLabel(data.trainingMethod);
 
   const config = useTrainingConfigStore(
@@ -123,7 +118,6 @@ export function ProgressSection({
 
   const [stopDialogOpen, setStopDialogOpen] = useState(false);
   const [stopRequestedLocal, setStopRequestedLocal] = useState(false);
-  const [enablingDecisionApi, setEnablingDecisionApi] = useState(false);
 
   const stopRequested = data.isTrainingRunning && stopRequestedLocal;
 
@@ -160,7 +154,7 @@ export function ProgressSection({
   );
   const showHalfwayHint =
     data.phase === "training" && pct >= 50 && pct < 100;
-  const showCompletedHint = data.phase === "completed" && !data.isDecision;
+  const showCompletedHint = data.phase === "completed";
   const handleCompareInChat = async () => {
     setTrainingCompareHandoff(data.modelName, data.outputDir);
     await navigate({ to: "/chat" });
@@ -170,37 +164,14 @@ export function ProgressSection({
   const exportRunName = data.outputDir
     ? (data.outputDir.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || null)
     : null;
-  const hasFinishedOutput =
+  const canExportGguf =
     !data.isTrainingRunning &&
     !!exportRunName &&
     !data.resumedLater &&
     (data.phase === "completed" || data.phase === "stopped");
-  const canExportGguf = hasFinishedOutput && !data.isDecision;
-  const canUseInDecisionApi = hasFinishedOutput && !!data.isDecision && isOwner;
   const handleExportGguf = () => {
     if (!exportRunName) return;
     void navigate({ to: "/export", search: { run: exportRunName } });
-  };
-  const handleUseInDecisionApi = async () => {
-    if (!exportRunName) {
-      return;
-    }
-    setEnablingDecisionApi(true);
-    try {
-      await updateSystemOneSettings({
-        enabled: true,
-        model: `laya-ft:${exportRunName}`,
-      });
-      toast.success(
-        t("studio.progress.decisionApiEnabled", { name: exportRunName }),
-      );
-    } catch (error) {
-      toast.error(t("studio.progress.decisionApiFailed"), {
-        description: error instanceof Error ? error.message : undefined,
-      });
-    } finally {
-      setEnablingDecisionApi(false);
-    }
   };
 
   const stoppedLoss = getDisplayMetric(
@@ -249,13 +220,9 @@ export function ProgressSection({
         configRow(t("studio.progress.epochs"), cfgEpochs),
         configRow(t("studio.progress.batchSize"), cfgBatchSize),
         configRow(t("studio.progress.learningRate"), cfgLearningRate),
-        ...(data.isDecision
-          ? []
-          : [configRow(t("studio.progress.optimizer"), optimizerLabel)]),
+        configRow(t("studio.progress.optimizer"), optimizerLabel),
         configRow(t("studio.progress.maxSteps"), cfgMaxSteps),
-        ...(data.isDecision
-          ? []
-          : [configRow(t("studio.progress.contextLength"), cfgContextLength)]),
+        configRow(t("studio.progress.contextLength"), cfgContextLength),
         configRow(t("studio.progress.warmupSteps"), cfgWarmupSteps),
       ],
     },
@@ -267,9 +234,7 @@ export function ProgressSection({
             configRow(t("studio.progress.rank"), cfgLoraRank),
             configRow(t("studio.progress.alpha"), cfgLoraAlpha),
             configRow(t("studio.progress.dropout"), cfgLoraDropout),
-            ...(data.isDecision
-              ? []
-              : [configRow(t("studio.progress.variant"), cfgLoraVariant)]),
+            configRow(t("studio.progress.variant"), cfgLoraVariant),
           ],
         },
       ]
@@ -294,18 +259,6 @@ export function ProgressSection({
             >
               <HugeiconsIcon icon={FolderExportIcon} className="size-3.5" />
               {t("studio.progress.exportGguf")}
-            </Button>
-          )}
-          {canUseInDecisionApi && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 gap-1.5 text-xs"
-              disabled={enablingDecisionApi}
-              onClick={handleUseInDecisionApi}
-            >
-              <HugeiconsIcon icon={TaskDone01Icon} className="size-3.5" />
-              {t("studio.progress.useInDecisionApi")}
             </Button>
           )}
           {isHistorical ? (

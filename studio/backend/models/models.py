@@ -6,7 +6,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Literal
 
-ModelType = Literal["text", "vision", "audio", "embeddings", "decision"]
+ModelType = Literal["text", "vision", "audio", "embeddings"]
 
 
 class CheckpointInfo(BaseModel):
@@ -91,10 +91,6 @@ class ModelDetails(BaseModel):
     is_embedding: bool = Field(
         False, description = "Whether model is an embedding/sentence-transformer model"
     )
-    is_decision: bool = Field(False, description = "Whether model is a Laya decision model")
-    decision_checkpoints: Optional[List[Dict[str, Any]]] = Field(
-        None, description = "Checkpoints a decision model repo offers for training"
-    )
     is_lora: bool = Field(False, description = "Whether model is a LoRA adapter")
     is_gguf: bool = Field(False, description = "Whether model is a GGUF model (llama.cpp format)")
     is_mlx: bool = Field(
@@ -113,7 +109,7 @@ class ModelDetails(BaseModel):
     )
     has_audio_input: bool = Field(False, description = "Whether model accepts audio input (ASR)")
     model_type: Optional[ModelType] = Field(
-        None, description = "Collapsed model modality: text, vision, audio, embeddings or decision"
+        None, description = "Collapsed model modality: text, vision, audio, or embeddings"
     )
     base_model: Optional[str] = Field(None, description = "Base model if this is a LoRA adapter")
     max_position_embeddings: Optional[int] = Field(
