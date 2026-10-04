@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
 import re
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -113,32 +114,49 @@ def current_date_prompt_line(today: date | None = None, request: Any = None) -> 
     return f"{CURRENT_DATE_PROMPT_PREFIX}{resolved_date.isoformat()}."
 
 
-def conversation_start_date(thread_id: Any, request: Any = None) -> date | None:
-    """Local date the thread (or the root of its fork chain) was created, None when unknown."""
-    if not isinstance(thread_id, str) or not thread_id:
-        return None
-    try:
-        from storage.studio_db import get_chat_thread
+_PROBE_SYSTEM = "UNSLOTH_DATE_PROBE_SYSTEM"
+_PROBE_USER = "UNSLOTH_DATE_PROBE_USER"
 
-        thread = get_chat_thread(thread_id)
-        seen = {thread_id}
-        # a fork keeps its parent's history, so it keeps the parent's prompt prefix too.
-        while thread:
-            parent_id = thread.get("forkedFromThreadId")
-            if not parent_id or parent_id in seen:
-                break
-            seen.add(parent_id)
-            parent = get_chat_thread(parent_id)
-            if not parent:
-                break
-            thread = parent
-        created_ms = thread.get("createdAt") if thread else None
-        if isinstance(created_ms, bool) or not isinstance(created_ms, (int, float)):
-            return None
-        created = datetime.fromtimestamp(created_ms / 1000, timezone.utc)
-    except Exception:
-        return None
-    return _request_local_date(request, now = created)
+
+def _render_probe(chat_template: str, messages: list[dict], today: date) -> str:
+    from jinja2.exceptions import TemplateError
+    from jinja2.sandbox import ImmutableSandboxedEnvironment
+
+    def raise_exception(message):
+        raise TemplateError(message)
+
+    env = ImmutableSandboxedEnvironment(trim_blocks = True, lstrip_blocks = True)
+    env.globals["raise_exception"] = raise_exception
+    # the user's day, so a default that dates itself (or works out yesterday) is dated for them.
+    env.globals["strftime_now"] = today.strftime
+    return env.from_string(chat_template).render(
+        messages = messages, add_generation_prompt = False, bos_token = "", eos_token = ""
+    )
+
+
+@lru_cache(maxsize = 8)
+def template_default_system_prompt(chat_template: str | None, today: date) -> str:
+    """The system prompt a chat template renders on its own on ``today`` when the chat sends none."""
+    if not chat_template:
+        return ""
+    # some templates read message text only from content parts, as a vision processor sends it.
+    for content in (lambda text: text, lambda text: [{"type": "text", "text": text}]):
+        user = {"role": "user", "content": content(_PROBE_USER)}
+        try:
+            bare = _render_probe(chat_template, [user], today)
+            with_system = _render_probe(
+                chat_template, [{"role": "system", "content": content(_PROBE_SYSTEM)}, user], today
+            )
+        except Exception:
+            continue
+        if with_system.count(_PROBE_SYSTEM) == 1:
+            break
+    else:
+        return ""
+    head, tail = with_system.split(_PROBE_SYSTEM)
+    if len(bare) <= len(head) + len(tail) or not bare.startswith(head) or not bare.endswith(tail):
+        return ""
+    return bare[len(head) : len(bare) - len(tail)].strip()
 
 
 def strip_current_date_update_note(text: str) -> str:
