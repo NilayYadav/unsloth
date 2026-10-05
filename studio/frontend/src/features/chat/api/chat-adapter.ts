@@ -184,7 +184,6 @@ import {
 } from "../tool-call-id";
 
 import { buildResearchInferenceRequest } from "../research-inference-request";
-import { customReasoningRequestFields } from "../custom-reasoning";
 import { pickFriendlyContainerName } from "../lib/friendly-names";
 import {
   buildExternalRoutingFields,
@@ -5995,7 +5994,6 @@ export function createOpenAIStreamAdapter(
                 isReasoningProvider: externalProvider.isReasoningModel === true,
                 baseUrl: externalProvider.baseUrl ?? null,
                 apiType: externalProvider.apiType,
-                reasoningConfig: externalProvider.reasoningConfig,
               },
             )
           : {
@@ -6029,26 +6027,19 @@ export function createOpenAIStreamAdapter(
         reasoningEffortLevels,
       );
       const externalReasoningFields: ReasoningRequestFields =
-        externalProvider?.providerType === "custom" &&
-        externalProvider.apiType !== "responses"
-          ? customReasoningRequestFields(
-              externalProvider.reasoningConfig,
-              externalReasoningEnabled,
-              selectedExternalEffort,
-            )
-          : externalReasoningCaps.supportsReasoning
-            ? externalReasoningCaps.reasoningStyle === "reasoning_effort"
-              ? externalReasoningEnabled
-                ? { reasoning_effort: selectedExternalEffort }
-                : externalReasoningCaps.supportsReasoningOff
-                  ? { reasoning_effort: "none" }
-                  : { reasoning_effort: fallbackExternalEffort }
-              : {
-                  thinking: {
-                    type: externalReasoningEnabled ? "enabled" : "disabled",
-                  },
-                }
-            : {};
+        externalReasoningCaps.supportsReasoning
+          ? externalReasoningCaps.reasoningStyle === "reasoning_effort"
+            ? externalReasoningEnabled
+              ? { reasoning_effort: selectedExternalEffort }
+              : externalReasoningCaps.supportsReasoningOff
+                ? { reasoning_effort: "none" }
+                : { reasoning_effort: fallbackExternalEffort }
+            : {
+                thinking: {
+                  type: externalReasoningEnabled ? "enabled" : "disabled",
+                },
+              }
+          : {};
       const localReasoningFields: ReasoningRequestFields = supportsReasoning
         ? reasoningStyle === "enable_thinking_effort"
           ? // GLM-5.2-style gate plus level, e.g. high|max.
