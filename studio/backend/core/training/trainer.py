@@ -2778,10 +2778,9 @@ class UnslothTrainer:
 
                 for notice in result.notices:
                     if notice.level == "warning":
+                        logger.warning(notice.message)
                         if notice.update_status:
-                            self._record_warning(notice.message)
-                        else:
-                            logger.warning(notice.message)
+                            self._update_progress(status_message = notice.message)
                     else:
                         logger.info(f"{notice.message}\n")
 
