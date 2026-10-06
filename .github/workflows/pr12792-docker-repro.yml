@@ -1,0 +1,72 @@
+name: PR 12792 docker volume repro
+
+on:
+  push:
+    branches:
+      - "pr12792-docker-*"
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [fresh, upgrade]
+    env:
+      PUBLISHED: unsloth/unsloth:studio@sha256:7c07062d310d8f73ceb5a177d58535eb51b4a9f2cdf6f42ff66f6587d47889fd
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Reclaim disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift \
+                      /usr/local/share/powershell /usr/local/julia* /opt/microsoft /usr/share/miniconda \
+                      /opt/az /usr/local/share/boost || true
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          df -h / /mnt
+
+      - name: Build the arm's image (published image + this branch's Dockerfile.studio ENV block)
+        run: |
+          awk '/^ENV UNSLOTH_STUDIO_HOME=/{p=1} p{print} p&&!/\\$/{exit}' docker/Dockerfile.studio > env-block.txt
+          cat env-block.txt
+          printf 'FROM %s\n' "$PUBLISHED" > Dockerfile.arm
+          cat env-block.txt >> Dockerfile.arm
+          docker pull -q "$PUBLISHED"
+          docker build -q -t studio-arm -f Dockerfile.arm .
+          diff <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$PUBLISHED" | sort) \
+               <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' studio-arm | sort) || true
+          docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$PUBLISHED"
+          df -h /
+
+      - name: Playwright
+        run: |
+          python3 -m venv /tmp/v
+          /tmp/v/bin/pip install -q playwright==1.55.0
+          /tmp/v/bin/python -m playwright install --with-deps chromium >/dev/null
+
+      - name: docker run, project chat writes a file, docker rm -f, docker run again
+        id: flow
+        env:
+          REPRO_IMAGE: studio-arm
+          REPRO_MODE: ${{ matrix.mode }}
+          REPRO_PUBLISHED: ${{ env.PUBLISHED }}
+          REPRO_ARM: ${{ github.ref_name }}
+          REPRO_OUT: ${{ github.workspace }}/repro-out
+          REPRO_HF: ${{ github.workspace }}/hf
+        run: |
+          mkdir -p "$REPRO_HF"
+          /tmp/v/bin/python .github/pr12792/pr12792_docker_repro.py
+
+      - name: Container logs
+        if: always()
+        run: docker ps -a; for c in studio-1 studio-2; do docker logs --tail 80 $c 2>&1 || true; done
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: pr12792-${{ github.ref_name }}-${{ matrix.mode }}
+          path: repro-out
