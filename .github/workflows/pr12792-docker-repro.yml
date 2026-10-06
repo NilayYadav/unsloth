@@ -35,8 +35,12 @@ jobs:
           cat env-block.txt
           printf 'FROM %s\n' "$PUBLISHED" > Dockerfile.arm
           cat env-block.txt >> Dockerfile.arm
+          if [ -f .github/pr12792/fix-backend.diff ]; then
+            printf 'COPY .github/pr12792/fix-backend.diff /tmp/fix-backend.diff\nRUN cd /opt/unsloth-studio-app/src && git apply -v /tmp/fix-backend.diff\n' >> Dockerfile.arm
+          fi
+          cat Dockerfile.arm
           docker pull -q "$PUBLISHED"
-          docker build -q -t studio-arm -f Dockerfile.arm .
+          docker build --progress=plain -t studio-arm -f Dockerfile.arm .
           diff <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$PUBLISHED" | sort) \
                <(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' studio-arm | sort) || true
           docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$PUBLISHED"

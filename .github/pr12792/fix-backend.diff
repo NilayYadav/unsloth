@@ -1,0 +1,70 @@
+diff --git a/studio/backend/storage/studio_db.py b/studio/backend/storage/studio_db.py
+index 6cfc35c16c..89da80f94a 100644
+--- a/studio/backend/storage/studio_db.py
++++ b/studio/backend/storage/studio_db.py
+@@ -35,6 +35,7 @@ from utils.paths import (
+     project_workspaces_root,
+     studio_db_path,
+ )
++from utils.paths.storage_roots import documents_project_workspaces_root
+ from utils.paths.external_media import is_linux_run_media_path, is_local_filesystem_root
+ from utils.paths import path_utils as _path_utils
+ from utils.paths.path_utils import macos_volume_ignores_case
+@@ -198,6 +199,18 @@ class ProjectWorkspaceError(OSError):
+         self.path = path
+ 
+ 
++def _current_project_root(root_path: str) -> str:
++    """A Documents-default project whose folder is gone (a replaced Docker container) follows
++    UNSLOTH_STUDIO_PROJECTS_HOME; one whose folder exists stays put."""
++    if not (os.environ.get("UNSLOTH_STUDIO_PROJECTS_HOME") or "").strip():
++        return root_path
++    root = Path(root_path).expanduser()
++    legacy = documents_project_workspaces_root()
++    if root.parent not in (legacy, Path(os.path.realpath(legacy))) or os.path.lexists(root):
++        return root_path
++    return str(project_workspaces_root() / root.name)
++
++
+ def _ensure_project_workspace(root_path: str) -> str:
+     root = Path(root_path).expanduser()
+     try:
+@@ -2885,6 +2898,9 @@ def _unretire_project_rag_scope(project_id: str) -> None:
+ def upsert_chat_project(project: dict) -> dict:
+     existing = get_chat_project(project["id"])
+     root_path = existing.get("rootPath") if existing else None
++    if root_path and _current_project_root(root_path) != root_path:
++        existing = ensure_chat_project_workspace(project["id"]) or existing
++        root_path = existing.get("rootPath")
+     if not root_path:
+         root_path = _default_project_root(project)
+     root_path = _ensure_project_workspace(root_path)
+@@ -2955,7 +2971,8 @@ def ensure_chat_project_workspace(id: str) -> Optional[dict]:
+     project = get_chat_project(id)
+     if project is None:
+         return None
+-    root_path = project.get("rootPath") or _default_project_root(project)
++    root_path = project.get("rootPath")
++    root_path = _current_project_root(root_path) if root_path else _default_project_root(project)
+     root_path = _ensure_project_workspace(root_path)
+     # A delete running in another threadpool worker can drop the row at any point before the directory
+     # is created, so confirm the project outlived the create rather than trusting a pre-create
+diff --git a/studio/backend/utils/paths/storage_roots.py b/studio/backend/utils/paths/storage_roots.py
+index 9c16255990..9125c3bcc7 100644
+--- a/studio/backend/utils/paths/storage_roots.py
++++ b/studio/backend/utils/paths/storage_roots.py
+@@ -415,6 +415,14 @@ def project_workspaces_root() -> Path:
+     return base / "Accounts" / current_account().account_id / "Projects"
+ 
+ 
++def documents_project_workspaces_root() -> Path:
++    """Where ``project_workspaces_root`` points without UNSLOTH_STUDIO_PROJECTS_HOME."""
++    base = documents_root() / "Unsloth Studio"
++    if is_owner_context():
++        return base / "Projects"
++    return base / "Accounts" / current_account().account_id / "Projects"
++
++
+ def shared_tmp_root() -> Path:
+     return Path(tempfile.gettempdir()) / "unsloth-studio"
+ 
