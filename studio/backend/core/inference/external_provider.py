@@ -652,8 +652,6 @@ _ANTHROPIC_COMPACTION_BETA = "compact-2026-01-12"
 _ANTHROPIC_COMPACTION_TYPE = "compact_20260112"
 # The threshold must be >= 50K tokens; lower 400s. Clamp on the way out so a UI slider cannot underflow.
 _ANTHROPIC_COMPACTION_MIN = 50_000
-# Server-side compaction past this is slow and costly on 1M-window models; Anthropic's own default is 150K.
-_SERVER_COMPACTION_MAX = 200_000
 
 
 # Anthropic fast-mode beta, Opus 5 / Opus 4.8 only: Opus 4.7 400s on `speed`; Opus 4.6 accepts it but runs at standard
@@ -668,16 +666,6 @@ _ANTHROPIC_FAST_MODE_PREFIXES = (
 
 def _anthropic_supports_compaction(model: str) -> bool:
     return model.startswith(_ANTHROPIC_COMPACTION_PREFIXES)
-
-
-def compacts_server_side(
-    provider_type: Optional[str], base_url: Optional[str], api_type: Optional[str], model: str
-) -> bool:
-    if provider_type == "anthropic":
-        return _anthropic_supports_compaction(model)
-    return (provider_type == "openai" or api_type == "responses") and _is_openai_family_cloud(
-        base_url
-    )
 
 
 def _anthropic_supports_fast_mode(model: str) -> bool:
@@ -2437,7 +2425,6 @@ class ExternalProviderClient:
         # Extract system prompt; translate image_url parts to Anthropic format
         system: Optional[str] = None
         filtered: list[dict[str, Any]] = []
-        compaction_replayed = False
         for msg in messages:
             if msg.get("role") == "system":
                 content = msg.get("content", "")
@@ -2515,20 +2502,12 @@ class ExternalProviderClient:
                     [
                         block
                         for block in native_content
-                        if (
-                            block.get("type") != "text"
-                            or _anthropic_text_is_sendable(block.get("text"))
-                        )
-                        and (
-                            block.get("type") != "compaction"
-                            or _anthropic_supports_compaction(model)
-                        )
+                        if block.get("type") != "text"
+                        or _anthropic_text_is_sendable(block.get("text"))
                     ]
                     if msg.get("role") == "assistant" and isinstance(native_content, list)
                     else []
                 )
-                if any(part.get("type") == "compaction" for part in anthropic_parts):
-                    compaction_replayed = True
                 for part in content:
                     if part.get("type") == "text" and _anthropic_text_is_sendable(part.get("text")):
                         anthropic_parts.append({"type": "text", "text": part["text"]})
@@ -2536,13 +2515,8 @@ class ExternalProviderClient:
                         # Round-trip a prior turn's compaction block back onto this assistant message so Anthropic
                         # skips re-compaction.
                         summary = part.get("content") or ""
-                        if (
-                            isinstance(summary, str)
-                            and summary
-                            and _anthropic_supports_compaction(model)
-                        ):
+                        if isinstance(summary, str) and summary:
                             anthropic_parts.append({"type": "compaction", "content": summary})
-                            compaction_replayed = True
                     elif part.get("type") == "image_url":
                         url = part.get("image_url", {}).get("url", "")
                         if url.startswith("data:"):
@@ -2992,9 +2966,9 @@ class ExternalProviderClient:
             and _anthropic_supports_compaction(model)
         )
         if compaction_active and compaction_threshold is not None:
-            trigger_value = min(
-                max(int(compaction_threshold), _ANTHROPIC_COMPACTION_MIN),
-                _SERVER_COMPACTION_MAX,
+            trigger_value = max(
+                int(compaction_threshold),
+                _ANTHROPIC_COMPACTION_MIN,
             )
             body["context_management"] = {
                 "edits": [
@@ -3054,9 +3028,7 @@ class ExternalProviderClient:
         )
         if code_execution_enabled and _ANTHROPIC_CODE_EXECUTION_BETA not in beta_parts:
             beta_parts.append(_ANTHROPIC_CODE_EXECUTION_BETA)
-        if (
-            compaction_active or compaction_replayed
-        ) and _ANTHROPIC_COMPACTION_BETA not in beta_parts:
+        if compaction_active and _ANTHROPIC_COMPACTION_BETA not in beta_parts:
             beta_parts.append(_ANTHROPIC_COMPACTION_BETA)
         if fast_mode_active and _ANTHROPIC_FAST_MODE_BETA not in beta_parts:
             beta_parts.append(_ANTHROPIC_FAST_MODE_BETA)
@@ -3482,12 +3454,6 @@ class ExternalProviderClient:
                                         yield _content_chunk(text)
                                     # web_search citations: web_search_tool_result. User-doc citations:
                                     # citations_delta below.
-                            elif (
-                                delta_type == "compaction_delta" and current_compaction is not None
-                            ):
-                                summary = delta.get("content")
-                                if isinstance(summary, str):
-                                    current_compaction["content"] += summary
                             elif delta_type == "citations_delta":
                                 # One citation per event; collapse onto a numbered footnote list and inject [N]
                                 # inline.
@@ -5519,14 +5485,6 @@ class ExternalProviderClient:
                             instructions_parts.append(part["text"])
                 continue
 
-            if role == "assistant" and is_openai_cloud and isinstance(content, list):
-                for part in content:
-                    if part.get("type") == "compaction" and part.get("encrypted_content"):
-                        # The item carries everything before it, and resending that would compact it again.
-                        input_items = [
-                            {"type": "compaction", "encrypted_content": part["encrypted_content"]}
-                        ]
-
             # Responses uses item-shape history: each assistant call is a `function_call` item and each role="tool"
             # follow-up a `function_call_output` keyed by call_id (the Chat Completions shape 400s).
             if role == "tool":
@@ -5843,7 +5801,7 @@ class ExternalProviderClient:
             body["context_management"] = [
                 {
                     "type": "compaction",
-                    "compact_threshold": min(int(compaction_threshold), _SERVER_COMPACTION_MAX),
+                    "compact_threshold": int(compaction_threshold),
                 }
             ]
 
@@ -6028,16 +5986,6 @@ class ExternalProviderClient:
                             and 400 <= response.status_code < 500
                             and _is_openai_container_expired_error(error_text)
                         )
-                        if (
-                            response.status_code == 400
-                            and (
-                                "compact_threshold" in error_text
-                                or "context_management" in error_text
-                            )
-                            and body.pop("context_management", None) is not None
-                        ):
-                            # A deployment without compaction (Azure: "compact_threshold is not enabled") still answers.
-                            continue
                         if expired_container_4xx and not retried:
                             if stream:
                                 yield (
@@ -6610,15 +6558,6 @@ class ExternalProviderClient:
                                             reasoning_open = True
                                         yield _chunk_with_text(summary_text)
                                         reasoning_emitted = True
-                                elif item.get("type") == "compaction":
-                                    encrypted = item.get("encrypted_content")
-                                    if isinstance(encrypted, str) and encrypted:
-                                        yield _emit_tool_event(
-                                            {
-                                                "type": "compaction_block",
-                                                "encrypted_content": encrypted,
-                                            }
-                                        )
                                 elif item.get("type") == "web_search_call":
                                     # done carries the action; emit tool_start + tool_end here. Citations are
                                     # aggregated and the last call's result is overwritten at response.completed.
