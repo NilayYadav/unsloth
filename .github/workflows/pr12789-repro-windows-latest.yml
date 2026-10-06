@@ -1,0 +1,51 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 12789 blank seed prompt (windows-latest)"
+
+on:
+  push:
+    branches:
+      - "pr12789-ci-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "windows-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install backend deps and data-designer"
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          pip install -r studio/backend/requirements/studio.txt
+          pip install python-multipart aiofiles sqlalchemy cryptography psutil pyyaml jinja2 'numpy<3' pytest pytest-asyncio pytest-timeout httpx
+          pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple 'torch>=2.4,<2.11'
+          pip install 'transformers>=4.51,<=5.17.0'
+          pip install -r studio/backend/requirements/single-env/data-designer-deps.txt
+          pip install --no-deps -r studio/backend/requirements/single-env/data-designer.txt
+          python -c "import data_designer.interface.data_designer, jinja2; print('data-designer ok, jinja2', jinja2.__version__)"
+
+      - name: "PR 12789 blank seed prompt tests (must run, not skip)"
+        shell: bash
+        run: |
+          set -uxo pipefail
+          cd studio/backend
+          python -m pytest -q -p no:cacheprovider -rs --timeout=600 tests/test_data_recipe_blank_seed_prompt.py 2>&1 | tee pytest-out.txt
+          rc=${PIPESTATUS[0]}
+          grep -E 'passed|failed|skipped|AssertionError|assert ' pytest-out.txt | tail -20
+          if grep -q skipped pytest-out.txt; then echo 'FAIL: tests skipped, data-designer missing'; exit 2; fi
+          exit $rc
+
