@@ -2263,7 +2263,7 @@ async function resolveProjectInstructions(
   return project.instructions?.trim() ?? "";
 }
 
-export async function resolveChatInstructions(
+async function resolveChatInstructions(
   threadId: string | undefined,
   systemPrompt: unknown,
   systemVariables: unknown,
