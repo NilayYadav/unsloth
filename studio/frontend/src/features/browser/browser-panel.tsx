@@ -98,7 +98,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { fileNameFromUrl, hostOf, resolveAddress } from "./address";
+import { fileNameFromUrl, hostOf, isWebUrl, resolveAddress } from "./address";
 import { OtherSurfaceError, canPrintFrames, printPage, screenshotPage } from "./capture";
 import { canScreenshot } from "./screenshot-support";
 import { stageEditsPrompt } from "./stage-edits";
@@ -765,6 +765,10 @@ function AddressBar({
         event.preventDefault();
         const url = resolveAddress(value, engine);
         if (!url || !tab) return;
+        if (!isWebUrl(url)) {
+          toast.error(t("browser.native.blocked"));
+          return;
+        }
         useBrowserStore.getState().navigate(tab.id, { url });
         setEditing(false);
         inputRef.current?.blur();
