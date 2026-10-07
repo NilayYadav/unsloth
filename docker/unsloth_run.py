@@ -14,7 +14,7 @@ Usage:
               [--transformers X.Y.Z]    # force a version, skip auto-detect
 """
 
-import argparse, json, os, re, shutil, stat, subprocess, sys, tempfile, urllib.parse, urllib.request
+import argparse, json, os, re, shutil, stat, subprocess, sys, tempfile, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
@@ -144,18 +144,6 @@ def _stage_metadata(staged, dest):
         pass
 
 
-def _open_url_download(url):
-    name = os.path.basename(urllib.parse.unquote(urllib.parse.urlsplit(url).path)) or "notebook"
-    stem = name[: -len(".ipynb")] if name.endswith(".ipynb") else name
-    n = 0
-    while True:
-        path = os.path.abspath(f"{stem}-{n}.ipynb" if n else f"{stem}.ipynb")
-        try:
-            return path, os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
-        except FileExistsError:
-            n += 1
-
-
 def main():
     ap = argparse.ArgumentParser(prog = "unsloth-run")
     ap.add_argument("notebook")
@@ -176,6 +164,7 @@ def main():
     want = args.tf or pin or (compat.tier_for_model(model) if compat else None)
     sidecar = compat.sidecar_for(want) if (compat and want) else None
 
+    tmp_dir = None
     tmp_files = []
     publish_from = None
     if args.out:
@@ -202,8 +191,9 @@ def main():
         os.close(fd)
         tmp_files.append(publish_from)
     elif args.notebook.startswith(("http://", "https://")):
-        src_path, fd = _open_url_download(args.notebook)
-        with os.fdopen(fd, "w") as f:
+        tmp_dir = tempfile.mkdtemp()
+        src_path = os.path.join(tmp_dir, os.path.basename(args.notebook.split("?")[0]))
+        with open(src_path, "w") as f:
             json.dump(nb, f)
         out_path = src_path
     else:
@@ -274,6 +264,8 @@ def main():
                     )
                     raise
     finally:
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors = True)
         for p in tmp_files:
             try:
                 os.remove(p)
