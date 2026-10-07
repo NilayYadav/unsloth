@@ -42,19 +42,6 @@ def cell_text(value):
     return str(value)
 
 
-def cell_turns(value, role):
-    if isinstance(value, list) and all(
-        isinstance(turn, dict) and {"role", "content"} <= turn.keys() for turn in value
-    ):
-        return [
-            turn
-            if turn["content"] is None and turn.get("tool_calls")
-            else {**turn, "content": cell_text(turn["content"])}
-            for turn in value
-        ]
-    return [{"role": role, "content": cell_text(value)}]
-
-
 def _column_ids(dataset) -> dict:
     features = getattr(dataset, "features", None) or {}
     return {column: getattr(feature, "id", None) for column, feature in features.items()}
