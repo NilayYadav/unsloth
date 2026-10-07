@@ -3335,14 +3335,14 @@ def apply_chat_template_for_generation(
                 raise
             return _render_continuation_manually(msgs)
 
-    # Mappings first: Qwen3.5 renders string arguments as an empty call instead of raising.
-    normalized = _normalize_tool_call_arguments(messages)
     try:
-        return _render_with_fallback(normalized)
+        return _render_with_fallback(messages)
     except Exception:
+        # Retry with repairs applied cumulatively. Originals render first, so working templates stay byte-identical.
         candidates: list = []
+        normalized = _normalize_tool_call_arguments(messages)
         if normalized is not messages:
-            candidates.append(messages)
+            candidates.append(normalized)
         split = _split_parallel_tool_calls(normalized)
         if split is not normalized:
             candidates.append(split)
