@@ -398,10 +398,11 @@ if [ -t 0 ] && [ -t 1 ]; then
     TTY_FLAG=(-it)
 fi
 
-# URL runs use mounted $PWD so unsloth-run saves survive --rm; local paths still use /workspace
+# commands on files in the mounted $PWD, and unsloth-run URLs, start there so relative saves survive --rm
 WORKDIR_FLAG=()
 RUN_USER_ENV=()
 if [[ $# -gt 0 && "$1" == "unsloth-run" ]]; then
+    # a local notebook path stays relative to /workspace, even with --out under /workspace/host
     for _arg in "${@:2}"; do
         case "$_arg" in
             http://* | https://*)
@@ -409,6 +410,12 @@ if [[ $# -gt 0 && "$1" == "unsloth-run" ]]; then
                 RUN_USER_ENV=(-e "UNSLOTH_RUN_UID=$(id -u)" -e "UNSLOTH_RUN_GID=$(id -g)")
                 break
                 ;;
+        esac
+    done
+else
+    for _arg in "$@"; do
+        case "$_arg" in
+            /workspace/host | /workspace/host/*) WORKDIR_FLAG=(-w /workspace/host) ;;
         esac
     done
 fi
