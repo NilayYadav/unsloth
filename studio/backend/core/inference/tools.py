@@ -21837,12 +21837,7 @@ def _snapshot_workdir_files(workdir: str | None) -> "dict[str, tuple]":
         dirs[:] = (
             []
             if depth >= _MAX_SANDBOX_PATH_SEGMENTS - 1
-            else [
-                d
-                for d in dirs
-                if (not d.startswith(".") or (base == workdir and d == _ATTACHMENTS_DIR))
-                and _servable_segment(d)
-            ]
+            else [d for d in dirs if not d.startswith(".") and _servable_segment(d)]
         )
         for name in names:
             # Only at the top: a tool that wrote archive/.unsloth_sandbox made an ordinary file, and dropping it hid
@@ -21924,16 +21919,6 @@ def _snapshot_differs(before: tuple, after: tuple) -> bool:
     return before[2] is not None and after[2] is not None and before[2] != after[2]
 
 
-def _fresh_attachment_copy(workdir: str, name: str) -> bool:
-    """A copy another chat's request made in a shared workdir while this call ran, or its staging file."""
-    parts = name.split("/")
-    if len(parts) != 3 or parts[0] != _ATTACHMENTS_DIR:
-        return False
-    if re.fullmatch(r"\.tmp-[0-9a-f]{12}", parts[2]):
-        return True
-    return _is_attachment_copy(workdir, os.path.join(workdir, _ATTACHMENTS_DIR, parts[1]), parts[2])
-
-
 def _created_file_sentinels(
     workdir: str | None,
     before: "dict[str, tuple]",
@@ -21963,7 +21948,6 @@ def _created_file_sentinels(
         if name != exclude
         and name not in scratch
         and (name not in before or _snapshot_differs(before[name], key))
-        and not (name not in before and _fresh_attachment_copy(workdir, name))
     )
     if not changed:
         return ""
