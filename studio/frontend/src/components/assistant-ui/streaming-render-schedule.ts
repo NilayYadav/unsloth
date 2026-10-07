@@ -57,7 +57,7 @@ const FOOTNOTE_DEFINITION_RE = /\[\^[\w-]{1,200}\]:/;
 // whitespace, `\\[\s\S]` because `.` rejected a label whose line ends in a
 // backslash, `u` because without it `{1,999}` bounds 499 emoji. 999 is
 // CommonMark's cap; unbounded would make every `[` an O(n) start position.
-const LINK_DEFINITION_RE = /\[((?:\\[\s\S]|[^\]\\]){1,999})\]:/u;
+const LINK_DEFINITION_RE = /\[(?:\\[\s\S]|[^\]\\]){1,999}\]:/u;
 // Widest match in UTF-16 units: 999 times `\` plus an astral code point, plus `[`.
 const LINK_DEFINITION_WINDOW = 999 * 3 + 2;
 
@@ -143,90 +143,6 @@ function isCodeBlock(block: string): boolean {
   }
   const backtick = BACKTICK_OPENER_RE.exec(block);
   return backtick === null || !backtick[1].includes("`");
-}
-const LINK_DEFINITION_LABEL_RE = new RegExp(
-  LINK_DEFINITION_LINE_RE.source,
-  `g${LINK_DEFINITION_LINE_RE.flags}`,
-);
-const BACKTICK_RUN_RE = /`+/g;
-const BLANK_LINE_RE = /\n[ \t]*\n/g;
-
-// One pass: each run's closer is the next run of the same width in its paragraph, found from
-// the right, so an opener with no closer costs nothing instead of a rescan of the paragraph.
-function stripCodeSpans(text: string): string {
-  const breaks = Array.from(text.matchAll(BLANK_LINE_RE), (match) => match.index);
-  const runs: { start: number; end: number; paragraph: number }[] = [];
-  let paragraph = 0;
-  for (const match of text.matchAll(BACKTICK_RUN_RE)) {
-    while (paragraph < breaks.length && breaks[paragraph] < match.index) {
-      paragraph += 1;
-    }
-    runs.push({
-      start: match.index,
-      end: match.index + match[0].length,
-      paragraph,
-    });
-  }
-  const closers = new Array<number>(runs.length).fill(-1);
-  const nearest = new Map<number, number>();
-  for (let i = runs.length - 1; i >= 0; i -= 1) {
-    if (i + 1 < runs.length && runs[i + 1].paragraph !== runs[i].paragraph) {
-      nearest.clear();
-    }
-    const width = runs[i].end - runs[i].start;
-    closers[i] = nearest.get(width) ?? -1;
-    nearest.set(width, i);
-  }
-  let stripped = "";
-  let from = 0;
-  for (let i = 0; i < runs.length; i += 1) {
-    const closer = closers[i];
-    if (closer < 0 || isEscaped(text, runs[i].start)) {
-      continue;
-    }
-    stripped += text.slice(from, runs[i].start);
-    from = runs[closer].end;
-    i = closer;
-  }
-  return stripped + text.slice(from);
-}
-
-const LINK_LABEL_USE_RE = /\[((?:\\[\s\S]|[^[\]\\]){1,999})\]/gu;
-
-// micromark's label normalisation, so `[SS]` finds `[ẞ]:` the way the renderer does.
-function normalizeLabel(label: string): string {
-  return label
-    .replace(/[\t\n\r ]+/g, " ")
-    .replace(/^ | $/g, "")
-    .toLowerCase()
-    .toUpperCase();
-}
-
-function hasShortcutReference(
-  definitions: string,
-  references: string,
-): boolean {
-  const labels = new Set<string>();
-  for (const [, label] of definitions.matchAll(LINK_DEFINITION_LABEL_RE)) {
-    const normalized = normalizeLabel(label);
-    if (normalized !== "" && label[0] !== "^") {
-      labels.add(normalized);
-    }
-  }
-  if (labels.size === 0) {
-    return false;
-  }
-  const uses = references.replace(LINK_DEFINITION_LABEL_RE, "");
-  for (const match of uses.matchAll(LINK_LABEL_USE_RE)) {
-    if (
-      match[1][0] !== "^" &&
-      !isEscaped(uses, match.index) &&
-      labels.has(normalizeLabel(match[1]))
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
 // Must admit exactly what `LINK_DEFINITION_RE` admits: a label resolves only when BOTH ends
 // carry it, so a narrower cap here made the wider one there unreachable (unslothai/unsloth#9540).
@@ -341,13 +257,7 @@ function blocksOf(markdown: string): readonly string[] {
 // the shape that separates them.
 function documentProse(markdown: string): string | null {
   const normalized = normalizeLineEndings(markdown);
-  if (
-    !hasLinkDefinition(normalized) ||
-    !(
-      hasLinkReference(normalized) ||
-      hasShortcutReference(normalized, normalized)
-    )
-  ) {
+  if (!hasLinkDefinition(normalized) || !hasLinkReference(normalized)) {
     return null;
   }
   const prose = normalizeLineEndings(
@@ -355,9 +265,7 @@ function documentProse(markdown: string): string | null {
       .filter((block) => !isCodeBlock(block))
       .join("\n"),
   );
-  return LINK_DEFINITION_LINE_RE.test(prose) &&
-    (hasLinkReference(prose) ||
-      hasShortcutReference(prose, stripCodeSpans(prose)))
+  return LINK_DEFINITION_LINE_RE.test(prose) && hasLinkReference(prose)
     ? prose
     : null;
 }
