@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
-import { isLoopbackHost, normalizeHost } from "../components/agent-command.ts";
-
 export type RemoteAccessState =
   | "off"
   | "starting"
@@ -77,21 +75,11 @@ export function remoteAccessPollDelay(
     : 5000;
 }
 
-function isLoopbackOrigin(origin: string): boolean {
-  try {
-    return isLoopbackHost(normalizeHost(new URL(origin).hostname));
-  } catch {
-    return false;
-  }
-}
-
 export function remoteApiOrigin(
   remoteUrl: string | null,
   localOrigin: string,
-  lanUrls: string[] = [],
 ): string {
-  const lanUrl = isLoopbackOrigin(localOrigin) ? lanUrls[0] : undefined;
-  return remoteUrl ?? lanUrl ?? localOrigin;
+  return remoteUrl ?? localOrigin;
 }
 
 export function remoteAccessAutoStartReadOnly(
