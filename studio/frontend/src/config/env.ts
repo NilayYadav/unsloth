@@ -52,7 +52,6 @@ interface PlatformState {
   cloudflareUrl: string | null;
   serverUrl: string | null;
   secure: boolean;
-  lanUrls: string[];
   fetched: boolean;
   // Last verdict came from a deferred reply (torch-warm kill switch): nothing settles
   // until a first-use operation detects, so the sidebar polls on this.
@@ -90,7 +89,6 @@ export const usePlatformStore = create<PlatformState>()((_, get) => ({
   cloudflareUrl: null,
   serverUrl: null,
   secure: false,
-  lanUrls: [],
   fetched: false,
   detectionDeferred: false,
   isChatOnly: () => get().chatOnly,
