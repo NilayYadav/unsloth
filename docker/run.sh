@@ -13,7 +13,6 @@
 #   bash docker/run.sh                                  # start Studio + JupyterLab
 #   bash docker/run.sh bash                             # shell in the container
 #   bash docker/run.sh python /workspace/host/train.py  # run your training script
-#   bash docker/run.sh unsloth-run <notebook URL>       # notebook and saves land in $PWD
 #   UNSLOTH_PORTS="-p 8000:8000 -p 8888:8888" bash docker/run.sh   # publish the ports
 #
 # JupyterLab on the lean core image (unsloth/unsloth:core):
@@ -398,18 +397,6 @@ if [ -t 0 ] && [ -t 1 ]; then
     TTY_FLAG=(-it)
 fi
 
-# unsloth-run keeps a URL notebook and its saves in the current directory, so start
-# a URL run in the mounted $PWD: /workspace is inside the container and --rm
-# discards it. Local notebook paths keep resolving against /workspace.
-WORKDIR_FLAG=()
-if [[ $# -gt 0 && "$1" == "unsloth-run" ]]; then
-    for _arg in "${@:2}"; do
-        case "$_arg" in
-            http://* | https://*) WORKDIR_FLAG=(-w /workspace/host); break ;;
-        esac
-    done
-fi
-
 # No `set -x`: it would echo HF_TOKEN / WANDB_API_KEY to CI logs. The
 # ${arr[@]+"${arr[@]}"} form keeps empty arrays nounset-safe on bash 3.2 (macOS).
 exec docker run --rm ${TTY_FLAG[@]+"${TTY_FLAG[@]}"} \
@@ -421,7 +408,6 @@ exec docker run --rm ${TTY_FLAG[@]+"${TTY_FLAG[@]}"} \
     -v "$HF_CACHE":/workspace/.cache/huggingface \
     -v "$TRITON_CACHE":/workspace/.cache/triton \
     -v "$WORK_DIR":/workspace/host \
-    ${WORKDIR_FLAG[@]+"${WORKDIR_FLAG[@]}"} \
     ${STUDIO_MOUNT[@]+"${STUDIO_MOUNT[@]}"} \
     ${MODEL_MOUNTS[@]+"${MODEL_MOUNTS[@]}"} \
     "${ENV_FORWARD[@]}" \
