@@ -25,23 +25,15 @@ import {
   quoteState,
 } from "./markdown-list-columns.ts";
 
-const DOLLAR_REGEX = /(?<![\\$])\$(?!\$)/g;
-
 /**
- * Matches a number pattern (currency) right after a `$`, e.g.:
+ * Matches a single $ followed by a number pattern (currency), e.g.:
  *   $5, $1,000, $5.99, $100K, $3.5M
+ *
+ * Does NOT match:
+ *   $$ (display math), \$ (already escaped), $\alpha (LaTeX command)
  */
-const CURRENCY_REGEX = /\d+(?:,\d{3})*(?:\.\d+)?[KMBkmb]?(?:\s|$|[^a-zA-Z\d])/y;
-
-const HEADING_LINE_RE = / {0,3}#{1,6}(?=[ \t\r\n]|$)/y;
-const TABLE_ROW_RE = /[ \t]*\|/y;
-const BLOCK_BREAK_RE =
-  /\n[ \t\r]*(?:\n|#{1,6}(?=[ \t\r\n])|[>|]|[-*+][ \t]|1[.)][ \t]|```|~~~)/;
-
-/** A `$NAME ... $` span that reads as prose: no math symbols, and the closer starts a word. */
-const VARIABLE_PROSE_RE =
-  /^(?!\w+\s+$)(?:[A-Za-z]{2,}\w*|_\w+|\{[A-Za-z_]\w*\})[\w\s.,;:!?'"()/`-]*(?:[\s/:,.;-]|[\s(]["'(`])$/;
-const NEW_TOKEN_RE = /[\w{\\]/;
+const CURRENCY_REGEX =
+  /(?<![\\$])\$(?!\$)(?=\d+(?:,\d{3})*(?:\.\d+)?[KMBkmb]?(?:\s|$|[^a-zA-Z\d]))/g;
 
 /**
  * Union of two span lists, each ascending by start (overlap within a list is
@@ -529,27 +521,6 @@ function hasInlineMathCloser(
   return false;
 }
 
-// Inside an open span remark-math closes on the next single `$`, escaped or not, within the block.
-function findInlineMathCloser(
-  content: string,
-  offset: number,
-  lineStart: number,
-): number {
-  let i = content.indexOf("$", offset + 1);
-  while (i !== -1 && content[i + 1] === "$") {
-    while (content[i + 1] === "$") i++;
-    i = content.indexOf("$", i + 1);
-  }
-  if (i === -1) return -1;
-  const body = content.slice(offset + 1, i);
-  if (BLOCK_BREAK_RE.test(body)) return -1;
-  HEADING_LINE_RE.lastIndex = lineStart;
-  if (HEADING_LINE_RE.test(content) && body.includes("\n")) return -1;
-  TABLE_ROW_RE.lastIndex = lineStart;
-  if (TABLE_ROW_RE.test(content) && /\n|(?<!\\)\|/.test(body)) return -1;
-  return i;
-}
-
 /**
  * Matches a `\[...\]` (display) or `\(...\)` (inline) LaTeX span. The body
  * is capped so repeated incomplete openers stay linear during streaming.
@@ -677,11 +648,8 @@ export function preprocessLaTeX(content: string): string {
   if (!text.includes("$")) return text;
 
   const codeRegions = findCodeBlockRegions(text);
-  let closer = -1;
-  let lineStart = 0;
-  let nextNewline = text.indexOf("\n");
 
-  return text.replace(DOLLAR_REGEX, (match, offset) => {
+  return text.replace(CURRENCY_REGEX, (match, offset) => {
     if (isInRegion(offset, codeRegions)) {
       return match;
     }
@@ -690,28 +658,9 @@ export function preprocessLaTeX(content: string): string {
     if (isInRegion(offset, mathRegions)) {
       return match;
     }
-    CURRENCY_REGEX.lastIndex = offset + 1;
-    const currency = CURRENCY_REGEX.test(text);
-    if (currency && !hasInlineMathCloser(text, offset, mathRegions)) {
-      return "\\" + match;
-    }
-    if (offset === closer) {
+    if (hasInlineMathCloser(text, offset, mathRegions)) {
       return match;
     }
-    while (nextNewline !== -1 && nextNewline < offset) {
-      lineStart = nextNewline + 1;
-      nextNewline = text.indexOf("\n", lineStart);
-    }
-    const next = findInlineMathCloser(text, offset, lineStart);
-    if (
-      !currency &&
-      next !== -1 &&
-      (next + 1 === text.length || NEW_TOKEN_RE.test(text[next + 1])) &&
-      VARIABLE_PROSE_RE.test(text.slice(offset + 1, next))
-    ) {
-      return "\\" + match;
-    }
-    closer = next;
-    return match;
+    return "\\" + match;
   });
 }
