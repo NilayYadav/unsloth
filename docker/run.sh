@@ -398,14 +398,9 @@ if [ -t 0 ] && [ -t 1 ]; then
     TTY_FLAG=(-it)
 fi
 
-# commands on files in the mounted $PWD, and unsloth-run URLs, start there so relative saves survive --rm
+# URL runs use mounted $PWD so unsloth-run saves survive --rm; local paths still use /workspace
 WORKDIR_FLAG=()
 RUN_USER_ENV=()
-for _arg in "$@"; do
-    case "$_arg" in
-        /workspace/host | /workspace/host/*) WORKDIR_FLAG=(-w /workspace/host) ;;
-    esac
-done
 if [[ $# -gt 0 && "$1" == "unsloth-run" ]]; then
     for _arg in "${@:2}"; do
         case "$_arg" in
