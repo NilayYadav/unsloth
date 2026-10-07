@@ -28,12 +28,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from auth.authentication import get_current_subject
-from core.inference.tools import (
-    _USER_AGENTS,
-    _WHATWG_CHARSET_CODECS,
-    _fetch_url_raw,
-    _normalize_url_scheme,
-)
+from core.inference.tools import _USER_AGENTS, _fetch_url_raw, _normalize_url_scheme
 from loggers import get_logger
 
 # Same embedders as the canvas shell.
@@ -1116,20 +1111,16 @@ _BOMS = (
 )
 
 
-# A header can name UTF-16; a <meta> naming it means UTF-8, as the shared table has it.
-_HEADER_CODECS = {
-    **_WHATWG_CHARSET_CODECS,
-    **dict.fromkeys(
-        "csunicode iso-10646-ucs-2 ucs-2 unicode unicodefeff utf-16 utf-16le".split(), "utf-16"
-    ),
-    "unicodefffe": "utf-16-be",
-    "utf-16be": "utf-16-be",
-    "latin-1": "cp1252",
-}
+# Browsers read these labels as windows-1252 (WHATWG Encoding), which fills 0x80-0x9F with quotes and dashes.
+_WINDOWS_1252_LABELS = frozenset(
+    "ansi_x3.4-1968 ascii cp1252 cp819 csisolatin1 ibm819 iso-8859-1 iso-ir-100 iso8859-1 iso88591 "
+    "iso_8859-1 iso_8859-1:1987 l1 latin1 latin-1 us-ascii windows-1252 x-cp1252".split()
+)
 
 
-def _codec(label: Optional[str], table: dict = _HEADER_CODECS) -> Optional[str]:
-    return table.get(label.strip().lower()) if label else None
+def _codec(label: str) -> str:
+    label = label.strip().lower()
+    return "cp1252" if label in _WINDOWS_1252_LABELS else label
 
 
 def _decode_html(raw: bytes, charset: Optional[str]) -> str:
@@ -1137,20 +1128,18 @@ def _decode_html(raw: bytes, charset: Optional[str]) -> str:
     for bom, codec in _BOMS:
         if raw.startswith(bom):
             return raw.decode(codec, errors = "replace")
-    candidates = [_codec(charset)]
+    candidates = [_codec(charset)] if charset else []
     sniffed = _META_CHARSET_RE.search(raw[:4096])
     if sniffed:
-        candidates.append(
-            _codec(sniffed.group(1).decode("ascii", "ignore"), _WHATWG_CHARSET_CODECS)
-        )
-    labelled = next(filter(None, candidates), None)
-    for candidate in filter(None, candidates + ["utf-8"]):
+        candidates.append(_codec(sniffed.group(1).decode("ascii", "ignore")))
+    candidates.append("utf-8")
+    for candidate in candidates:
         try:
             return raw.decode(candidate)
-        except UnicodeDecodeError:
+        except (LookupError, UnicodeDecodeError):
             continue
-    # As browsers do: U+FFFD for bad bytes in a labelled page, windows-1252 for an unlabelled one.
-    return raw.decode(labelled or "cp1252", errors = "replace")
+    # Unlabelled and not UTF-8: windows-1252, as browsers default to.
+    return raw.decode("cp1252", errors = "replace")
 
 
 def _attr(match: "re.Match[str] | None") -> Optional[str]:
@@ -1492,13 +1481,16 @@ def _build_response(
             media_type = "application/json",
             headers = {KIND_HEADER: "html"},
         )
-    codec = _codec(meta.get("charset"))
+    charset = meta.get("charset")
     textual = content_type.startswith("text/") or content_type.endswith(
         ("json", "xml", "javascript")
     )
-    if textual and codec and codec != "utf-8":
+    if textual and charset and charset.lower().replace("_", "-") not in ("utf-8", "utf8"):
         # Text in another encoding goes out as UTF-8, the encoding the response is labelled with.
-        body = body.decode(codec, errors = "replace").encode("utf-8")
+        try:
+            body = body.decode(_codec(charset), errors = "replace").encode("utf-8")
+        except LookupError:
+            pass
     return Response(
         content = body,
         media_type = content_type or "application/octet-stream",
