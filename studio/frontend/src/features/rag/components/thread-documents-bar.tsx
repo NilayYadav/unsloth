@@ -24,7 +24,6 @@ import {
   readPendingAttachmentTargetClaim,
   useChatRuntimeStore,
 } from "@/features/chat/stores/chat-runtime-store";
-import { useRagToolDisabled } from "@/features/chat/hooks/use-rag-tool-disabled";
 import type { ProjectAttachmentTarget } from "@/features/chat/utils/project-attachment-target";
 import {
   chatHistoryClearBoundary,
@@ -169,32 +168,21 @@ async function requireStoredThread(threadId: string): Promise<void> {
  * they still reach the model, so they must not be invisible. */
 function InheritedProjectSources({
   documents,
-  unused,
 }: {
   documents: { id: string; filename: string; status: DocumentStatus }[];
-  unused: boolean;
 }) {
   return (
     <div className="mb-2 flex w-full flex-row items-center gap-1.5 pl-0.5 pr-1.5 pt-0.5 pb-1">
       <span
         className="composer-pill-btn shrink-0 cursor-default !text-foreground/60"
-        title={
-          unused
-            ? "The selected model can't search documents, so this chat doesn't use its project's sources. Pick a model with tool support to use them."
-            : "This chat retrieves from its project's sources. Manage them in the project's Sources tab."
-        }
+        title="This chat retrieves from its project's sources. Manage them in the project's Sources tab."
       >
         <HugeiconsIcon icon={FolderAttachmentIcon} strokeWidth={2} className="size-3.5" />
-        <span>{unused ? "Project sources not used" : "Project sources"}</span>
+        <span>Project sources</span>
       </span>
       {/* Same cap as the editable list: a linked folder can carry hundreds of
           sources, and an uncapped row would swallow the chat viewport. */}
-      <div
-        className={cn(
-          "flex max-h-24 flex-1 flex-row flex-wrap items-center gap-1.5 overflow-y-auto",
-          unused && "opacity-50",
-        )}
-      >
+      <div className="flex max-h-24 flex-1 flex-row flex-wrap items-center gap-1.5 overflow-y-auto">
         {documents.map((doc) => (
           <DocumentStatusChip
             key={`inherited:${doc.id}`}
@@ -428,7 +416,6 @@ export function ThreadDocumentsBar({
   const ragSource = useChatRuntimeStore((s) => s.ragSource);
   const setRagSource = useChatRuntimeStore((s) => s.setRagSource);
   const setRagEnabled = useChatRuntimeStore((s) => s.setRagEnabled);
-  const ragToolDisabled = useRagToolDisabled();
   const projectAttachmentDefault = useChatRuntimeStore(
     (s) => s.projectAttachmentTarget,
   );
@@ -774,10 +761,7 @@ export function ThreadDocumentsBar({
       <>
         {kbDialog}
         {projectDocuments.length > 0 ? (
-          <InheritedProjectSources
-            documents={projectDocuments}
-            unused={ragToolDisabled}
-          />
+          <InheritedProjectSources documents={projectDocuments} />
         ) : null}
       </>
     );
@@ -827,15 +811,9 @@ export function ThreadDocumentsBar({
         <div
           ref={chipScrollRef}
           onScroll={updateChipFade}
-          title={
-            ragToolDisabled
-              ? "The selected model can't search documents, so these files aren't used. Pick a model with tool support to use them."
-              : undefined
-          }
           className={cn(
             "flex max-h-24 flex-1 flex-row flex-wrap items-center gap-1.5 overflow-y-auto",
             chipsOverflow && "rag-docs-bottom-fade",
-            ragToolDisabled && "opacity-50",
           )}
         >
           {/* Project sources first: inherited context, and it outlives this chat. */}
