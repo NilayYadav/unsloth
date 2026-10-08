@@ -1,0 +1,33 @@
+name: PR 13098 table spans (focused)
+on:
+  push:
+    branches: ["pr13098-focus-*"]
+permissions:
+  contents: read
+jobs:
+  spans:
+    name: table spans (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Install backend deps (no torch)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r studio/backend/requirements/studio.txt
+          pip install pytest pytest-timeout httpx pyyaml jinja2 requests
+      - name: Span tests
+        shell: bash
+        working-directory: studio/backend
+        run: |
+          python -m pytest -q --tb=short -p no:cacheprovider tests/test_web_fetch_extraction.py -k "span or table" -rA 2>&1 | tee spans.txt
+          echo "SPANS_EXIT=${PIPESTATUS[0]}"
+          exit ${PIPESTATUS[0]}
