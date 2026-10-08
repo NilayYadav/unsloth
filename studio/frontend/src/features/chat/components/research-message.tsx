@@ -88,10 +88,8 @@ export function ResearchMessage(): ReactElement | null {
       title: source.title || source.url,
       description: source.snippet ?? undefined,
     }));
-    const documentSources: Citation[] = [];
-    const mcpSources: Citation[] = [];
-    (run.documentSources ?? []).forEach((source, index) => {
-      (source.kind === "mcp" ? mcpSources : documentSources).push({
+    const documentSources: Citation[] = (run.documentSources ?? []).map(
+      (source, index) => ({
         id: source.chunkId ?? String(source.id ?? index),
         filename: source.filename,
         page: source.page,
@@ -99,12 +97,10 @@ export function ResearchMessage(): ReactElement | null {
         text: source.snippet ?? "",
         documentId: source.documentId,
         chunkId: source.chunkId,
-      });
-    });
+      }),
+    );
     const documentCount = new Set(
-      [...documentSources, ...mcpSources].map(
-        (source) => source.documentId ?? source.filename,
-      ),
+      documentSources.map((source) => source.documentId ?? source.filename),
     ).size;
     const sourceCount = sources.length + documentCount;
     return (
@@ -135,7 +131,6 @@ export function ResearchMessage(): ReactElement | null {
         />
         <SourcesGroup sources={sources} allowRemoteIcons={false} />
         <DocumentSourcesGroup sources={documentSources} />
-        <DocumentSourcesGroup sources={mcpSources} label="MCP Sources" />
       </div>
     );
   }
