@@ -524,6 +524,76 @@ def test_thinking_off_omits_disable_on_opus_5_5(monkeypatch, off):
     assert "thinking" not in body
 
 
+def test_thinking_off_sends_between_tool_updates_as_reasoning(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        events = [
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": "That result looks wrong."},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "signature_delta", "signature": "sig123"},
+            },
+            {"type": "content_block_stop", "index": 0},
+            {
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {"type": "text", "text": ""},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {"type": "text_delta", "text": "Answer."},
+            },
+            {"type": "content_block_stop", "index": 1},
+            {"type": "message_delta", "delta": {"stop_reason": "end_turn"}},
+            {"type": "message_stop"},
+        ]
+        return httpx.Response(
+            200,
+            content = _anthropic_sse(events),
+            headers = {"content-type": "text/event-stream"},
+        )
+
+    _mock_http_client(monkeypatch, handler)
+
+    async def run():
+        client = _make_client()
+        lines = await _collect(
+            client._stream_anthropic(
+                messages = [{"role": "user", "content": "hi"}],
+                model = "claude-sonnet-5-5",
+                temperature = 0.7,
+                top_p = 0.95,
+                max_tokens = 4096,
+                top_k = None,
+                enable_thinking = None,
+                reasoning_effort = "none",
+            )
+        )
+        await client.close()
+        return lines
+
+    deltas = [
+        p["choices"][0]["delta"]
+        for p in _payloads_from_lines(_drive(run()))
+        if isinstance(p, dict) and p.get("choices")
+    ]
+    content = "".join(d.get("content") or "" for d in deltas)
+    assert "<think>" not in content and "</think>" not in content
+    assert content == "Answer."
+    assert "".join(d.get("reasoning_content") or "" for d in deltas) == "That result looks wrong."
+    assert "sig123" not in content
+
+
 @pytest.mark.parametrize(
     ("model", "web", "code", "compaction", "fast"),
     (

@@ -3522,7 +3522,11 @@ class ExternalProviderClient:
                             if delta_type == "thinking_delta":
                                 # Wrap as <think>...</think> for parseAssistantContent.
                                 thinking_text = delta.get("thinking", "")
-                                if thinking_text:
+                                if thinking_text and effort == "none":
+                                    # Thinking off still gets between-tool updates on Sonnet 5.5; a client that
+                                    # asked for no thinking renders <think> as text, so send it as reasoning.
+                                    yield _delta_chunk({"reasoning_content": thinking_text})
+                                elif thinking_text:
                                     if not thinking_open:
                                         thinking_text = f"<think>{thinking_text}"
                                         thinking_open = True
