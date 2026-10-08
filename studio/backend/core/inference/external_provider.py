@@ -48,9 +48,7 @@ _TEMPLATE_APPLYING_PROVIDERS = frozenset({"vllm", "llama_cpp", "ollama", "custom
 _CONTINUATION_FLAG_PROVIDERS = frozenset({"vllm", "llama_cpp"})
 
 # custom may reject include_usage; OpenAI Responses supplies usage, while listed streams require it.
-_USAGE_STREAM_OPTION_PROVIDERS = frozenset(
-    {"vllm", "llama_cpp", "ollama", "openrouter", "kimi", "lemonade"}
-)
+_USAGE_STREAM_OPTION_PROVIDERS = frozenset({"vllm", "llama_cpp", "openrouter", "kimi", "lemonade"})
 
 # launch-time windows are absent from catalogues; custom covers unregistered self-hosted servers.
 _SERVED_WINDOW_PROVIDERS = frozenset({"vllm", "llama_cpp", "custom"})
