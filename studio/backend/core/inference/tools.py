@@ -13812,11 +13812,11 @@ def cached_mcp_tools() -> tuple[list[dict], bool]:
     return _mcp_listing(listed), complete
 
 
-async def get_enabled_mcp_tools() -> list[dict]:
+async def get_enabled_mcp_tools(include_stdio: bool = True) -> list[dict]:
     # Keep the SQLite-backed server list off the event loop.
     servers = await asyncio.to_thread(lambda: _enabled_mcp_servers(mcp_servers_db.list_servers()))
     # Never spawn stdio servers when stdio is disabled on this host.
-    if not stdio_mcp_enabled():
+    if not include_stdio or not stdio_mcp_enabled():
         servers = [s for s in servers if not is_stdio(s["url"])]
     if not servers:
         return []
@@ -13870,6 +13870,59 @@ async def get_enabled_mcp_tools() -> list[dict]:
         payload = [public_tool(server, tool) for tool in payload]
         listed.append((server, payload, _mcp_specs_for_server(server, payload)))
     return _mcp_listing(listed)
+
+
+def mcp_search_argument(name: str, tool: dict) -> str | None:
+    schema = _mcp_input_schema(tool)
+    required = schema.get("required") or []
+    properties = schema.get("properties") or {}
+    if len(required) != 1 or not isinstance(properties, dict):
+        return None
+    key = required[0]
+    prop = properties.get(key) if isinstance(key, str) else None
+    if not isinstance(prop, dict) or prop.get("type") != "string" or "enum" in prop:
+        return None
+    tool_name = _CAMEL_CASE_RE.sub("_", _MCP_TERM_SEPARATOR_RE.sub("_", _mcp_raw_tool_name(name)))
+    if _AUTO_UNSAFE_MCP_VERB_RE.search(tool_name) or is_high_risk_tool_call(name, {key: ""}):
+        return None
+    return key
+
+
+async def mcp_search_tools(include_stdio: bool = True) -> list[dict]:
+    from state.tool_policy import get_tool_policy
+
+    if get_tool_policy() is False:
+        return []
+    await get_enabled_mcp_tools(include_stdio)
+    servers = _enabled_mcp_servers(await asyncio.to_thread(mcp_servers_db.list_servers))
+    if not include_stdio or not stdio_mcp_enabled():
+        servers = [s for s in servers if not is_stdio(s["url"])]
+    found = []
+    for server in servers:
+        for tool in get_cached_tools(server["id"]) or ():
+            raw_name = tool.get("name") if isinstance(tool, dict) else None
+            if not isinstance(raw_name, str) or not tool_visible_to(tool, "model"):
+                continue
+            name = f"{MCP_TOOL_PREFIX}{server['id']}__{raw_name}"
+            argument = mcp_search_argument(name, public_tool(server, tool))
+            if argument:
+                found.append(
+                    {
+                        "name": name,
+                        "serverId": server["id"],
+                        "serverName": server.get("display_name") or server["id"],
+                        "tool": raw_name,
+                        "description": tool.get("description") or "",
+                        "argument": argument,
+                    }
+                )
+    return found
+
+
+def execute_mcp_tool(name: str, arguments: dict, **kwargs) -> str:
+    if not name.startswith(MCP_TOOL_PREFIX):
+        return f"Error: '{name}' is not an MCP tool"
+    return execute_tool(name, arguments, **kwargs)
 
 
 def mcp_tool_definition(server_id: str, tool_name: str) -> "dict | None":
