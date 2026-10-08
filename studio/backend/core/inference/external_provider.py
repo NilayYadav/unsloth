@@ -529,27 +529,19 @@ class _AnthropicThinkingSpec(NamedTuple):
     prefixes: tuple[str, ...]
     kind: Literal["adaptive", "manual"]
     efforts: tuple[str, ...]
-    # Claude 5 thinks unless told otherwise, so "Thinking: off" must send an explicit disable. Fable/Mythos 5 and
-    # Opus 5.5 400 on it (thinking is always on); Sonnet 5.5 takes "between_tools" instead.
+    # Claude 5 thinks unless told otherwise, so "Thinking: off" must send an explicit disable. Fable/Mythos 5 400 on
+    # it (thinking is always on).
     thinking_default_on: bool = False
     can_disable: bool = True
-    disable_type: str = "disabled"
 
 
 _ANTHROPIC_THINKING_SPECS = (
     _AnthropicThinkingSpec(
-        prefixes = ("claude-fable-5", "claude-mythos-5", "claude-opus-5-5"),
+        prefixes = ("claude-fable-5", "claude-mythos-5"),
         kind = "adaptive",
         efforts = ("none", "low", "medium", "high", "xhigh", "max"),
         thinking_default_on = True,
         can_disable = False,
-    ),
-    _AnthropicThinkingSpec(
-        prefixes = ("claude-sonnet-5-5",),
-        kind = "adaptive",
-        efforts = ("none", "low", "medium", "high", "xhigh", "max"),
-        thinking_default_on = True,
-        disable_type = "between_tools",
     ),
     _AnthropicThinkingSpec(
         prefixes = ("claude-opus-5", "claude-sonnet-5"),
@@ -2892,7 +2884,7 @@ class ExternalProviderClient:
             and thinking_spec.thinking_default_on
             and thinking_spec.can_disable
         ):
-            body["thinking"] = {"type": thinking_spec.disable_type}
+            body["thinking"] = {"type": "disabled"}
         # Normalize one semantic Thinking control into Anthropic's two model-era APIs: adaptive effort on Claude 4.6+,
         # manual budget_tokens on 4.5.
         if effort and effort != "none":
