@@ -260,17 +260,6 @@ export function listMcpServerTools(
   return mcpRequest(`/${serverId}/tools`);
 }
 
-export interface ResearchMcpTool {
-  serverId: string;
-  serverName: string;
-  tool: string;
-  description: string;
-}
-
-export function listResearchMcpTools(): Promise<ResearchMcpTool[]> {
-  return mcpRequest("/research-tools");
-}
-
 export function testMcpServer(payload: {
   url: string;
   headers?: Record<string, string>;
