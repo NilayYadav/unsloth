@@ -64,8 +64,6 @@ class CheckpointInfo:
     what: str = ""  # e.g. "a VAE", used in refusals
     layout: str = ""
     variant: Optional[str] = None  # flux.1-schnell vs flux.1-dev
-    # denoiser + text encoder(s) + VAE in one file (an SDXL checkpoint, or its stable-diffusion.cpp GGUF)
-    whole_pipeline: bool = False
 
 
 def family_page(family: Optional[str]) -> Optional[str]:
@@ -201,9 +199,6 @@ _DIT_PREFIXES = (
     "transformer.",
     "",
 )
-
-_BUNDLED_TEXT_ENCODER_TOPS = frozenset({"conditioner", "cond_stage_model", "text_encoders"})
-_BUNDLED_VAE_TOPS = frozenset({"first_stage_model", "vae"})
 
 _LORA_RE = re.compile(
     r"(?:^|\.)(?:lora_[AB]|lora_down|lora_up|lora\.(?:up|down)|lokr_w\d|hada_w\d_[ab])(?:\.|$)|^lora_unet_|^lora_te\d?_"
@@ -504,7 +499,6 @@ def classify_tensors(shapes: dict[str, list[int]], meta: Optional[dict] = None) 
             "audio_vae",
         }
     )
-    whole_pipeline = bool(tops & _BUNDLED_TEXT_ENCODER_TOPS) and bool(tops & _BUNDLED_VAE_TOPS)
     for prefix in _DIT_PREFIXES:
         sub = _strip(shapes, prefix)
         if not sub:
@@ -513,7 +507,7 @@ def classify_tensors(shapes: dict[str, list[int]], meta: Optional[dict] = None) 
         if info is not None:
             layout = "gguf" if arch else ("checkpoint" if bundled else info.layout)
             return CheckpointInfo(
-                info.role, info.family, info.page, info.what, layout, info.variant, whole_pipeline
+                info.role, info.family, info.page, info.what, layout, info.variant
             )
 
     te = _match_text_encoder(keys)
@@ -568,23 +562,6 @@ def inspect_checkpoint(path: str) -> CheckpointInfo:
 def offer_as_dit(path: str) -> bool:
     """False for TE / VAE / LoRA / ControlNet; an unclassified header is left to the caller's name check."""
     return inspect_checkpoint(path).role not in NON_DIT_ROLES
-
-
-def whole_pipeline_gguf_family(path: Optional[str]) -> Optional[str]:
-    """Family of a GGUF that carries the WHOLE pipeline (denoiser, text encoders, VAE), for a family whose single
-    file is the pipeline (SDXL). stable-diffusion.cpp's ``convert`` writes exactly this from a Civitai / ComfyUI
-    ``checkpoints/`` file, with no ``general.architecture``. None for a denoiser-only GGUF or any other file."""
-    if not path or not str(path).lower().endswith(".gguf"):
-        return None
-    info = inspect_checkpoint(str(path))
-    if info.role != ROLE_DIT or not info.family or not info.whole_pipeline:
-        return None
-    try:
-        from .diffusion_families import detect_family
-        fam = detect_family("", override = info.family)
-    except Exception:  # noqa: BLE001 - no registry: not a pick this module can vouch for
-        return None
-    return info.family if fam is not None and fam.single_file_is_pipeline else None
 
 
 def local_pick_file(repo_id: Optional[str], filename: Optional[str]) -> Optional[str]:
