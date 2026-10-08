@@ -3501,7 +3501,7 @@ def render_native_template(
             exc,
         )
         return None
-    if tools and with_tools == no_tools:
+    if with_tools == no_tools:
         return None
     if return_metadata:
         return ChatTemplateRenderResult(
