@@ -824,6 +824,10 @@ def test_page_that_fits_keeps_its_links(monkeypatch):
         ("les 2<sup>nds</sup>", "les 2nds"),
         ("（a+b）<sup>2</sup> and 「引用」<sup>1</sup>", "（a+b）^2 and 「引用」1"),
         (
+            '&euro;19<sup>,99</sup> and claim<sup class="reference-number">2</sup>',
+            "€19,99 and claim2",
+        ),
+        (
             "M<sup>me</sup> Dupont, D<sup>r</sup> Martin, n<sup>o</sup> 5, Om<sup>e</sup>",
             "Mme Dupont, Dr Martin, no 5, Om^e",
         ),

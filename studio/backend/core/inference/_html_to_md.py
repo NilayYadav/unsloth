@@ -300,7 +300,15 @@ _CODE_PRICE_TAIL = re.compile(r"\b([A-Z]{3})[ \u00a0\u202f]?\d(?:[\d,.'’]|[ \u
 # note markers that keep their plain-text form, like Wikipedia's class="reference"
 _FOOTNOTE_CLASSES = frozenset({"reference", "footnote", "footnote-ref", "noteref", "fn", "cite"})
 # class token parts (split on - and _) starting with these mark a note too: footnote-reference, citation
-_FOOTNOTE_CLASS_PREFIXES = ("footnote", "noteref", "cite", "citation", "endnote", "fnref")
+_FOOTNOTE_CLASS_PREFIXES = (
+    "footnote",
+    "noteref",
+    "cite",
+    "citation",
+    "endnote",
+    "fnref",
+    "reference",
+)
 _CLASS_PART_SPLIT = re.compile(r"[-_]")
 # deeper <sup> nests render as plain text: each tracked level rescans its whole suffix on close
 _MAX_SUP_DEPTH = 8
@@ -719,8 +727,8 @@ class _MarkdownRenderer(HTMLParser):
             not visible
             or "\n" in visible
             or visible[0] == "["
-            # $19<sup>.99</sup> is split cents; 10<sup>.5</sup> with no currency is a power
-            or (visible[0] == "." and after_price)
+            # $19<sup>.99</sup> / €19<sup>,99</sup> are split cents; 10<sup>.5</sup> with no currency is a power
+            or (visible[0] in ".," and after_price)
             or not any(c.isalnum() for c in visible)
             or visible.lower() in _PLAIN_SUFFIXES
             or (
