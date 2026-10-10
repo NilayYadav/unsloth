@@ -210,8 +210,9 @@ _MAX_REPEATED_CELL_CHARS = 200
 _MIN_SCOPE_SPAN_CHARS = 256
 _INLINE_EMPHASIS = {"strong": "**", "b": "**", "em": "*", "i": "*"}
 
-# claim<sup>1–3</sup>: a citation range; hyphen and minus stay exponents (10<sup>-3</sup>)
-_CITATION_RANGE = re.compile(r"\d+(?:\s*–\s*\d+)+")
+# claim<sup>1–3</sup>, claim<sup>1,3–5</sup>: citation ranges (an en dash present);
+# hyphen and minus stay exponents (10<sup>-3</sup>)
+_CITATION_RANGE = re.compile(r"\d+(?:\s*[–,]\s*\d+)*\s*–\s*\d+(?:\s*[–,]\s*\d+)*")
 # claim<sup>2,5</sup> after a word is a citation list; x<sup>2,5</sup> (decimal comma) and 1,000 are exponents
 _CITATION_COMMAS = re.compile(r"\d+(?:,\s*\d+)+")
 _THOUSANDS = re.compile(r"\d{1,3}(?:,\d{3})+")
