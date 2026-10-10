@@ -680,7 +680,7 @@ class _MarkdownRenderer(HTMLParser):
             part = _visible_tail(part)
             if part:
                 base = part[-1]
-                return part if base.isalnum() or base in ")]}|" else ""
+                return part if base.isalnum() or base in ")]}|）］｝" else ""
         return ""
 
     @staticmethod
