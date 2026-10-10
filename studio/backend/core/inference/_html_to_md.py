@@ -450,7 +450,6 @@ class _MarkdownRenderer(HTMLParser):
         self.scope_heading_prose: list[int] = []
         # Open-tag indices of headings, unwound with _hidden_marks.
         self._heading_marks: list[int] = []
-        self._heading_has_text: bool = False
 
         self._link_href: str | None = None
         self._link_text_parts: list[str] = []
@@ -898,7 +897,6 @@ class _MarkdownRenderer(HTMLParser):
                 self._hidden_marks.append(len(self._open_tags) - 1)
             if tag in _HEADING_TAGS or tag == "hgroup" or _is_aria_heading(attr_dict):
                 self._heading_marks.append(len(self._open_tags) - 1)
-                self._heading_has_text = False
                 if self._in_link:
                     self._link_had_heading = True
             if (
@@ -984,10 +982,7 @@ class _MarkdownRenderer(HTMLParser):
         # <p>, releasing its hidden mark so following siblings render.
         self._close_implicit(tag)
 
-        # an accordion trigger (<h3><button>Question</button></h3>) carries the heading's only text
-        if tag in _SKIP_TAGS and not (
-            tag == "button" and self._heading_marks and not self._heading_has_text
-        ):
+        if tag in _SKIP_TAGS:
             self._skip_depth += 1
             return
 
@@ -1089,7 +1084,7 @@ class _MarkdownRenderer(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
 
-        if tag in _SKIP_TAGS and (self._skip_depth or tag != "button"):
+        if tag in _SKIP_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
             return
         if self._skip_depth:
@@ -1162,8 +1157,6 @@ class _MarkdownRenderer(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._text_suppressed():
             return
-        if self._heading_marks and data.strip():
-            self._heading_has_text = True
         if self._in_pre:
             self._count_header_text(data)
             self._pre_parts.append(data)
