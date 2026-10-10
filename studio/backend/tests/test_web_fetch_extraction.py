@@ -834,6 +834,7 @@ def test_page_that_fits_keeps_its_links(monkeypatch):
         ("x<sup>2,5</sup> and 10<sup>1,000</sup>", "x^2,5 and 10^1,000"),
         ("&#8363;10<sup>12</sup> and &#8361;10<sup>12</sup>", "₫10^12 and ₩10^12"),
         ("claim<sup>1,3&ndash;5</sup>", "claim1,3–5"),
+        ("Doors 9:30<sup>pm</sup>, ends 11<sup>p.m.</sup>", "Doors 9:30pm, ends 11p.m."),
         (
             "M<sup>me</sup> Dupont, D<sup>r</sup> Martin, n<sup>o</sup> 5, Om<sup>e</sup>",
             "Mme Dupont, Dr Martin, no 5, Om^e",
