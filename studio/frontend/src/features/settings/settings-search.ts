@@ -127,7 +127,6 @@ export const SETTINGS_SEARCH_INDEX: Record<SettingsTab, TranslationKey[]> = {
     "settings.chat.projectAttachments",
     "settings.chat.rememberParamsPerModel",
     "settings.chat.autoCompact",
-    "settings.chat.toolResultLimit",
     "settings.chat.autoScroll",
     "settings.chat.scrollToBottomButton",
     "settings.profile.greetingSloth",
@@ -385,7 +384,6 @@ const OWNER_ONLY_ENTRIES: ReadonlySet<TranslationKey> = new Set([
   "settings.sandbox.python",
   "settings.sandbox.terminal",
   "settings.apiKeys.mcp.title",
-  "settings.chat.toolResultLimit",
 ]);
 
 export function renderedSearchEntries(
@@ -424,7 +422,6 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<
   "settings.resources.modelMemory.noRamReserve":
     "settings.resources.modelMemory.modelMemoryKeywords",
   "settings.chat.autoCompact": "settings.chat.autoCompactKeywords",
-  "settings.chat.toolResultLimit": "settings.chat.toolResultLimitKeywords",
   // match action verbs omitted from these descriptive labels.
   "settings.chat.thinking.visibility": "settings.chat.visibilityKeywords",
   "settings.chat.tools.visibility": "settings.chat.visibilityKeywords",
