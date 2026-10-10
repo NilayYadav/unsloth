@@ -88,16 +88,14 @@ def _parts(record: dict, message_id: str) -> tuple[list[dict], dict[str, str]]:
 def read_transcript(path: Path, thread_id: str, session_id: str) -> Transcript:
     file_created, file_updated = file_times_ms(path)
     # File order, not a tree walk: the import ledger relies on append-only order.
-    lines = list(read_jsonl(path))
     records = [
         r
-        for r in lines
+        for r in read_jsonl(path)
         if r.get("type") in ("user", "assistant")
         and not r.get("isSidechain")
         and not r.get("isMeta")
     ]
-    # Attachment and system lines are links in the chain too.
-    by_uuid = {str(r["uuid"]): r for r in lines if r.get("uuid")}
+    by_uuid = {str(r["uuid"]): r for r in records if r.get("uuid")}
     imported: dict[str, str] = {}
     open_calls: dict[str, dict] = {}
     messages: list[dict] = []
@@ -115,8 +113,7 @@ def read_transcript(path: Path, thread_id: str, session_id: str) -> Transcript:
         parent, seen = record.get("parentUuid"), set()
         while parent and parent not in imported and parent not in seen:
             seen.add(parent)
-            ancestor = by_uuid.get(parent, {})
-            parent = ancestor.get("parentUuid") or ancestor.get("logicalParentUuid")
+            parent = by_uuid.get(parent, {}).get("parentUuid")
         timestamp = iso_ms(record.get("timestamp"))
         messages.append(
             {
