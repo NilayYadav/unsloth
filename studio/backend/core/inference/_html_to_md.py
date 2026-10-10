@@ -704,7 +704,8 @@ class _MarkdownRenderer(HTMLParser):
         price = _PRICE_TAIL.search(context)
         # any Unicode currency sign (Sc): $, €, ₺, ₱, ...; or an ISO code: CHF 19
         if price and unicodedata.category(price.group(1)) == "Sc":
-            return 2
+            # ₫ ₲ ₩ have no minor unit (¥ is shared with two-decimal CNY, so it stays 2)
+            return 0 if price.group(1) in "₫₲₩" else 2
         code = _CODE_PRICE_TAIL.search(context)
         if (
             not code
