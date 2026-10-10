@@ -210,11 +210,9 @@ _MAX_REPEATED_CELL_CHARS = 200
 _MIN_SCOPE_SPAN_CHARS = 256
 _INLINE_EMPHASIS = {"strong": "**", "b": "**", "em": "*", "i": "*"}
 
-# claim<sup>1–3</sup>, claim<sup>1,3–5</sup>: citation ranges (an en dash present);
-# hyphen and minus stay exponents (10<sup>-3</sup>)
-_CITATION_RANGE = re.compile(r"\d+(?:\s*[–,]\s*\d+)*\s*–\s*\d+(?:\s*[–,]\s*\d+)*")
-# claim<sup>2,5</sup> after a word is a citation list; x<sup>2,5</sup> (decimal comma) and 1,000 are exponents
-_CITATION_COMMAS = re.compile(r"\d+(?:,\s*\d+)+")
+# after a word, digits joined by commas / en dashes are citations (claim<sup>1,3–5</sup>); one separator per
+# step keeps the match linear. Hyphen / minus stay exponents (10<sup>-3</sup>), and so do thousands (1,000)
+_CITATION_LIST = re.compile(r"\d+(?:\s*[–,]\s*\d+)+")
 _THOUSANDS = re.compile(r"\d{1,3}(?:,\d{3})+")
 _PLAIN_SUFFIXES = frozenset(
     {"st", "nd", "rd", "th", "tm", "sm", "mc", "md", "(tm)", "(sm)", "(r)", "(c)", "mr", "m.r."}
@@ -740,13 +738,12 @@ class _MarkdownRenderer(HTMLParser):
             or (visible[0] in ".," and after_price)
             or not any(c.isalnum() for c in visible)
             or visible.lower() in _PLAIN_SUFFIXES
-            or (not base[-1].isdigit() and _CITATION_RANGE.fullmatch(visible))
-            or (base[-1] == "2" and visible.lower() in _SECOND_SUFFIXES)
             or (
-                _CITATION_COMMAS.fullmatch(visible)
-                and not _THOUSANDS.fullmatch(visible)
-                and len(_last_word(base)) > 1
+                len(_last_word(base)) > 1
+                and _CITATION_LIST.fullmatch(visible)
+                and ("–" in visible or not _THOUSANDS.fullmatch(visible))
             )
+            or (base[-1] == "2" and visible.lower() in _SECOND_SUFFIXES)
             or (
                 (base[-1].isdigit() or _ROMAN_NUMERAL_TAIL.search(base))
                 and visible.lower() in _DIGIT_ORDINAL_SUFFIXES

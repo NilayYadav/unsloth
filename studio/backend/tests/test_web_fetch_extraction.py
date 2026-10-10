@@ -836,6 +836,7 @@ def test_page_that_fits_keeps_its_links(monkeypatch):
         ("claim<sup>1,3&ndash;5</sup>", "claim1,3–5"),
         ("Doors 9:30<sup>pm</sup>, ends 11<sup>p.m.</sup>", "Doors 9:30pm, ends 11p.m."),
         ("10<sup>6&ndash;8</sup> CFU/mL and 10<sup>d</sup>", "10^(6–8) CFU/mL and 10^d"),
+        ("(x+1)<sup>2&ndash;4</sup>", "(x+1)^(2–4)"),
         (
             "M<sup>me</sup> Dupont, D<sup>r</sup> Martin, n<sup>o</sup> 5, Om<sup>e</sup>",
             "Mme Dupont, Dr Martin, no 5, Om^e",
@@ -911,6 +912,9 @@ def test_empty_superscripts_do_not_rescan_the_page():
     start = time.perf_counter()
     html_to_markdown("<p>" + "*" * 250000 + "<sup></sup>" * 23000 + "</p>")
     assert time.perf_counter() - start < 3
+    start = time.perf_counter()
+    html_to_markdown("<p>claim<sup>" + "1–" * 16000 + "x</sup></p>")
+    assert time.perf_counter() - start < 2
     start = time.perf_counter()
     html_to_markdown(
         "<p>" + "<b>" + "word 1 " * 40000 + "</b>" * 1 + "9" + "<sup></sup>" * 20000 + "</p>"
