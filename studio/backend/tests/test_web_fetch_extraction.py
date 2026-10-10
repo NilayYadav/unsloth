@@ -828,6 +828,10 @@ def test_page_that_fits_keeps_its_links(monkeypatch):
             "€19,99 and claim2",
         ),
         (
+            "SVC 19<sup>99</sup>, claim<sup>1&ndash;3</sup>, fact<sup>2,5</sup>, 10<sup>-3</sup>",
+            "SVC 1999, claim1–3, fact2,5, 10^-3",
+        ),
+        (
             "M<sup>me</sup> Dupont, D<sup>r</sup> Martin, n<sup>o</sup> 5, Om<sup>e</sup>",
             "Mme Dupont, Dr Martin, no 5, Om^e",
         ),

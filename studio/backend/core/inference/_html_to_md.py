@@ -210,6 +210,8 @@ _MAX_REPEATED_CELL_CHARS = 200
 _MIN_SCOPE_SPAN_CHARS = 256
 _INLINE_EMPHASIS = {"strong": "**", "b": "**", "em": "*", "i": "*"}
 
+# claim<sup>1–3</sup>, claim<sup>2,5</sup>: citation ranges / lists; hyphen and minus stay exponents (10<sup>-3</sup>)
+_CITATION_LIST = re.compile(r"\d+(?:\s*[–,]\s*\d+)+")
 _PLAIN_SUFFIXES = frozenset(
     {"st", "nd", "rd", "th", "tm", "sm", "mc", "md", "(tm)", "(sm)", "(r)", "(c)", "mr", "m.r."}
 )
@@ -286,7 +288,7 @@ _CURRENCY_CODES = frozenset(
         "FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY "
         "KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP "
         "MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR "
-        "RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SYP SZL THB TJS TMT TND "
+        "RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP SVC STN SYP SZL THB TJS TMT TND "
         "TOP TRY TTD TWD TZS UAH UGX USD UYU UZS VED VES VND VUV WST XAF XCD XCG XOF XPF YER ZAR ZMW "
         "ZWG ZWL"
     ).split()
@@ -731,6 +733,7 @@ class _MarkdownRenderer(HTMLParser):
             or (visible[0] in ".," and after_price)
             or not any(c.isalnum() for c in visible)
             or visible.lower() in _PLAIN_SUFFIXES
+            or _CITATION_LIST.fullmatch(visible)
             or (
                 (base[-1].isdigit() or _ROMAN_NUMERAL_TAIL.search(base))
                 and visible.lower() in _DIGIT_ORDINAL_SUFFIXES
