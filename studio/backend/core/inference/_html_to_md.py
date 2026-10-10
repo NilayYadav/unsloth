@@ -241,6 +241,8 @@ def _last_word(text: str) -> str:
     return match.group() if match else ""
 
 
+# French second / seconde (2d, 2de, 2ds, 2des) only after a 2: 10<sup>d</sup> stays a power
+_SECOND_SUFFIXES = frozenset({"d", "de", "ds", "des"})
 _DIGIT_ORDINAL_SUFFIXES = frozenset(
     {
         "e",
@@ -257,10 +259,6 @@ _DIGIT_ORDINAL_SUFFIXES = frozenset(
         "emes",
         "nd",
         "nde",
-        "d",
-        "de",
-        "ds",
-        "des",
         "bis",
         "ter",
         "quater",
@@ -742,7 +740,8 @@ class _MarkdownRenderer(HTMLParser):
             or (visible[0] in ".," and after_price)
             or not any(c.isalnum() for c in visible)
             or visible.lower() in _PLAIN_SUFFIXES
-            or _CITATION_RANGE.fullmatch(visible)
+            or (not base[-1].isdigit() and _CITATION_RANGE.fullmatch(visible))
+            or (base[-1] == "2" and visible.lower() in _SECOND_SUFFIXES)
             or (
                 _CITATION_COMMAS.fullmatch(visible)
                 and not _THOUSANDS.fullmatch(visible)
