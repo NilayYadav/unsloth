@@ -260,6 +260,7 @@ _DIGIT_ORDINAL_SUFFIXES = frozenset(
         "quater",
         "quinquies",
         "ndes",
+        "nds",
         "º",
         "ª",
         "o",

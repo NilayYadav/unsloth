@@ -821,6 +821,7 @@ def test_page_that_fits_keeps_its_links(monkeypatch):
             "les S<sup>ts</sup>, les S<sup>tes</sup> et les C<sup>ies</sup>",
             "les Sts, les Stes et les Cies",
         ),
+        ("les 2<sup>nds</sup>", "les 2nds"),
         (
             "M<sup>me</sup> Dupont, D<sup>r</sup> Martin, n<sup>o</sup> 5, Om<sup>e</sup>",
             "Mme Dupont, Dr Martin, no 5, Om^e",
