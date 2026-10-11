@@ -54,7 +54,6 @@ import {
   type ExternalReasoningCapabilities,
   externalReasoningTakesEffort,
   getExternalMaxOutputTokens,
-  kimiSearchExcludesThinking,
   resolveExternalReasoningEffort,
 } from "../provider-capabilities";
 import {
@@ -3331,12 +3330,11 @@ function externalCheckpointRefusesDeepResearch(
 function isKimiCheckpoint(checkpoint: string | null | undefined): boolean {
   const parsed = parseExternalModelId(checkpoint);
   if (!parsed) return false;
-  return kimiSearchExcludesThinking(
+  return (
     useExternalProvidersStore
       .getState()
       .providers.find((candidate) => candidate.id === parsed.providerId)
-      ?.providerType,
-    parsed.modelId,
+      ?.providerType === "kimi"
   );
 }
 

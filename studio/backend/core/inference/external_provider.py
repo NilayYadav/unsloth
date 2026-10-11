@@ -863,27 +863,6 @@ def _apply_deepseek_reasoning_controls(
         body["thinking"] = {"type": "enabled"}
 
 
-_KIMI_K3_EFFORT_ALIASES = {"minimal": "low", "medium": "high", "xhigh": "max"}
-
-
-def _is_kimi_k3(provider_type: Optional[str], model: Optional[str]) -> bool:
-    return provider_type == "kimi" and (model or "").strip().lower() == "kimi-k3"
-
-
-def _apply_kimi_k3_controls(body: dict[str, Any], reasoning_effort: Optional[str]) -> None:
-    """kimi-k3 always reasons and has no `thinking` field; effort is low | high | max (server default max), output
-    is capped by `max_completion_tokens`, and its fixed sampling (presence_penalty incl.) is to be omitted.
-    https://platform.kimi.ai/docs/guide/kimi-k3-quickstart"""
-    body.pop("thinking", None)
-    body.pop("presence_penalty", None)
-    if "max_tokens" in body:
-        body["max_completion_tokens"] = body.pop("max_tokens")
-    effort = (reasoning_effort or "").strip().lower()
-    effort = _KIMI_K3_EFFORT_ALIASES.get(effort, effort)
-    if effort in ("low", "high", "max"):
-        body["reasoning_effort"] = effort
-
-
 def _apply_qwen_reasoning_controls(body: dict[str, Any], enable_thinking: Optional[bool]) -> None:
     if enable_thinking is not None:
         body["enable_thinking"] = bool(enable_thinking)
@@ -1742,7 +1721,6 @@ class ExternalProviderClient:
                 messages,
                 model,
                 max_tokens,
-                reasoning_effort,
             ):
                 yield line
             return
@@ -1797,9 +1775,7 @@ class ExternalProviderClient:
 
         # Kimi thinking is a top-level body field. kimi-k2-thinking is always on (ignore the toggle); kimi-k2.6
         # defaults on, can be disabled. `keep: all` preserves every chunk for the UI panel.
-        if _is_kimi_k3(self.provider_type, model):
-            _apply_kimi_k3_controls(body, reasoning_effort)
-        elif self.provider_type == "kimi" and enable_thinking is not None:
+        if self.provider_type == "kimi" and enable_thinking is not None:
             if model == "kimi-k2-thinking":
                 # Always on; ignore client toggle to avoid an API-level reject.
                 pass
@@ -2148,11 +2124,7 @@ class ExternalProviderClient:
             )
 
     async def _stream_kimi_web_search(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        max_tokens: Optional[int],
-        reasoning_effort: Optional[str] = None,
+        self, messages: list[dict[str, Any]], model: str, max_tokens: Optional[int]
     ) -> AsyncGenerator[str, None]:
         """Kimi $web_search round-trip, per https://platform.kimi.ai/docs/guide/use-web-search: POST
         messages with tools=[{type: "builtin_function", function: {name: "$web_search"}}] and
@@ -2185,8 +2157,6 @@ class ExternalProviderClient:
         provider_info = get_provider_info(self.provider_type) or {}
         for field in provider_info.get("body_omit", ()):
             body.pop(field, None)
-        if _is_kimi_k3(self.provider_type, model):
-            _apply_kimi_k3_controls(body, reasoning_effort)
 
         tool_call_id = "kimi_web_search"
         synthetic_id = f"chatcmpl-{self.provider_type}-synthetic"
@@ -2208,8 +2178,6 @@ class ExternalProviderClient:
         )
 
         tool_calls_acc: dict[int, dict[str, Any]] = {}
-        # A reasoning model's tool-call turn is replayed whole, reasoning included, or the follow-up is rejected.
-        reasoning_parts: list[str] = []
         try:
             async with _client().stream(
                 "POST",
@@ -2254,8 +2222,6 @@ class ExternalProviderClient:
                             if not isinstance(choice, dict):
                                 continue
                             delta = choice.get("delta") or {}
-                            if isinstance(delta.get("reasoning_content"), str):
-                                reasoning_parts.append(delta["reasoning_content"])
                             for tc in delta.get("tool_calls") or []:
                                 if not isinstance(tc, dict):
                                     continue
@@ -2399,8 +2365,6 @@ class ExternalProviderClient:
             "content": "",
             "tool_calls": list(tool_calls_acc.values()),
         }
-        if reasoning_parts:
-            assistant_msg["reasoning_content"] = "".join(reasoning_parts)
         tool_msgs = [
             {
                 "role": "tool",

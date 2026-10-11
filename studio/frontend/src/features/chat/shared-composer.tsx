@@ -222,7 +222,6 @@ import {
 import {
   clampReasoningEffortToLevels,
   getExternalReasoningCapabilities,
-  kimiSearchExcludesThinking,
   providerHostsCodeExecution,
   providerSupportsBuiltinCodeExecution,
   providerSupportsBuiltinImageGeneration,
@@ -892,10 +891,7 @@ export function SharedComposer({
   // Kimi's $web_search builtin mandates thinking=disabled
   // (https://platform.kimi.ai/docs/guide/use-web-search). Both pills stay clickable, but turning
   // one on flips the other off, so the visible state matches what the backend sends.
-  const isKimiExternal = kimiSearchExcludesThinking(
-    selectedExternalProvider?.providerType,
-    externalSelection?.modelId,
-  );
+  const isKimiExternal = selectedExternalProvider?.providerType === "kimi";
   const effectiveReasoningEnabled = reasoningLockedOn ? true : reasoningEnabled;
   // What the adapter sends: the stored effort clamped to the current ladder, so a catalog refresh that
   // drops the stored level is shown truthfully without overwriting the choice.
