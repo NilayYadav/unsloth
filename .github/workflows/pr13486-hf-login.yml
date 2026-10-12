@@ -1,0 +1,38 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 13486 hf_login keeps the saved login"
+
+on:
+  push:
+    branches:
+      - "pr13486-ci-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "hf_login ${{ matrix.os }} hub ${{ matrix.hub }}"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        hub: ["0.34.0", "0.36.2", "latest"]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+      - name: "Install huggingface_hub"
+        shell: bash
+        run: |
+          if [ "${{ matrix.hub }}" = "latest" ]; then pip install -q pytest "huggingface_hub<2"; else pip install -q pytest "huggingface_hub==${{ matrix.hub }}"; fi
+          python -c "import huggingface_hub; print('huggingface_hub', huggingface_hub.__version__)"
+      - name: "Run the hf_login tests"
+        shell: bash
+        run: python -m pytest -v -p no:cacheprovider tests/test_hf_login_keeps_saved_token.py
