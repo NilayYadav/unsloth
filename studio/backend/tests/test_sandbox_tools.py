@@ -166,6 +166,38 @@ class TestUntrustedHostBlock:
         )
 
 
+class TestLocalDatabaseFileIsNotAHost:
+    @pytest.mark.parametrize(
+        "code",
+        [
+            'import sqlite3\ncon = sqlite3.connect("sales.db")\ncon.execute("select 1")',
+            'import sqlite3\nsqlite3.connect(":memory:")',
+            'import duckdb\nduckdb.connect("a.duckdb")',
+            'import sqlite3 as sql\nsql.connect("sales.db")',
+            'import duckdb as ddb\nddb.connect("a.duckdb")',
+            'import sqlite3\nsqlite3.connect("file:sales.db?mode=ro", uri = True)',
+        ],
+    )
+    def test_local_database_file_opens(self, code):
+        _ok(code)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            'import socket\ns = socket.socket()\ns.connect(("evil.example", 80))',
+            'import ftplib\nftp = ftplib.FTP()\nftp.connect("evil.example")',
+            'import duckdb\nduckdb.connect("md:my_db")',
+            'import duckdb\nduckdb.connect("https://evil.example/a.duckdb")',
+            'import ftplib\nsqlite3 = ftplib.FTP()\nsqlite3.connect("evil.example")',
+            'import psycopg2 as duckdb\nduckdb.connect("evil.example")',
+            'import sqlite3\nsqlite3.connect(r"\\\\evil.example\\share\\a.db")',
+            'import sqlite3\nsqlite3.connect("file://evil.example/share/a.db", uri = True)',
+        ],
+    )
+    def test_remote_connect_still_blocked(self, code):
+        _blocked(code, expect_phrase = "Blocked: host not in sandbox allowlist")
+
+
 _H = "203.0.113.5"
 
 
