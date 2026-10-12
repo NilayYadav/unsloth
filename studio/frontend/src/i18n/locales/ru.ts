@@ -2954,7 +2954,7 @@ export const ru = {
         modelClef: "Clef",
         recommended: "Рекомендуется",
         device: "Запускать на",
-        deviceDescription: "GPU отвечает быстрее и освобождает память, когда модель выгружается.",
+        deviceDescription: "GPU отвечает быстрее, но держит память зарезервированной до перезапуска.",
         deviceCpu: "CPU",
         deviceGpu: "GPU",
         backend: "Среда выполнения",

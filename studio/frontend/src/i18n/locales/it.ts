@@ -2946,7 +2946,7 @@ export const it = {
         modelClef: "Clef",
         recommended: "Consigliato",
         device: "Esegui su",
-        deviceDescription: "La GPU risponde più velocemente e libera la memoria quando il modello viene scaricato.",
+        deviceDescription: "La GPU risponde più velocemente, ma tiene la memoria riservata fino al riavvio.",
         deviceCpu: "CPU",
         deviceGpu: "GPU",
         backend: "Runtime",

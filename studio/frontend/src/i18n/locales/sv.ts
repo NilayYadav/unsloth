@@ -3151,7 +3151,7 @@ export const sv = {
         recommended: "Rekommenderas",
         device: "Kör på",
         deviceDescription:
-          "GPU svarar snabbare och frigör sitt minne när modellen avlastas.",
+          "GPU svarar snabbare men håller sitt minne reserverat tills omstart.",
         deviceCpu: "CPU",
         deviceGpu: "GPU",
         backend: "Körmiljö",
