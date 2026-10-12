@@ -65,6 +65,33 @@ class McpServerResponse(BaseModel):
     updated_at: str
 
 
+class McpCustomToolSource(BaseModel):
+    code: StrictStr = Field(max_length = 1_000_000)
+
+
+class McpCustomToolSave(McpCustomToolSource):
+    display_name: str
+    headers: Optional[dict[str, str]] = None
+
+
+class McpCustomToolParam(BaseModel):
+    name: str
+    type: Optional[str] = None
+    required: bool
+
+
+class McpCustomToolFunction(BaseModel):
+    name: str
+    description: str
+    params: list[McpCustomToolParam]
+
+
+class McpCustomToolParseResult(BaseModel):
+    tools: list[McpCustomToolFunction] = Field(default_factory = list)
+    error: Optional[str] = None
+    unavailable_reason: Optional[str] = None
+
+
 class McpServerTestRequest(BaseModel):
     url: str
     headers: Optional[dict[str, str]] = None
@@ -120,6 +147,11 @@ class McpServerProbeResult(BaseModel):
     error: Optional[str] = None
     blender_ready: Optional[bool] = None
     blender_error: Optional[str] = None
+
+
+class McpCustomToolResponse(McpServerResponse):
+    code: str
+    probe: Optional[McpServerProbeResult] = None
 
 
 class McpServerImportRequest(BaseModel):

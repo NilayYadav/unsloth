@@ -39,6 +39,25 @@ export interface McpServerProbeResult {
   error: string | null;
 }
 
+export interface McpCustomToolParseResult {
+  tools: {
+    name: string;
+    description: string;
+    params: { name: string; type: string | null; required: boolean }[];
+  }[];
+  error: string | null;
+  unavailable_reason: string | null;
+}
+
+export interface McpCustomTool extends McpServerConfig {
+  code: string;
+  probe: McpServerProbeResult | null;
+}
+
+export function isCustomTool(server: McpServerConfig): boolean {
+  return server.builtin_id?.startsWith("custom_tool:") ?? false;
+}
+
 export interface McpBuiltinConfig {
   builtin_id: "blender";
   display_name: string;
@@ -245,6 +264,36 @@ export function updateMcpServer(
 export function deleteMcpServer(serverId: string): Promise<void> {
   return trackMcpServerMutation(
     mcpRequest(`/${serverId}`, { method: "DELETE" }),
+  );
+}
+
+export function parseCustomTool(
+  code: string,
+): Promise<McpCustomToolParseResult> {
+  return mcpRequest("/custom-tools/parse", { method: "POST", body: { code } });
+}
+
+export function getCustomTool(serverId: string): Promise<McpCustomTool> {
+  return mcpRequest(`/custom-tools/${serverId}`);
+}
+
+export function saveCustomTool(
+  serverId: string | null,
+  payload: {
+    displayName: string;
+    code: string;
+    headers?: Record<string, string>;
+  },
+): Promise<McpCustomTool> {
+  return trackMcpServerMutation(
+    mcpRequest(serverId ? `/custom-tools/${serverId}` : "/custom-tools", {
+      method: serverId ? "PUT" : "POST",
+      body: {
+        display_name: payload.displayName,
+        code: payload.code,
+        headers: payload.headers ?? null,
+      },
+    }),
   );
 }
 

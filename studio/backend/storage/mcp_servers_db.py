@@ -181,6 +181,10 @@ def get_server_for_tool(key: str) -> Optional[dict]:
 
 
 def _effective_row(row: dict) -> dict:
+    from integrations import custom_tools
+
+    if custom_tools.is_custom_tool(row):
+        return custom_tools.resolve_server(row)
     if row.get("builtin_id"):
         from integrations.blender.service import resolve_server
         return resolve_server(row)

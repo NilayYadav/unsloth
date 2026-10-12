@@ -41,6 +41,7 @@ import { subscribeToMcpServerMutationSettlements } from "./api/mcp-server-mutati
 import {
   type McpServerConfig,
   createMcpServer,
+  isCustomTool,
   listMcpServers,
   updateMcpServer,
 } from "./api/mcp-servers-api";
@@ -219,7 +220,7 @@ export function McpComposerButton({
   // Non-preset servers, shown below the presets so they stay toggleable.
   const customServers = servers.filter(
     (s) =>
-      !s.builtin_id &&
+      (!s.builtin_id || isCustomTool(s)) &&
       normalizeMcpUrl(s.url) !== "studio:decisions" &&
       !presets.some((p) => normalizeMcpUrl(p.url) === normalizeMcpUrl(s.url)),
   );

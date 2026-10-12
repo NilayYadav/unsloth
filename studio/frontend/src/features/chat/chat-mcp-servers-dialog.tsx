@@ -39,18 +39,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { changedImageMappings } from "./api/mcp-image";
 import { subscribeToMcpServerMutationSettlements } from "./api/mcp-server-mutation-tracker";
 import {
+  type McpCustomToolParseResult,
   type McpImageInputMapping,
   type McpServerConfig,
   createMcpServer,
   decodeMcpStdioCommand,
   deleteMcpServer,
   encodeMcpStdioCommand,
+  getCustomTool,
   importMcpServers,
+  isCustomTool,
   listMcpServers,
+  parseCustomTool,
   refreshMcpServerTools,
+  saveCustomTool,
   testMcpServer,
   updateMcpServer,
 } from "./api/mcp-servers-api";
@@ -61,6 +67,7 @@ import {
 } from "./mcp-server-form";
 import { McpImageMappings } from "./mcp-image-mappings";
 import { RefreshGlyph } from "@/lib/refresh-icon";
+import { useChatRuntimeStore } from "./stores/chat-runtime-store";
 
 type HeaderRow = { id: string; key: string; value: string };
 type ArgumentRow = { id: string; value: string };
@@ -372,6 +379,196 @@ function HeadersEditor({
   );
 }
 
+const TOOL_TEMPLATE = `def get_weather(city: str) -> str:
+    """Get the current weather for a city."""
+    return f"It is sunny in {city}."
+`;
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function CustomToolForm({
+  toolId,
+  onClose,
+}: {
+  toolId: string | null;
+  onClose: () => void;
+}) {
+  const [savedId, setSavedId] = useState(toolId);
+  const [name, setName] = useState("");
+  const [code, setCode] = useState(toolId ? "" : TOOL_TEMPLATE);
+  const [headers, setHeaders] = useState<HeaderRow[]>([]);
+  const [loaded, setLoaded] = useState(toolId === null);
+  const [parsed, setParsed] = useState<McpCustomToolParseResult | null>(null);
+  const [parsedCode, setParsedCode] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!toolId) return;
+    let cancelled = false;
+    getCustomTool(toolId).then(
+      (tool) => {
+        if (cancelled) return;
+        setName(tool.display_name);
+        setCode(tool.code);
+        setHeaders(headersFromObject(tool.headers));
+        setLoaded(true);
+      },
+      (err) => {
+        if (!cancelled) setError(errorText(err));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [toolId]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      parseCustomTool(code).then(
+        (result) => {
+          if (cancelled) return;
+          setParsed(result);
+          setParsedCode(code);
+        },
+        (err) => {
+          if (!cancelled) setError(errorText(err));
+        },
+      );
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [code, loaded]);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await saveCustomTool(savedId, {
+        displayName: name.trim(),
+        code,
+        headers: headersToObject(headers),
+      });
+      setSavedId(saved.id);
+      if (saved.probe && !saved.probe.ok) {
+        setError(saved.probe.error ?? "The tool could not start.");
+        return;
+      }
+      useChatRuntimeStore.getState().setMcpEnabledForChat(true);
+      toast.success(`Saved "${saved.display_name}"`);
+      onClose();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const blocked =
+    !parsed ||
+    parsedCode !== code ||
+    parsed.error !== null ||
+    parsed.unavailable_reason !== null ||
+    parsed.tools.length === 0;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-2">
+        <Label htmlFor="custom-tool-name">Name</Label>
+        <Input
+          id="custom-tool-name"
+          value={name}
+          disabled={saving || !loaded}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Weather"
+        />
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor="custom-tool-code">Python code</Label>
+        <Textarea
+          id="custom-tool-code"
+          value={code}
+          rows={14}
+          fieldSizing="fixed"
+          spellCheck={false}
+          disabled={saving || !loaded}
+          onChange={(e) => setCode(e.target.value)}
+          className="whitespace-pre overflow-x-auto font-mono text-xs [overflow-wrap:normal]"
+        />
+        <span className="text-xs text-muted-foreground">
+          Each top-level function whose name does not start with an underscore
+          becomes a tool. Its docstring and type hints tell the model what it
+          does and what to pass.
+        </span>
+        {parsed?.error ? (
+          <div role="alert" className="text-sm text-destructive">
+            {parsed.error}
+          </div>
+        ) : parsed?.tools.length === 0 ? (
+          <div className="text-xs text-muted-foreground">No tools found.</div>
+        ) : (
+          parsed?.tools.map((tool) => (
+            <div key={tool.name} className="text-xs">
+              <code className="font-medium">
+                {tool.name}(
+                {tool.params
+                  .map((param) =>
+                    param.type ? `${param.name}: ${param.type}` : param.name,
+                  )
+                  .join(", ")}
+                )
+              </code>
+              {tool.description ? (
+                <span className="text-muted-foreground">
+                  {" "}
+                  {tool.description.split("\n")[0]}
+                </span>
+              ) : null}
+            </div>
+          ))
+        )}
+      </div>
+      <HeadersEditor
+        rows={headers}
+        onChange={setHeaders}
+        stdio={true}
+        disabled={saving || !loaded}
+      />
+      {parsed?.unavailable_reason ? (
+        <div className="text-xs text-muted-foreground">
+          {parsed.unavailable_reason}
+        </div>
+      ) : null}
+      {error ? (
+        <div
+          role="alert"
+          className="whitespace-pre-wrap text-sm text-destructive"
+        >
+          {error}
+        </div>
+      ) : null}
+      <div className="flex justify-end gap-2 pt-2">
+        <Button variant="ghost" onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        <Button
+          onClick={save}
+          disabled={saving || !loaded || !name.trim() || blocked}
+        >
+          {saving ? <Spinner /> : null}
+          {savedId ? "Save changes" : "Add tool"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export interface ChatMcpServersDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -380,7 +577,8 @@ export interface ChatMcpServersDialogProps {
 type View =
   | { kind: "list" }
   | { kind: "create" }
-  | { kind: "edit"; id: string };
+  | { kind: "edit"; id: string }
+  | { kind: "tool"; id: string | null };
 
 export function ChatMcpServersDialog({
   open,
@@ -928,7 +1126,10 @@ export function ChatMcpServersDialog({
     }
   }
 
-  const showForm = view.kind !== "list";
+  const showForm = view.kind === "create" || view.kind === "edit";
+  const listed = servers.filter(
+    (server) => !server.builtin_id || isCustomTool(server),
+  );
   const formPending = importing || codecPending || testing || saving;
   // A local stdio command uses env vars, not headers or OAuth.
   const addressIsCommand = form.transport === "stdio";
@@ -943,7 +1144,8 @@ export function ChatMcpServersDialog({
         <DialogHeader>
           <DialogTitle>MCP Servers</DialogTitle>
           <DialogDescription>
-            Register remote (HTTP) or local (stdio command) MCP servers.
+            Register remote (HTTP) or local (stdio command) MCP servers, or
+            write tools in Python.
           </DialogDescription>
         </DialogHeader>
         <input
@@ -955,7 +1157,13 @@ export function ChatMcpServersDialog({
           disabled={importing || formPending}
         />
 
-        {showForm ? (
+        {view.kind === "tool" ? (
+          <CustomToolForm
+            key={view.id ?? "new"}
+            toolId={view.id}
+            onClose={() => setView({ kind: "list" })}
+          />
+        ) : showForm ? (
           <div className="flex flex-col gap-4">
             {view.kind === "create" && (
               <div className="flex items-center justify-between gap-3 rounded-md border border-dashed px-3 py-2">
@@ -1213,6 +1421,15 @@ export function ChatMcpServersDialog({
                 {importing ? <Spinner /> : <UploadIcon className="size-3.5" />}
                 Import config
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setView({ kind: "tool", id: null })}
+                disabled={importing}
+              >
+                <HugeiconsIcon icon={PlusSignIcon} className="size-3.5" />
+                New tool
+              </Button>
               <Button size="sm" onClick={startCreate} disabled={importing}>
                 <HugeiconsIcon icon={PlusSignIcon} className="size-3.5" />
                 Add server
@@ -1222,13 +1439,13 @@ export function ChatMcpServersDialog({
               <div className="flex justify-center py-6">
                 <Spinner />
               </div>
-            ) : servers.filter((server) => !server.builtin_id).length === 0 ? (
+            ) : listed.length === 0 ? (
               <div className="rounded-md border border-dashed py-6 text-center text-sm text-muted-foreground">
                 No custom MCP servers configured yet.
               </div>
             ) : (
               <ul className="flex flex-col divide-y rounded-md border">
-                {servers.filter((server) => !server.builtin_id).map((server) => (
+                {listed.map((server) => (
                   <li
                     key={server.id}
                     className="flex items-center justify-between gap-3 px-3 py-2"
@@ -1238,7 +1455,7 @@ export function ChatMcpServersDialog({
                         {server.display_name}
                       </div>
                       <div className="truncate text-xs text-muted-foreground">
-                        {server.url}
+                        {isCustomTool(server) ? "Python tool" : server.url}
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
@@ -1267,7 +1484,13 @@ export function ChatMcpServersDialog({
                         type="button"
                         variant="ghost"
                         size="icon"
-                        onClick={() => void startEdit(server)}
+                        onClick={() => {
+                          if (isCustomTool(server)) {
+                            setView({ kind: "tool", id: server.id });
+                          } else {
+                            void startEdit(server);
+                          }
+                        }}
                         aria-label="Edit server"
                         disabled={importing || busyIds.has(server.id)}
                       >

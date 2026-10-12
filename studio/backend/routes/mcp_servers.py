@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
+from integrations import custom_tools
 from integrations.blender import service as blender
 from models.mcp_servers import BlenderSettings, BlenderSetup, McpBuiltinResponse
 
@@ -47,6 +48,10 @@ from core.inference.mcp_config_import import parse_mcp_config
 from core.inference.mcp_image import image_input_mappings, image_mapping
 from models.mcp_servers import (
     BlenderTest,
+    McpCustomToolParseResult,
+    McpCustomToolResponse,
+    McpCustomToolSave,
+    McpCustomToolSource,
     McpServerCreate,
     McpServerImportRequest,
     McpServerImportResult,
@@ -337,6 +342,102 @@ def encode_stdio_command(
     return McpStdioEncodeResponse(url = url)
 
 
+def _custom_tool_row(server_id: str) -> dict:
+    row = mcp_servers_db.get_server(server_id)
+    if not row or not custom_tools.is_custom_tool(row):
+        raise HTTPException(status_code = 404, detail = "Custom tool not found")
+    return row
+
+
+def _custom_tool_response(row: dict, probe = None) -> McpCustomToolResponse:
+    code = custom_tools.source_path(row["id"]).read_text(encoding = "utf-8")
+    return McpCustomToolResponse(**_row_to_response(row).model_dump(), code = code, probe = probe)
+
+
+def _custom_tool_fields(payload: McpCustomToolSave) -> dict:
+    display_name = payload.display_name.strip()
+    if not display_name:
+        raise HTTPException(status_code = 400, detail = "display_name must not be empty")
+    headers = _normalize_headers(payload.headers)
+    return {"display_name": display_name, "headers_json": json.dumps(headers) if headers else None}
+
+
+async def _probe_custom_tool(server_id: str) -> McpCustomToolResponse:
+    probe = await refresh_mcp_server_tools(server_id)
+    row = mcp_servers_db.get_server(server_id)
+    if not probe.ok:
+        probe.error = await asyncio.to_thread(custom_tools.load_error, row) or probe.error
+    return _custom_tool_response(row, probe)
+
+
+@router.post("/custom-tools/parse", response_model = McpCustomToolParseResult)
+def parse_custom_tool(
+    payload: McpCustomToolSource,
+    current_subject: str = Depends(get_current_subject),
+    via_api_key: ViaApiKey = False,
+    no_credential: WithoutCredential = False,
+):
+    _require_managed_access(via_api_key, no_credential)
+    tools, error = custom_tools.parse_tools(payload.code)
+    return McpCustomToolParseResult(
+        tools = tools,
+        error = error,
+        unavailable_reason = None if stdio_mcp_enabled() else stdio_mcp_disabled_reason(),
+    )
+
+
+@router.get("/custom-tools/{server_id}", response_model = McpCustomToolResponse)
+def get_custom_tool(
+    server_id: str,
+    current_subject: str = Depends(get_current_subject),
+    via_api_key: ViaApiKey = False,
+    no_credential: WithoutCredential = False,
+):
+    _require_managed_access(via_api_key, no_credential)
+    return _custom_tool_response(_custom_tool_row(server_id))
+
+
+@router.post("/custom-tools", response_model = McpCustomToolResponse, status_code = 201)
+@serialize_mcp_server_mutation
+async def create_custom_tool(
+    payload: McpCustomToolSave,
+    current_subject: str = Depends(get_current_subject),
+    via_api_key: ViaApiKey = False,
+    no_credential: WithoutCredential = False,
+):
+    _require_managed_access(via_api_key, no_credential, executes = True)
+    fields = _custom_tool_fields(payload)
+    server_id = uuid.uuid4().hex[:16]
+    custom_tools.write_source(server_id, payload.code)
+    mcp_servers_db.create_server(
+        server_id,
+        fields["display_name"],
+        "",
+        headers_json = fields["headers_json"],
+        builtin_id = custom_tools.PREFIX + server_id,
+    )
+    return await _probe_custom_tool(server_id)
+
+
+@router.put("/custom-tools/{server_id}", response_model = McpCustomToolResponse)
+@serialize_mcp_server_mutation
+async def update_custom_tool(
+    server_id: str,
+    payload: McpCustomToolSave,
+    current_subject: str = Depends(get_current_subject),
+    via_api_key: ViaApiKey = False,
+    no_credential: WithoutCredential = False,
+):
+    _require_managed_access(via_api_key, no_credential, executes = True)
+    old = _custom_tool_row(server_id)
+    fields = _custom_tool_fields(payload)
+    custom_tools.write_source(server_id, payload.code)
+    mcp_servers_db.update_server(server_id, fields)
+    invalidate_tool_cache(server_id)
+    await asyncio.to_thread(close_mcp_sessions, old["url"], parse_server_headers(old))
+    return await _probe_custom_tool(server_id)
+
+
 # FastAPI offloads sync reads; mutations stay on-loop to preserve atomic sequences.
 @router.get("/", response_model = list[McpServerResponse])
 def list_mcp_servers(
@@ -457,7 +558,9 @@ async def update_mcp_server(
     changes = _changes_from_payload(payload)
     if old.get("builtin_id"):
         _require_managed_access(via_api_key, no_credential)
-        if payload.model_fields_set != {"is_enabled"} or payload.is_enabled is not False:
+        if payload.model_fields_set != {"is_enabled"} or (
+            payload.is_enabled is not False and not custom_tools.is_custom_tool(old)
+        ):
             raise HTTPException(
                 status_code = 400,
                 detail = "Use the managed integration setup to configure or enable this server.",
@@ -524,7 +627,7 @@ async def delete_mcp_server(
     old = mcp_servers_db.get_server(server_id)
     if not old:
         raise HTTPException(status_code = 404, detail = "MCP server not found")
-    if old.get("builtin_id"):
+    if old.get("builtin_id") and not custom_tools.is_custom_tool(old):
         raise HTTPException(
             status_code = 400, detail = "Managed integrations cannot be deleted; disable them instead."
         )
@@ -534,6 +637,8 @@ async def delete_mcp_server(
     if old.get("use_oauth"):
         await clear_oauth_tokens_async(old["url"])
     mcp_servers_db.delete_server(server_id)
+    if custom_tools.is_custom_tool(old):
+        custom_tools.source_path(server_id).unlink(missing_ok = True)
     invalidate_tool_cache(server_id)
     await asyncio.to_thread(close_mcp_sessions, old["url"], parse_server_headers(old))
 
@@ -572,7 +677,7 @@ async def refresh_mcp_server_tools(
     server = mcp_servers_db.get_server(server_id)
     if not server:
         raise HTTPException(status_code = 404, detail = "MCP server not found")
-    if server.get("builtin_id"):
+    if server.get("builtin_id") and not custom_tools.is_custom_tool(server):
         raise HTTPException(
             status_code = 400,
             detail = "Use the managed integration Test action to check Blender readiness.",
