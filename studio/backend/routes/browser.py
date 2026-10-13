@@ -35,7 +35,6 @@ from core.inference.tools import (
     _normalize_url_scheme,
     _sniff_meta_charset,
 )
-from core.inference.web_access_policy import normalize_domain
 from loggers import get_logger
 from routes.browser_network import BROWSER_NETWORK_JS
 
@@ -63,27 +62,6 @@ _HTML_TYPES = frozenset({"text/html", "application/xhtml+xml"})
 # Own pool, so slow sites can't starve chat inference's default executor.
 _FETCH_POOL = ThreadPoolExecutor(max_workers = 8, thread_name_prefix = "browser-fetch")
 _DISCONNECT_POLL_S = 0.25
-# Pages' requests to their own sites (/request); a pool of their own, so a busy page can't hold up page loads.
-_REQUEST_POOL = ThreadPoolExecutor(max_workers = 8, thread_name_prefix = "browser-request")
-_MAX_PAGE_REQUEST_BODY = 1024 * 1024
-_MAX_PAGE_RESPONSE_BYTES = 10 * 1024 * 1024
-_HEADER_NAME_RE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}")
-# Fetch's forbidden methods and request headers: no page can send them, so neither does this.
-_FORBIDDEN_METHODS = frozenset({"CONNECT", "TRACE", "TRACK"})
-_FORBIDDEN_REQUEST_HEADERS = frozenset(
-    "accept-charset accept-encoding access-control-request-headers access-control-request-method "
-    "connection content-length cookie cookie2 date dnt expect host keep-alive origin referer "
-    "set-cookie te trailer transfer-encoding upgrade user-agent via".split()
-)
-# What a page reads of a CORS response besides the headers it names in Access-Control-Expose-Headers.
-_CORS_SAFELISTED_RESPONSE_HEADERS = frozenset(
-    "cache-control content-language content-length content-type expires last-modified pragma".split()
-)
-# Unreadable by any page (Set-Cookie) or about the hop, not the response. Content-Length and
-# Content-Encoding stay: browsers show them with a decoded body too.
-_HIDDEN_RESPONSE_HEADERS = frozenset(
-    "set-cookie set-cookie2 connection keep-alive proxy-connection te trailer transfer-encoding upgrade".split()
-)
 
 # Quoted values are bounded and a bare "<" ends a tag, so stripping stays linear on hostile pages.
 _TAG_BODY = r"""(?:[^<>"']|"[^"]{0,4096}"|'[^']{0,4096}')*>"""
@@ -1595,184 +1573,9 @@ def _build_response(
     )
 
 
-class BrowserPageRequest(BaseModel):
-    # The page's address as the panel loaded it; the request must be to its origin.
-    page: str = Field(..., min_length = 1, max_length = 8192)
-    url: str = Field(..., min_length = 1, max_length = 8192)
-    method: str = Field(default = "GET", pattern = r"^[A-Za-z]{1,16}$")
-    headers: list[tuple[str, str]] = Field(default_factory = list, max_length = 64)
-    # Base64.
-    body: Optional[str] = Field(default = None, max_length = 4 * (_MAX_PAGE_REQUEST_BODY // 3 + 1))
-    # Fetch's redirect mode: "error" fails at a redirect, "manual" stops there (an opaque redirect).
-    redirect: Literal["follow", "error", "manual"] = "follow"
-
-
-def _origin(url: str) -> Optional[tuple[str, str, int]]:
-    """``(scheme, host, port)``, the host named as _fetch_url_raw names it to host_headers."""
-    try:
-        parts = urlsplit(url)
-        scheme = parts.scheme.lower()
-        if scheme not in ("http", "https") or not parts.hostname:
-            return None
-        return (
-            scheme,
-            normalize_domain(parts.hostname),
-            parts.port or (443 if scheme == "https" else 80),
-        )
-    except (TypeError, ValueError):
-        return None
-
-
-def _allowed_header(name: str, value: str) -> bool:
-    lowered = name.lower()
-    return (
-        bool(_HEADER_NAME_RE.fullmatch(name))
-        and lowered not in _FORBIDDEN_REQUEST_HEADERS
-        and not lowered.startswith(("proxy-", "sec-"))
-        and "\r" not in value
-        and "\n" not in value
-    )
-
-
-def _page_request(request: BrowserPageRequest, cancel_event: threading.Event) -> dict:
-    """The page's request, made as its browser would make a same-origin one; every status is the page's."""
-    origin = _origin(request.page)
-    if origin is None or _origin(request.url) != origin:
-        raise HTTPException(status_code = 403, detail = "Only requests to the page's own site.")
-    method = request.method.upper()
-    if method in _FORBIDDEN_METHODS:
-        raise HTTPException(status_code = 400, detail = f"{method} is not allowed.")
-    body = None
-    if request.body is not None and method not in ("GET", "HEAD"):
-        try:
-            body = base64.b64decode(request.body, validate = True)
-        except ValueError:
-            raise HTTPException(status_code = 400, detail = "The body is not base64.")
-        if len(body) > _MAX_PAGE_REQUEST_BODY:
-            raise HTTPException(status_code = 413, detail = "The body is too large.")
-    own = {name: value for name, value in request.headers if _allowed_header(name, value)}
-    named = {name.lower() for name in own}
-    scheme, host, port = origin
-    default_port = 443 if scheme == "https" else 80
-    # What a browser adds to a same-origin request: Referer (the default policy keeps the whole
-    # address), fetch metadata, and Origin on anything but GET and HEAD.
-    added = {
-        "Referer": request.page.split("#", 1)[0],
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Dest": "empty",
-    }
-    if method not in ("GET", "HEAD"):
-        added["Origin"] = f"{scheme}://{host}" + ("" if port == default_port else f":{port}")
-    if "accept" not in named:
-        added["Accept"] = "*/*"
-    if "accept-language" not in named:
-        added["Accept-Language"] = "en-US,en;q=0.9"
-    page_headers = {**added, **own}
-    # Whether every hop so far stayed on the page's origin. Once one leaves it, the page's headers
-    # (Authorization among them) are not sent again, as Fetch strips them on an origin change.
-    hops = {"same_origin": True, "stopped": False}
-
-    def on_redirect(url: str, hop_method: str, has_body: bool) -> Optional[str]:
-        if request.redirect != "follow":
-            hops["stopped"] = True
-            return "Redirected, and the request asked not to follow."
-        if _origin(url) == origin and hops["same_origin"]:
-            return None
-        hops["same_origin"] = False
-        # A browser preflights anything but a bare GET or HEAD to another origin; this can't, so a
-        # write is refused before it is sent rather than after it reached the other site.
-        if hop_method not in ("GET", "HEAD") or has_body:
-            return "Redirected a write to another site."
-        return None
-
-    def host_headers(current_host: str) -> dict:
-        return {**_studio_headers(current_host), **(page_headers if hops["same_origin"] else {})}
-
-    meta: dict = {}
-    error, raw, _content_type = _fetch_url_raw(
-        request.url,
-        timeout = _FETCH_TIMEOUT_S,
-        extra_headers = {"User-Agent": _BROWSER_UA},
-        deadline = time.monotonic() + _FETCH_TIMEOUT_S,
-        raw_bytes_max = _MAX_PAGE_RESPONSE_BYTES,
-        post_data = body,
-        meta_out = meta,
-        cancel_event = cancel_event,
-        host_headers = host_headers,
-        method = method,
-        any_status = True,
-        on_redirect = on_redirect,
-    )
-    # "manual" gets an opaque redirect: no status, headers or body reach the page.
-    if hops["stopped"] and request.redirect == "manual":
-        return {
-            "opaqueRedirect": True,
-            "status": 0,
-            "statusText": "",
-            "url": request.url,
-            "headers": [],
-            "body": "",
-        }
-    status = meta.get("status")
-    if not isinstance(status, int) or not isinstance(raw, bytes):
-        raise HTTPException(status_code = 502, detail = error or "The request failed.")
-    if not 200 <= status <= 599:
-        raise HTTPException(status_code = 502, detail = f"HTTP {status}.")
-    final_url = meta.get("url") or request.url
-    headers = [
-        (name, value)
-        for name, value in meta.get("headers") or []
-        if name.lower() not in _HIDDEN_RESPONSE_HEADERS
-    ]
-    # Redirected to another site, it is a CORS request from an opaque origin, as in a browser: read
-    # only with that site's consent, and only the headers it exposes.
-    if _origin(final_url) != origin:
-        allow_origin = (meta.get("allow_origin") or "").strip()
-        if allow_origin not in ("*", "null"):
-            raise HTTPException(status_code = 502, detail = "Redirected to another site.")
-        exposed = {
-            name.strip().lower()
-            for header, value in headers
-            if header.lower() == "access-control-expose-headers"
-            for name in value.split(",")
-        }
-        # Credentials are never sent, so "*" exposes every header.
-        if "*" not in exposed:
-            headers = [
-                (name, value)
-                for name, value in headers
-                if name.lower() in _CORS_SAFELISTED_RESPONSE_HEADERS or name.lower() in exposed
-            ]
-    return {
-        "status": status,
-        "statusText": meta.get("reason") or "",
-        "url": final_url,
-        "headers": [[name, value] for name, value in headers],
-        "body": base64.b64encode(raw).decode("ascii"),
-    }
-
-
 def _fetch_and_build(request: BrowserFetchRequest, cancel_event: threading.Event) -> Response:
     error, body, content_type, meta = _fetch(request, cancel_event)
     return _build_response(request.url, error, body, content_type, meta, cancel_event)
-
-
-async def _run_in_pool(pool: ThreadPoolExecutor, work, request, http_request: Request):
-    """``work(request, cancel_event)`` in ``pool``, cancelled when the client goes away."""
-    cancel_event = threading.Event()
-    loop = asyncio.get_running_loop()
-    task = loop.run_in_executor(pool, work, request, cancel_event)
-    try:
-        while True:
-            done, _ = await asyncio.wait({task}, timeout = _DISCONNECT_POLL_S)
-            if done:
-                return task.result()
-            if await http_request.is_disconnected():
-                cancel_event.set()
-                raise HTTPException(status_code = 499, detail = "Client closed request")
-    finally:
-        cancel_event.set()
 
 
 @router.post("/fetch")
@@ -1783,17 +1586,19 @@ async def browser_fetch(
 ):
     """Fetch a page: HTML as JSON for the shell, anything else raw with its content type."""
     request.url = _normalize_url_scheme(request.url.strip())
-    return await _run_in_pool(_FETCH_POOL, _fetch_and_build, request, http_request)
-
-
-@router.post("/request")
-async def browser_page_request(
-    request: BrowserPageRequest,
-    http_request: Request,
-    current_subject: str = Depends(get_current_subject),
-):
-    """A page's fetch or XHR to its own site, which its opaque-origin sandbox can't make (browser_network.py)."""
-    return await _run_in_pool(_REQUEST_POOL, _page_request, request, http_request)
+    cancel_event = threading.Event()
+    loop = asyncio.get_running_loop()
+    task = loop.run_in_executor(_FETCH_POOL, _fetch_and_build, request, cancel_event)
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout = _DISCONNECT_POLL_S)
+            if done:
+                return task.result()
+            if await http_request.is_disconnected():
+                cancel_event.set()
+                raise HTTPException(status_code = 499, detail = "Client closed request")
+    finally:
+        cancel_event.set()
 
 
 @router.get("/print", include_in_schema = False)
