@@ -1,0 +1,50 @@
+# Disposable repro workflow. Delete after validation.
+
+name: "PR 13661 address bar (macOS)"
+
+on:
+  push:
+    branches:
+      - "pr13661-ci-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: "Targeted repro"
+    runs-on: "macos-14"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22.x"
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: "Install Playwright browsers"
+        shell: bash
+        run: |
+          python -m pip install playwright==1.55.0
+          python -m playwright install chromium firefox webkit
+
+      - name: "Address bar resolution in node and every browser engine"
+        shell: bash
+        run: |
+          set +e
+          export PYTHONIOENCODING=utf-8
+          status=0
+          cd studio/frontend
+          node --experimental-strip-types --test tests/browser-address.test.ts || status=1
+          cd "$GITHUB_WORKSPACE"
+          node .github/repro/pr13661/strip.mjs studio/frontend/src/features/browser/address.ts "$RUNNER_TEMP/address.js" || status=1
+          python .github/repro/pr13661/engines.py "$RUNNER_TEMP/address.js" chromium,firefox,webkit || status=1
+          exit $status
+
