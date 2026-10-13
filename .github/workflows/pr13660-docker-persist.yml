@@ -1,0 +1,32 @@
+name: PR 13660 docker rm cycle
+
+on:
+  push:
+    branches: [pr13660-ci-head, pr13660-ci-reverted]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift /usr/local/.ghcup
+          docker system prune -af > /dev/null
+          df -h / /mnt
+      - name: Pull the published image
+        run: |
+          docker pull -q unsloth/unsloth@sha256:e37dc23d18ccbf51c63781c7c9b0cee24bb5764a14e71e0d0013579f68cba739
+          docker tag unsloth/unsloth@sha256:e37dc23d18ccbf51c63781c7c9b0cee24bb5764a14e71e0d0013579f68cba739 unsloth/unsloth:latest
+          df -h /
+      - name: docker run / docker rm / docker run
+        run: bash .github/pr13660/cycle.sh
+      - name: Logs
+        if: always()
+        run: |
+          for f in "$RUNNER_TEMP"/out/*.log; do echo "== $f"; grep -v "pr13660-local-only" "$f" | tail -60; done
