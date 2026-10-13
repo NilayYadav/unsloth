@@ -157,7 +157,7 @@ export function buildLlmMcpProvider(
   }
   return {
     // biome-ignore lint/style/useNamingConvention: api schema
-    provider_type: provider.provider_type,
+    provider_type: "streamable_http",
     name,
     endpoint,
     // biome-ignore lint/style/useNamingConvention: api schema
