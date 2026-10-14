@@ -13,7 +13,7 @@ import { callNative, useNativeBrowser } from "../native-support";
 import { requestFrameAgent } from "../page-frame";
 import { browserPanelAvailable } from "../panel-availability";
 import { type BrowserTab, currentEntry, useBrowserStore } from "../store";
-import { type Answer, askUser, setActiveAction, useBrowserAgentStore } from "./agent-store";
+import { askUser, setActiveAction, useBrowserAgentStore } from "./agent-store";
 import { type Gate, type Question, type SitePolicy, gateElement, gateNavigation, hostOfUrl, navigationBlocks } from "./gate";
 import { type SiteRule, ruleFor } from "./permissions";
 import { type AgentAnswer, type ElementInfo, pageAgentSource } from "./page-agent";
@@ -111,8 +111,6 @@ let scope: string | undefined;
 // it goes, so this is how it is checked before it loads.
 let trail: string[] = [];
 let at = -1;
-// Always allow answers, by chat: kept when another chat uses the browser, like Always allow on tool cards.
-const alwaysAllowed = new Map<string, Set<string>>();
 
 function enterScope(next: string | undefined): void {
   if (next === scope) return;
@@ -419,18 +417,11 @@ const DECLINED: Record<Question["ask"], string> = {
   pointer: "clicking where the page doesn't say what is there",
 };
 
-/** Questions show in the panel's agent bar, so the panel has to be on screen to ask. A script is asked every time. */
-async function askInPanel(question: Question, signal?: AbortSignal): Promise<Answer> {
-  // A click is asked about by its label, so Always allow covers that button, not every risky one.
-  const key = [question.ask, question.host, question.ask === "click" ? question.name : ""].join("\n");
-  // "__default" is a new chat's first turn that hasn't got its id yet, which another new chat can share.
-  const chat = question.ask === "script" || !scope || scope === "__default" ? undefined : scope;
-  if (chat && alwaysAllowed.get(chat)?.has(key)) return "always";
+/** Questions show in the panel's agent bar, so the panel has to be on screen to ask. */
+function askInPanel(question: Question, signal?: AbortSignal): Promise<boolean> {
   const store = useBrowserStore.getState();
   if (!store.open) store.openPanel();
-  const answer = await askUser(question, signal);
-  if (answer === "always" && chat) alwaysAllowed.set(chat, (alwaysAllowed.get(chat) ?? new Set()).add(key));
-  return answer;
+  return askUser(question, signal);
 }
 
 async function observe(tab: BrowserTab, context: ActionContext, note?: string, op: Record<string, unknown> = { op: "snapshot" }): Promise<Result> {
