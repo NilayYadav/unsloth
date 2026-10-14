@@ -255,7 +255,7 @@ export const it = {
     annotationScreenshotsAlways: "Includi sempre",
     annotationScreenshotsNever: "Non includere mai",
     clearDataSetting: "Cancella dati di navigazione",
-    clearDataSettingDescription: "Cancella la cronologia di navigazione, la cronologia download e le pagine nella cache. Le pagine conservano cookie e dati dei siti solo fino al ricaricamento di Studio.",
+    clearDataSettingDescription: "Cancella la cronologia di navigazione, la cronologia download e le pagine nella cache. Le pagine non conservano cookie né dati dei siti.",
     manage: "Gestisci",
     fullView: {
       enter: "Vista completa",

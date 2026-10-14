@@ -268,7 +268,7 @@ export const sv = {
     annotationScreenshotsNever: "Ta aldrig med",
     clearDataSetting: "Rensa webbdata",
     clearDataSettingDescription:
-      "Rensa webbhistorik, hämtningshistorik och cachade sidor. Sidor sparar cookies och webbplatsdata bara tills Studio laddas om.",
+      "Rensa webbhistorik, hämtningshistorik och cachade sidor. Sidor sparar inga cookies eller webbplatsdata.",
     manage: "Hantera",
     fullView: {
       enter: "Öppna helvy",
