@@ -106,7 +106,6 @@ import {
   ArchivedMediaView,
 } from "../components/archived-media-dialog";
 import { DocumentsRagSection } from "../components/documents-rag-section";
-import { ReembedDocumentsRow } from "../components/reembed-documents-row";
 import { SettingsRow } from "../components/settings-row";
 import { SettingsSection } from "../components/settings-section";
 import { UploadedFilesView } from "../components/uploaded-files-dialog";
@@ -1199,8 +1198,6 @@ export function DataTab({ searchEntry }: { searchEntry?: string }) {
             <LinkedFoldersManager />
           </div>
         ) : null}
-        {/* The owner sees it beside the embedding model below. */}
-        {!isOwner ? <ReembedDocumentsRow /> : null}
       </SettingsSection>
 
       {/* Embedding model settings are installation-wide (owner-only routes). */}

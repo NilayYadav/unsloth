@@ -16,8 +16,6 @@ import type {
   LinkedFolder,
   LinkedFolderScope,
   RagDocument,
-  ReembedJob,
-  ReembedStatus,
   UploadedDocument,
 } from "../types/rag";
 import { noteRagAvailability, noteRagResponse } from "./rag-availability";
@@ -754,18 +752,6 @@ export async function deleteDocument(
   );
   if (projectId) announceProjectSourcesUpdated(projectId);
   return result;
-}
-
-export function getReembedStatus(): Promise<ReembedStatus> {
-  return ragRequest("/reembed");
-}
-
-export function startReembed(): Promise<{ job: ReembedJob }> {
-  return ragRequest("/reembed", { method: "POST" });
-}
-
-export function cancelReembed(): Promise<{ job: ReembedJob }> {
-  return ragRequest("/reembed/cancel", { method: "POST" });
 }
 
 export function getJob(jobId: string, signal?: AbortSignal): Promise<IndexJob> {
