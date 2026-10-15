@@ -46,7 +46,6 @@ class ActiveGeneration:
         "model",
         "kind",
         "account_id",
-        "external",
         "_handle",
         "_borrowed",
     )
@@ -60,10 +59,8 @@ class ActiveGeneration:
         model: Optional[str] = None,
         kind: str = "chat",
         account_id: Optional[str] = None,
-        external: bool = False,
     ):
         self.account_id = account_id or current_account_id()
-        self.external = external
         self.thread_id = thread_id or None
         self.run_id = run_id or None
         self.cancel_event = cancel_event
@@ -100,7 +97,6 @@ class ActiveGeneration:
                 "model": self.model,
                 "kind": self.kind,
                 "account_id": self.account_id,
-                "external": self.external,
                 "started_at": time.time(),
                 "event": self.cancel_event,
             }
@@ -185,14 +181,7 @@ def count(account_id: Optional[str] = None, exclude: Collection[threading.Event]
 def foreign_count(account_id: str) -> int:
     """Generations in flight for OTHER accounts, which a load or unload must not interrupt."""
     with _LOCK:
-        return sum(
-            1 for e in _ACTIVE.values() if e["account_id"] != account_id and not e["external"]
-        )
-
-
-def external_events() -> set[threading.Event]:
-    with _LOCK:
-        return {e["event"] for e in _ACTIVE.values() if e["external"]}
+        return sum(1 for e in _ACTIVE.values() if e["account_id"] != account_id)
 
 
 def cancel_all(account_id: Optional[str] = None, exclude: Collection[threading.Event] = ()) -> int:
