@@ -40187,7 +40187,6 @@ class LlamaCppBackend:
                                                 permission_mode = permission_mode,
                                                 name = current_name,
                                                 sandbox_level = sandbox_level,
-                                                session_id = session_id,
                                             )
                                             # A text-preview card still streams while gated;
                                             # hiding it blanks the chat.
@@ -40338,7 +40337,6 @@ class LlamaCppBackend:
                                                                 permission_mode = "off",
                                                                 name = _sniffed,
                                                                 sandbox_level = sandbox_level,
-                                                                session_id = session_id,
                                                             )
                                                         )
                                                         and not has_text_only_provisional_card(
@@ -41358,7 +41356,6 @@ class LlamaCppBackend:
                         is_high_risk = is_high_risk_tool_call,
                         never_needs = never_needs_approval,
                         sandbox_level = sandbox_level,
-                        session_id = session_id,
                     )
                     # Sending the user's image always asks, whatever the permission mode.
                     needs_confirm = needs_confirm or image_share is not None
