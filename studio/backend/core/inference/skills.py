@@ -109,9 +109,6 @@ def _agents_base(home: Optional[Path]) -> tuple[Path, Optional[Path]]:
     if home is not None:
         return home, None
     if is_owner_context():
-        override = _owner_skills_dir()
-        if override is not None:
-            return override.parent, Path(override.name)
         return _owner_home(), None
     return workspace_root(), Path(_MANAGED_SKILLS_DIR)
 
@@ -405,17 +402,6 @@ def _owner_home() -> Path:
     return Path.home()
 
 
-def _owner_skills_dir() -> Optional[Path]:
-    override = (os.environ.get("UNSLOTH_STUDIO_SKILLS_HOME") or "").strip()
-    return Path(override).expanduser() if override else None
-
-
-def _agents_display() -> str:
-    if not is_owner_context():
-        return _MANAGED_SKILLS_DIR
-    return str(_owner_skills_dir() or "~/.agents/skills")
-
-
 def _skill_roots(home: Optional[Path] = None) -> tuple[tuple[str, Path], ...]:
     if home is not None:
         base = home
@@ -425,7 +411,7 @@ def _skill_roots(home: Optional[Path] = None) -> tuple[tuple[str, Path], ...]:
         return (("agents", workspace_root() / _MANAGED_SKILLS_DIR), _BUNDLED_ROOT)
     base = _owner_home()
     return (
-        ("agents", _owner_skills_dir() or base / ".agents" / "skills"),
+        ("agents", base / ".agents" / "skills"),
         ("claude", base / ".claude" / "skills"),
         _BUNDLED_ROOT,
     )
@@ -720,7 +706,7 @@ def create_skill(
             raise
 
     # The path as the user would name it, not the resolved host path.
-    display = "~/.agents/skills" if home is not None else _agents_display()
+    display = "~/.agents/skills" if root is None else f"{_MANAGED_SKILLS_DIR}"
     return {
         **metadata,
         "source": "agents",
@@ -789,7 +775,7 @@ def read_skill_manifest(name: str, *, home: Optional[Path] = None) -> dict:
         )
         _, body = _split_skill_markdown(raw)
         display = {
-            "agents": _agents_display(),
+            "agents": "~/.agents/skills" if is_owner_context() else _MANAGED_SKILLS_DIR,
             "claude": "~/.claude/skills",
         }.get(record["source"])
         return {
