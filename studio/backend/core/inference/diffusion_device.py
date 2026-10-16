@@ -406,8 +406,7 @@ def resolve_auto_cuda_ordinal() -> Optional[int]:
     single-GPU fit, ties to the lowest ordinal. Read from nvidia-smi alone (no CUDA context per card, so no
     torch fallback) and keyed through the parent-visible list, so a mask keeps deciding which cards exist.
 
-    None when card 0 wins (ties included) on identical cards, on one visible card (unchanged),
-    a UUID/MIG mask (no physical ids), ROCm (an APU's free reading is the
+    None on one visible card (unchanged), a UUID/MIG mask (no physical ids), ROCm (an APU's free reading is the
     shared host pool, which would outrank a discrete card), a CUDA order other than nvidia-smi's (its rows are
     then not torch's ordinals), an integrated GPU (its rows are a carve-out or N/A, and its real budget is the
     shared host pool), missing nvidia-smi telemetry and any failure. Never raises. Only cards at least as
@@ -423,12 +422,8 @@ def resolve_auto_cuda_ordinal() -> Optional[int]:
         if hw.IS_ROCM:
             return None
         visible = hw.get_parent_visible_gpu_ids()
-        if len(visible) < 2:
+        if len(visible) < 2 or not hw._cuda_order_matches_smi():
             return None
-        if not hw._cuda_order_matches_smi():
-            # No ranking (rows are not ordinals), but on cards that are not provably identical keep the
-            # current card explicit, so a pooled thread left on another card cannot preflight against it.
-            return None if hw._cuda_cards_identical() is True else 0
         if hw._integrated_cuda_rows(visible)[0]:
             return None
         result = hw._smi_visible_utilization(hw._get_parent_visible_gpu_spec())
@@ -461,72 +456,7 @@ def resolve_auto_cuda_ordinal() -> Optional[int]:
     if not free_by_ordinal:
         return None
     best = max(free_by_ordinal.values())
-    winner = min(o for o, free in free_by_ordinal.items() if best - free <= _AUTO_FREE_TIE_BYTES)
-    if winner:
-        return winner
-    # Card 0 won. Identical cards (same capability and size) keep None, the unpinned path they always had:
-    # any card resolves the same precision and artifacts. Mixed cards keep 0 explicit, since a pooled thread
-    # left on another card would otherwise preflight against that card.
-    totals = {d.get("vram_total_gb") for d in devices if d.get("index") in visible}
-    if len({caps.get(i) for i in visible}) == 1 and len(totals) == 1:
-        # Physical rows hide MIG slice sizes, so a MIG card makes the set mixed.
-        try:
-            if not set(visible) & nvidia.get_mig_gpu_indices():
-                return None
-        except Exception:  # noqa: BLE001 -- unknown: keep card 0 explicit
-            pass
-    return 0
-
-
-def auto_cuda_ranking_possible_cached() -> Optional[bool]:
-    """``auto_cuda_ranking_possible`` when it can be answered from state already in memory, else None.
-
-    For the event loop: a cold device detection, an uncounted unmasked host or a non-numeric mask may run
-    nvidia-smi, so those go to a worker thread instead.
-    """
-    try:
-        from utils.hardware import hardware as hw
-
-        if hw.DEVICE is None:
-            return None
-        if hw.IS_ROCM or hw.DEVICE != hw.DeviceType.CUDA:
-            return auto_cuda_ranking_possible()
-        mask = os.environ.get("CUDA_VISIBLE_DEVICES")
-        if mask is None:
-            if hw._physical_gpu_count is None:
-                return None
-        elif not all(token.strip().isdigit() for token in mask.split(",") if token.strip()):
-            return None
-    except Exception:  # noqa: BLE001 -- let the worker-thread gate decide
-        return None
-    return auto_cuda_ranking_possible()
-
-
-def auto_cuda_ranking_possible() -> bool:
-    """Whether an automatic load could pick another card: NVIDIA CUDA with 2+ parent-visible GPUs.
-
-    Read from the cached device and mask only (no torch, no capability or dtype probe), so zero / one GPU,
-    ROCm, XPU, MPS and CPU keep the pre-ranking fast path. Never raises.
-    """
-    try:
-        from utils.hardware import hardware as hw
-        if hw.IS_ROCM or hw.get_device() != hw.DeviceType.CUDA:
-            return False
-        return len(hw.get_parent_visible_gpu_ids()) >= 2
-    except Exception:  # noqa: BLE001 -- unknown host keeps the current device
-        return False
-
-
-def auto_cuda_ordinal_for_load() -> Optional[int]:
-    """``resolve_auto_cuda_ordinal`` behind the cheap gate and the CUDA target check, for automatic loads."""
-    planned = _PLANNED_ORDINAL.get()
-    if planned is not _UNPLANNED:
-        return planned
-    if not auto_cuda_ranking_possible():
-        return None
-    if resolve_diffusion_device_target().device != "cuda":
-        return None
-    return resolve_auto_cuda_ordinal()
+    return min(o for o, free in free_by_ordinal.items() if best - free <= _AUTO_FREE_TIE_BYTES)
 
 
 @contextmanager
