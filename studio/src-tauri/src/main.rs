@@ -10,6 +10,8 @@ mod browser_downloads;
 mod browser_layer;
 mod browser_open_with;
 mod browser_proxy;
+#[cfg(test)]
+mod proxy_ab_probe;
 #[cfg(target_os = "linux")]
 mod browser_linux;
 mod browser_webview;
