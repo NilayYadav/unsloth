@@ -90,7 +90,6 @@ MODELS_DEV_PROVIDER_MAP = {
     "cohere": "cohere",
     "huggingface": "huggingface",
     "alibaba": "qwen",
-    "zai": "zai",
     "ollama-cloud": "ollama",
     "lmstudio": "lmstudio",
 }
