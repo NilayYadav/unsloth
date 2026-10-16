@@ -2041,6 +2041,82 @@ def _mask_names_cuda_ordinals(parent_visible_spec: Dict[str, Any]) -> bool:
     return not _cuda_order_matches_smi()
 
 
+_cuda_card_identities: Dict[int, tuple] = {}
+
+
+def _cuda_cards_identical(gpu_ids: Optional[list[int]] = None) -> Optional[bool]:
+    """Whether the NVIDIA cards ``gpu_ids`` (default: every physical card) share one identity per nvidia-smi (name, total memory, compute cap, max SM clock) and none is MIG, out of process. None when unknown. Read once and cached: a card's identity does not change, and a grown card count re-reads."""
+    global _cuda_card_identities
+    if IS_ROCM:
+        return None
+    count = get_physical_gpu_count()
+    wanted = list(range(count)) if gpu_ids is None else list(gpu_ids)
+    if not set(wanted) <= set(_cuda_card_identities) or len(_cuda_card_identities) < count:
+        try:
+            from . import nvidia
+            identities = nvidia.get_card_identities()
+        except Exception:
+            return None
+        if not identities:
+            return None
+        _cuda_card_identities = identities
+    rows = [_cuda_card_identities.get(gpu_id) for gpu_id in wanted]
+    if not rows or any(row is None for row in rows):
+        return None
+    if len(set(rows)) != 1:
+        return False
+    # A MIG card is seen through a slice whose size the physical row does not show.
+    try:
+        from . import nvidia
+        return not (set(wanted) & nvidia.get_mig_gpu_indices())
+    except Exception:
+        return None
+
+
+_cuda_ordinal_rows_cache: Dict[tuple, list[int]] = {}
+
+
+def _smi_rows_for_cuda_ordinals(parent_ids: list[int]) -> Optional[Dict[str, Any]]:
+    """nvidia-smi utilization keyed by the mask's ids, read from the rows the CUDA ordinals really are.
+
+    For a numeric mask under a non-PCI CUDA_DEVICE_ORDER, where mask entries are CUDA ordinals and not
+    nvidia-smi rows. The ordinal -> row join is by PCI bus id, found once per environment out of process
+    (no CUDA context here). None when it cannot be established, so the caller keeps the torch path.
+    """
+    key = (os.environ.get("CUDA_VISIBLE_DEVICES"), os.environ.get("CUDA_DEVICE_ORDER"))
+    rows = _cuda_ordinal_rows_cache.get(key)
+    if rows is None:
+        try:
+            from . import nvidia
+            rows = nvidia.get_cuda_ordinal_smi_rows()
+        except Exception:
+            rows = None
+        if not rows:
+            return None
+        _cuda_ordinal_rows_cache[key] = rows
+    if len(rows) != len(parent_ids) or len(set(rows)) != len(rows):
+        return None
+    result = _smi_query(
+        "get_visible_gpu_utilization", sorted(rows), parent_cuda_visible_devices = None
+    )
+    # MIG slices are keyed by the physical row, so correct before the rows become mask ids.
+    physical = _with_mig_instance_memory(list((result or {}).get("devices", [])))
+    by_row = {d.get("index"): d for d in physical}
+    if not all(row in by_row for row in rows):
+        return None
+    return {
+        "mig_corrected": True,
+        "devices": [
+            {
+                "index": parent_ids[ordinal],
+                "vram_total_gb": by_row[row].get("vram_total_gb"),
+                "vram_used_gb": by_row[row].get("vram_used_gb"),
+            }
+            for ordinal, row in enumerate(rows)
+        ],
+    }
+
+
 def _amd_smi_ids_for_hip_ids(hip_ids: Optional[list[int]]) -> Optional[list[int]]:
     """Translate visible HIP ordinals to amd-smi physical GPU IDs."""
     if hip_ids is None or not hip_ids:
@@ -6105,9 +6181,20 @@ def auto_select_gpu_ids(
         metadata["selected_gpu_ids"] = parent_ids
         return parent_ids, metadata
 
-    if _mask_names_cuda_ordinals(parent_visible_spec):
-        # The display keeps the CLI rows; ranking needs the cards the worker will get.
+    smi_by_ordinal = (
+        _smi_rows_for_cuda_ordinals(get_parent_visible_gpu_ids())
+        if _mask_names_cuda_ordinals(parent_visible_spec)
+        else None
+    )
+    if smi_by_ordinal is not None:
+        # nvidia-smi telemetry for the cards the ids select, joined by PCI bus id out of process.
+        utilization = smi_by_ordinal
+    elif _mask_names_cuda_ordinals(parent_visible_spec):
+        # The display keeps the CLI rows; ranking needs the cards the worker will get. Torch already
+        # reports a MIG slice's own memory, and these rows carry mask ids, not the physical rows the
+        # MIG correction keys on, so it must not run on them.
         utilization = {
+            "mig_corrected": True,
             "devices": [
                 {
                     "index": td["index"],
@@ -6115,12 +6202,13 @@ def auto_select_gpu_ids(
                     "vram_used_gb": td["used_gb"],
                 }
                 for td in _torch_get_per_device_info(get_parent_visible_gpu_ids())
-            ]
+            ],
         }
     else:
         utilization = get_visible_gpu_utilization()
     devices = [d for d in utilization.get("devices", []) if d.get("index") not in _uncovered]
-    devices = _with_mig_instance_memory(devices)
+    if not utilization.get("mig_corrected"):
+        devices = _with_mig_instance_memory(devices)
     parent_ids = _covered(get_parent_visible_gpu_ids())
 
     if not devices:
