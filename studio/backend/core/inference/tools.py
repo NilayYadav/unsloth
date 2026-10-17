@@ -114,8 +114,6 @@ _RAG_SEARCH_SLOT = threading.BoundedSemaphore(1)
 # Candidate multiplier when a website policy will filter the results after the search.
 _POLICY_OVERFETCH = 4
 _DISABLE_DNS_PINNING_ENV = "UNSLOTH_STUDIO_DISABLE_DNS_PINNING"
-# How a lookup that found no address starts, as opposed to a refused one.
-_RESOLVE_FAILED = "Failed to resolve host"
 
 # Splits the UI source-map from the result; loops strip it (like __IMAGES__).
 RAG_SOURCES_SENTINEL = "\n__RAG_SOURCES__:"
@@ -15900,13 +15898,12 @@ _PINNED_DIAL_TIMEOUT = 1.0
 _PINNED_PROBE_BUDGET = 0.25
 
 
-def _pinned_create_connection(addresses, origin = None):
+def _pinned_create_connection(addresses):
     """``socket.create_connection`` that walks *addresses* instead of resolving.
 
     Pinning to one validated address dropped the walk every other client gets. Walking
     here rather than around ``opener.open`` keeps the caller's timeout covering one
-    whole response. A direct dial of *origin*, a name sent on for a proxy, walks them
-    too: the opener reads the proxy settings again, and must not look the name up afresh.
+    whole response.
     """
     import socket
 
@@ -15918,10 +15915,8 @@ def _pinned_create_connection(addresses, origin = None):
         if timeout is socket._GLOBAL_DEFAULT_TIMEOUT:
             timeout = socket.getdefaulttimeout()
         # A proxy dial is not an origin dial, and callers withhold the addresses for it.
-        if address[0] not in addresses and address[0] != origin:
+        if address[0] not in addresses:
             return socket.create_connection(address, timeout, source_address)
-        if not addresses:
-            raise OSError(f"{origin} did not resolve here and no proxy took it")
 
         port = address[1]
         expiry = None if timeout is None else time.monotonic() + timeout
@@ -15977,13 +15972,12 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         *,
         sni_hostname: str,
         addresses = (),
-        origin = None,
         **kwargs,
     ):
         super().__init__(host, **kwargs)
         self._sni_hostname = sni_hostname
-        if addresses or origin:
-            self._create_connection = _pinned_create_connection(tuple(addresses), origin)
+        if addresses:
+            self._create_connection = _pinned_create_connection(tuple(addresses))
 
     def connect(self):
         http.client.HTTPConnection.connect(self)
@@ -16007,12 +16001,10 @@ class _SNIHTTPSHandler(urllib.request.HTTPSHandler):
         self,
         hostname: str,
         addresses = (),
-        origin = None,
     ):
         super().__init__(context = _tls_ctx)
         self._sni_hostname = hostname
         self._addresses = tuple(addresses)
-        self._origin = origin
 
     def https_open(self, req):
         return self.do_open(self._sni_connection, req)
@@ -16023,28 +16015,22 @@ class _SNIHTTPSHandler(urllib.request.HTTPSHandler):
             host,
             sni_hostname = self._sni_hostname,
             addresses = self._addresses,
-            origin = self._origin,
             **kwargs,
         )
 
 
 class _PinnedHTTPHandler(urllib.request.HTTPHandler):
-    def __init__(
-        self,
-        addresses = (),
-        origin = None,
-    ):
+    def __init__(self, addresses = ()):
         super().__init__()
         self._addresses = tuple(addresses)
-        self._origin = origin
 
     def http_open(self, req):
         return self.do_open(self._pinned_connection, req)
 
     def _pinned_connection(self, host, **kwargs):
         conn = http.client.HTTPConnection(host, **kwargs)
-        if self._addresses or self._origin:
-            conn._create_connection = _pinned_create_connection(self._addresses, self._origin)
+        if self._addresses:
+            conn._create_connection = _pinned_create_connection(self._addresses)
         return conn
 
 
@@ -16086,10 +16072,10 @@ def _validate_and_resolve_host(hostname: str, port: int) -> tuple[bool, str, lis
         infos = socket.getaddrinfo(hostname, port, type = socket.SOCK_STREAM)
     except (OSError, UnicodeError) as e:
         # IDNA encoding rejects a hostname with UnicodeError, not OSError.
-        return False, f"{_RESOLVE_FAILED}: {e}", []
+        return False, f"Failed to resolve host: {e}", []
 
     if not infos:
-        return False, f"{_RESOLVE_FAILED}: no addresses for {hostname!r}", []
+        return False, f"Failed to resolve host: no addresses for {hostname!r}", []
 
     resolved = []
     for *_, sockaddr in infos:
@@ -16267,7 +16253,7 @@ def _resolve_with_budget(hostname, port, deadline, cancel_event):
         try:
             result.put(_validate_and_resolve_host(hostname, port))
         except Exception as exc:  # prevent the resolver thread from failing silently
-            result.put((False, f"{_RESOLVE_FAILED}: {exc}", []))
+            result.put((False, f"Failed to resolve host: {exc}", []))
 
     threading.Thread(target = _resolve, name = "web-fetch-dns", daemon = True).start()
     while True:
@@ -16636,13 +16622,19 @@ def _pinned_netloc(ip: str, port: int | None) -> str:
     return f"{host}:{port}" if port else host
 
 
-def _redirect_hop(url: str, website_policy) -> tuple[str | None, str]:
+def _redirect_hop(url: str, website_policy, deadline, cancel_event) -> tuple[str | None, str, list]:
+    from urllib.parse import urlparse
     from .web_access_policy import check_url_access
 
     allowed, reason, host = check_url_access(url, website_policy)
     if not allowed:
-        return reason, ""
-    return None, host
+        return reason, "", []
+    parsed = urlparse(url)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    ok, reason, pinned_ips = _resolve_with_budget(host, port, deadline, cancel_event)
+    if not ok:
+        return reason, "", []
+    return None, host, pinned_ips
 
 
 def _is_bot_check(status: int, headers) -> bool:
@@ -16678,12 +16670,10 @@ def _fetch_url_raw(
     method: str | None = None,
     any_status: bool = False,
     on_redirect = None,
-    proxy_hostname: bool | None = None,
 ) -> tuple[str | None, "str | bytes", str]:
     """fetch with SSRF protection; binary reads stay capped, HTML error pages require binary mode, per-hop headers do not cross redirects, and deadlines cover redirects and body reads.
     ``method`` replaces the GET/POST chosen from ``post_data``; with ``any_status`` (binary mode) every status returns its body, and ``meta_out`` gets the status and headers.
-    ``on_redirect(url, method, has_body, headers)`` runs before a redirect is followed, with the redirect's headers; a string it returns is the error, and the hop is never sent.
-    ``proxy_hostname`` sends a system proxy the hostname instead of the validated IP, and lets a proxied hop whose name doesn't resolve here go on; ``None`` follows ``--disable-dns-pinning``."""
+    ``on_redirect(url, method, has_body, headers)`` runs before a redirect is followed, with the redirect's headers; a string it returns is the error, and the hop is never sent."""
     from urllib.parse import urlparse
     from .web_access_policy import check_url_access
 
@@ -16693,8 +16683,17 @@ def _fetch_url_raw(
     if not allowed:
         return reason, "", ""
 
-    if proxy_hostname is None:
-        proxy_hostname = os.environ.get(_DISABLE_DNS_PINNING_ENV) == "1"
+    # check_url_access already parsed this and read .port, so this cannot raise.
+    parsed = urlparse(url)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    ok, reason, pinned_ips = _resolve_with_budget(
+        canonical_host,
+        port,
+        deadline,
+        cancel_event,
+    )
+    if not ok:
+        return reason, "", ""
 
     try:
         from urllib.error import HTTPError as _HTTPError
@@ -16726,18 +16725,7 @@ def _fetch_url_raw(
             # Decide routing once, on the netloc urllib tests: a pinned request carries an IP, which no NO_PROXY entry
             # matches, so the opener below has to carry the decision rather than re-derive it.
             proxied = _explicit_proxy_applies(cp.scheme, validated_netloc)
-            # Resolved after routing: a name that reaches the proxy may resolve only there (proxy-only networks),
-            # and a poisoned answer here never gets used. Non-public answers are refused either way.
-            ok, reason, pinned_ips = _resolve_with_budget(
-                current_host,
-                cp.port or (443 if cp.scheme == "https" else 80),
-                deadline,
-                cancel_event,
-            )
-            named = proxied and proxy_hostname
-            if not ok and not (named and reason.startswith(_RESOLVE_FAILED)):
-                return reason, "", ""
-            if named:
+            if os.environ.get(_DISABLE_DNS_PINNING_ENV) == "1" and proxied:
                 # Enterprise proxies need the hostname in CONNECT for policy and TLS interception, and they resolve
                 # it, so nothing rebinds behind us.
                 request_url = urlunparse(cp._replace(netloc = validated_netloc))
@@ -16746,12 +16734,11 @@ def _fetch_url_raw(
                 request_url = urlunparse(cp._replace(netloc = _pinned_netloc(pinned_ips[0], cp.port)))
 
             # The proxy makes the origin connection, to the one address the URL pins.
-            walk = () if proxied and not named else pinned_ips
-            origin = current_host if named else None
+            walk = () if proxied else pinned_ips
             handlers = [
                 _NoRedirect,
-                _SNIHTTPSHandler(current_host, walk, origin),
-                _PinnedHTTPHandler(walk, origin),
+                _SNIHTTPSHandler(current_host, walk),
+                _PinnedHTTPHandler(walk),
             ]
             if not proxied:
                 # An empty ProxyHandler is the documented way to opt a request out.
@@ -16812,7 +16799,12 @@ def _fetch_url_raw(
                         )
                         if refused:
                             return refused, "", ""
-                    hop_error, current_host = _redirect_hop(current_url, website_policy)
+                    hop_error, current_host, pinned_ips = _redirect_hop(
+                        current_url,
+                        website_policy,
+                        deadline,
+                        cancel_event,
+                    )
                     if hop_error is not None:
                         return hop_error, "", ""
                     continue
@@ -16890,7 +16882,12 @@ def _fetch_url_raw(
             current_url = refresh_url
             # a refresh starts a new GET like a browser.
             pending_post = None
-            hop_error, current_host = _redirect_hop(current_url, website_policy)
+            hop_error, current_host, pinned_ips = _redirect_hop(
+                current_url,
+                website_policy,
+                deadline,
+                cancel_event,
+            )
             if hop_error is not None:
                 return hop_error, "", ""
         else:
