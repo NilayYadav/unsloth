@@ -648,3 +648,20 @@ export { chatLocalModelOptions } from "./local-model-options";
 export { readLastLocalModelLoad } from "./utils/last-local-model-load";
 export { decideAutoRead } from "./utils/auto-read-aloud";
 export { wantsDownloadManagerStaging } from "./utils/model-download-staging";
+export {
+  type MemoryEntry,
+  type MemorySource,
+  bulkSaveMemoryEntries,
+  deleteMemoryEntry,
+  listMemoryEntries,
+  saveMemoryEntry,
+} from "./api/memories-api";
+export {
+  MEMORY_EXTRACTION_PROMPT,
+  MEMORY_TOKEN_LIMIT,
+  buildUserMemoryBlock,
+  estimateMemoryTokens,
+  memoryKey,
+  parseImportedMemories,
+  selectMemoriesForPrompt,
+} from "./utils/user-memory";

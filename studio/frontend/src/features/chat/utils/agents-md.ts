@@ -10,6 +10,7 @@ export const EMPTY_AGENTS_MD: AgentsMdRecord = { text: "" };
 export function composeChatInstructions(parts: {
   agentsMd?: AgentsMdRecord;
   projectInstructions: string;
+  userMemory?: string;
   systemPrompt: string;
 }): string {
   const agentsMd = parts.agentsMd?.text.trim() ?? "";
@@ -18,6 +19,7 @@ export function composeChatInstructions(parts: {
     parts.projectInstructions
       ? `<project_instructions>\n${parts.projectInstructions}\n</project_instructions>`
       : "",
+    parts.userMemory ?? "",
     parts.systemPrompt.trim(),
   ]
     .filter(Boolean)

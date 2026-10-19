@@ -802,6 +802,18 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS user_memories (
+            id TEXT NOT NULL PRIMARY KEY,
+            text TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'manual',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS prompt_lists (
             id TEXT NOT NULL PRIMARY KEY,
             name TEXT NOT NULL,
@@ -1217,6 +1229,79 @@ def bulk_upsert_prompt_entries(entries: list[dict]) -> int:
             """,
             [(e["id"], e["name"], e["text"], e["createdAt"], e["updatedAt"]) for e in entries],
         )
+        conn.commit()
+        return len(entries)
+    finally:
+        conn.close()
+
+
+def _user_memory_from_row(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "text": row["text"],
+        "source": row["source"],
+        "enabled": bool(row["enabled"]),
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+_UPSERT_USER_MEMORY_SQL = """
+    INSERT INTO user_memories (id, text, source, enabled, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+        text = excluded.text,
+        source = excluded.source,
+        enabled = excluded.enabled,
+        updated_at = excluded.updated_at
+"""
+
+
+def _user_memory_params(entry: dict) -> tuple:
+    return (
+        entry["id"],
+        entry["text"],
+        entry["source"],
+        int(entry["enabled"]),
+        entry["createdAt"],
+        entry["updatedAt"],
+    )
+
+
+def list_user_memories() -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT * FROM user_memories ORDER BY created_at DESC").fetchall()
+        return [_user_memory_from_row(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def upsert_user_memory(entry: dict) -> dict:
+    conn = get_connection()
+    try:
+        conn.execute(_UPSERT_USER_MEMORY_SQL, _user_memory_params(entry))
+        conn.commit()
+        return entry
+    finally:
+        conn.close()
+
+
+def delete_user_memory(entry_id: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM user_memories WHERE id = ?", (entry_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def bulk_upsert_user_memories(entries: list[dict]) -> int:
+    if not entries:
+        return 0
+    conn = get_connection()
+    try:
+        conn.executemany(_UPSERT_USER_MEMORY_SQL, [_user_memory_params(e) for e in entries])
         conn.commit()
         return len(entries)
     finally:

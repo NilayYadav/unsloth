@@ -147,6 +147,7 @@ const SETTINGS_TAB_LABELS: Record<SettingsTab, TranslationKey> = {
   appearance: "settings.tabs.appearance",
   resources: "settings.tabs.resources",
   chat: "settings.tabs.chat",
+  memory: "settings.tabs.memory",
   voice: "settings.tabs.voice",
   connections: "settings.tabs.connections",
   library: "shell.navigation.library",

@@ -301,6 +301,7 @@ export function sanitizeChatSettings(value: unknown): PersistedChatSettings {
   const deduplicateToolCalls = sanitizeBool(value.deduplicateToolCalls);
   const autoCompactEnabled = sanitizeBool(value.autoCompactEnabled);
   const keepRunningWhenTabClosed = sanitizeBool(value.keepRunningWhenTabClosed);
+  const memoryEnabled = sanitizeBool(value.memoryEnabled);
   const maxToolCallsPerMessage = sanitizeInt(value.maxToolCallsPerMessage, 0);
   const toolCallTimeout = sanitizeInt(value.toolCallTimeout, 1);
 
@@ -341,6 +342,7 @@ export function sanitizeChatSettings(value: unknown): PersistedChatSettings {
   if (keepRunningWhenTabClosed !== undefined) {
     settings.keepRunningWhenTabClosed = keepRunningWhenTabClosed;
   }
+  if (memoryEnabled !== undefined) settings.memoryEnabled = memoryEnabled;
   if (maxToolCallsPerMessage !== undefined) {
     settings.maxToolCallsPerMessage = maxToolCallsPerMessage;
   }
@@ -408,6 +410,7 @@ export function isEmptyChatSettings(settings: PersistedChatSettings): boolean {
     settings.deduplicateToolCalls === undefined &&
     settings.autoCompactEnabled === undefined &&
     settings.keepRunningWhenTabClosed === undefined &&
+    settings.memoryEnabled === undefined &&
     settings.maxToolCallsPerMessage === undefined &&
     settings.toolCallTimeout === undefined &&
     hasNoMirroredSettings(settings)

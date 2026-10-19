@@ -21,6 +21,7 @@ import { scheduleIdleTask } from "@/lib/schedule-idle-task";
 import {
   ApiIcon,
   BotIcon,
+  Brain02Icon,
   Cancel01Icon,
   CloudIcon,
   ComputerTerminal01Icon,
@@ -79,6 +80,8 @@ const TAB_LOADERS = {
   resources: () =>
     import("./tabs/resources-tab").then((m) => ({ default: m.ResourcesTab })),
   chat: () => import("./tabs/chat-tab").then((m) => ({ default: m.ChatTab })),
+  memory: () =>
+    import("./tabs/memory-tab").then((m) => ({ default: m.MemoryTab })),
   sandbox: () =>
     import("./tabs/sandbox-tab").then((m) => ({ default: m.SandboxTab })),
   browser: () =>
@@ -212,6 +215,11 @@ const TABS: TabDef[] = [
     id: "chat",
     labelKey: "settings.tabs.chat",
     icon: MessageCircleIcon,
+  },
+  {
+    id: "memory",
+    labelKey: "settings.tabs.memory",
+    icon: Brain02Icon,
   },
   {
     id: "sandbox",
@@ -440,6 +448,7 @@ export function SettingsDialog() {
     appearance: null,
     resources: null,
     chat: null,
+    memory: null,
     sandbox: null,
     browser: null,
     voice: null,

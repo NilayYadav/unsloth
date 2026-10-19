@@ -613,6 +613,7 @@ class ChatSettingsPayload(BaseModel):
     autoCompactEnabled: Optional[bool] = None
     # Off: a chat or Deep Research run stops once no tab follows it (state/unattended_runs.py).
     keepRunningWhenTabClosed: Optional[bool] = None
+    memoryEnabled: Optional[bool] = None
     contextPolicy: Optional[Literal["inherit", "checkpoint", "rolling"]] = None
     compactionHeadroomRatio: Optional[float] = Field(default = None, ge = 0.0, le = 0.9)
 

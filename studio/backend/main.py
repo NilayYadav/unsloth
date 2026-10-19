@@ -351,6 +351,7 @@ from routes import (
     inference_router,
     inference_studio_router,
     mcp_servers_router,
+    memories_router,
     skills_router,
     models_router,
     providers_router,
@@ -1900,6 +1901,7 @@ app.include_router(sandbox_capability_router, prefix = "/api/sandbox", tags = ["
 app.include_router(mcp_servers_router, prefix = "/api/mcp/servers", tags = ["mcp"])
 app.include_router(skills_router, prefix = "/api/skills", tags = ["skills"])
 app.include_router(prompts_router, prefix = "/api/prompts", tags = ["prompts"])
+app.include_router(memories_router, prefix = "/api/memories", tags = ["memories"])
 app.include_router(library_router, prefix = "/api/library", tags = ["library"])
 app.include_router(profile_stats_router, prefix = "/api/profile", tags = ["profile"])
 app.include_router(datasets_router, prefix = "/api/datasets", tags = ["datasets"])

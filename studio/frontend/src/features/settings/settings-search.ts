@@ -147,6 +147,11 @@ export const SETTINGS_SEARCH_INDEX: Record<SettingsTab, TranslationKey[]> = {
     "settings.chat.inlineEditResponse",
     "settings.chat.groups.menu.title",
   ],
+  memory: [
+    "settings.memory.enable",
+    "settings.memory.listTitle",
+    "settings.memory.import",
+  ],
   browser: [
     "browser.agentSettings.title",
     "browser.agentSettings.enable",

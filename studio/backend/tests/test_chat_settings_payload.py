@@ -256,6 +256,13 @@ def test_keep_running_when_tab_closed_round_trips_and_refuses_a_non_boolean():
         ChatSettingsPayload.model_validate({"keepRunningWhenTabClosed": "sometimes"})
 
 
+def test_memory_switch_round_trips_and_refuses_a_non_boolean():
+    payload = ChatSettingsPayload.model_validate({"memoryEnabled": False})
+    assert payload.model_dump(exclude_unset = True) == {"memoryEnabled": False}
+    with pytest.raises(ValidationError):
+        ChatSettingsPayload.model_validate({"memoryEnabled": "sometimes"})
+
+
 def test_auto_compact_settings_can_inherit_the_server_policy():
     payload = ChatSettingsPayload.model_validate({"contextPolicy": "inherit"})
     assert payload.model_dump(exclude_unset = True) == {"contextPolicy": "inherit"}

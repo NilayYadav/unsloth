@@ -14,6 +14,7 @@ export const SETTINGS_TABS = [
   "appearance",
   "resources",
   "chat",
+  "memory",
   "sandbox",
   "voice",
   "connections",

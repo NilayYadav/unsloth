@@ -85,7 +85,7 @@ test("only requests sent to the model ask for AGENTS.md; copies and exports do n
     ADAPTER.match(/await resolveChatInstructions\([\s\S]*?\);/g) ?? [];
   assert.equal(calls.length, 2, "chat send and deep research");
   for (const call of calls) {
-    assert.match(call, /\{ agentsMd: true \}/);
+    assert.match(call, /agentsMd: true\b/);
   }
   assert.doesNotMatch(DIALOG, /agentsMd/);
   // The background token recount must measure the prompt the send will use.

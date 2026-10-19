@@ -416,6 +416,8 @@ import {
   composeChatInstructions,
   EMPTY_AGENTS_MD,
 } from "../utils/agents-md";
+import { buildUserMemoryBlock } from "../utils/user-memory";
+import { listMemoryEntries } from "./memories-api";
 import {
   createOpenAIContainer,
   listOpenAIContainers,
@@ -2214,13 +2216,15 @@ export async function buildLocalTokenCountHistory(
         )
       : "";
   const projectId = await resolveProjectId(threadId);
-  const [projectInstructions, agentsMd] = await Promise.all([
+  const [projectInstructions, agentsMd, userMemory] = await Promise.all([
     resolveProjectInstructions(projectId),
     resolveAgentsMd(projectId),
+    resolveUserMemory(),
   ]);
   const combinedSystemPrompt = composeChatInstructions({
     agentsMd,
     projectInstructions,
+    userMemory,
     systemPrompt: safeSystemPrompt,
   });
   if (combinedSystemPrompt) {
@@ -2469,13 +2473,34 @@ function resolveAgentsMd(projectId: string | null): Promise<AgentsMdRecord> {
   return value;
 }
 
+let userMemoryRead: { at: number; value: Promise<string> } | null = null;
+
+function resolveUserMemory(): Promise<string> {
+  if (!useChatRuntimeStore.getState().memoryEnabled) {
+    return Promise.resolve("");
+  }
+  const now = Date.now();
+  if (userMemoryRead && now - userMemoryRead.at < AGENTS_MD_TTL_MS) {
+    return userMemoryRead.value;
+  }
+  const value = listMemoryEntries()
+    .then((entries) =>
+      buildUserMemoryBlock(
+        entries.filter((entry) => entry.enabled).map((entry) => entry.text),
+      ),
+    )
+    .catch(() => "");
+  userMemoryRead = { at: now, value };
+  return value;
+}
+
 export async function resolveChatInstructions(
   threadId: string | undefined,
   systemPrompt: unknown,
   systemVariables: unknown,
   readThreadRecord?: ThreadRecordReader,
   // Only what goes to the model carries AGENTS.md; copies and exports of a chat keep its own instructions.
-  opts?: { agentsMd?: boolean },
+  opts?: { agentsMd?: boolean; userMemory?: boolean },
 ): Promise<string> {
   const safeSystemPrompt =
     typeof systemPrompt === "string"
@@ -2485,13 +2510,15 @@ export async function resolveChatInstructions(
         )
       : "";
   const projectId = await resolveProjectId(threadId, readThreadRecord);
-  const [projectInstructions, agentsMd] = await Promise.all([
+  const [projectInstructions, agentsMd, userMemory] = await Promise.all([
     resolveProjectInstructions(projectId),
     opts?.agentsMd ? resolveAgentsMd(projectId) : undefined,
+    opts?.userMemory ? resolveUserMemory() : undefined,
   ]);
   return composeChatInstructions({
     agentsMd,
     projectInstructions,
+    userMemory,
     systemPrompt: safeSystemPrompt,
   });
 }
@@ -4843,7 +4870,7 @@ export function createOpenAIStreamAdapter(
           params.systemPrompt,
           params.systemVariables,
           readThreadRecord,
-          { agentsMd: true },
+          { agentsMd: true, userMemory: true },
         );
         if (transitionSignal.aborted) return;
         const ragScope =
@@ -5498,7 +5525,7 @@ export function createOpenAIStreamAdapter(
         params.systemPrompt,
         params.systemVariables,
         readThreadRecord,
-        { agentsMd: true },
+        { agentsMd: true, userMemory: true },
       );
       if (combinedSystemPrompt) {
         outboundMessages.unshift({

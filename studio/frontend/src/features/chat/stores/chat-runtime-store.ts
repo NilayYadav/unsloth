@@ -2619,6 +2619,7 @@ type ChatRuntimeStore = {
   deduplicateToolCalls: boolean;
   autoCompactEnabled: boolean;
   keepRunningWhenTabClosed: boolean;
+  memoryEnabled: boolean;
   maxToolCallsPerMessage: number;
   toolCallTimeout: number;
   kvCacheDtype: string | null;
@@ -2921,6 +2922,7 @@ type ChatRuntimeStore = {
   setDeduplicateToolCalls: (enabled: boolean) => void;
   setAutoCompactEnabled: (enabled: boolean) => void;
   setKeepRunningWhenTabClosed: (enabled: boolean) => void;
+  setMemoryEnabled: (enabled: boolean) => void;
   setMaxToolCallsPerMessage: (value: number) => void;
   setToolCallTimeout: (value: number) => void;
   setGpuMemoryMode: (mode: "auto" | "manual") => void;
@@ -2968,6 +2970,7 @@ type ScalarSettingKey =
   | "deduplicateToolCalls"
   | "autoCompactEnabled"
   | "keepRunningWhenTabClosed"
+  | "memoryEnabled"
   | "maxToolCallsPerMessage"
   | "toolCallTimeout"
   | "reasoningEnabled"
@@ -3021,6 +3024,7 @@ const SCALAR_SETTING_KEYS = [
   "deduplicateToolCalls",
   "autoCompactEnabled",
   "keepRunningWhenTabClosed",
+  "memoryEnabled",
   "maxToolCallsPerMessage",
   "toolCallTimeout",
   "reasoningEnabled",
@@ -4483,6 +4487,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
   deduplicateToolCalls: true,
   autoCompactEnabled: DEFAULT_AUTO_COMPACT_ENABLED,
   keepRunningWhenTabClosed: DEFAULT_KEEP_RUNNING_WHEN_TAB_CLOSED,
+  memoryEnabled: true,
   maxToolCallsPerMessage: 25,
   toolCallTimeout: 5,
   kvCacheDtype: null,
@@ -6209,6 +6214,15 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set, get) => ({
         keepRunningWhenTabClosed,
         queuedSettingsEpoch: state.queuedSettingsEpoch + 1,
       };
+    }),
+  setMemoryEnabled: (memoryEnabled) =>
+    set((state) => {
+      setScalarSettingVersion(
+        "memoryEnabled",
+        memoryEnabled,
+        state.memoryEnabled,
+      );
+      return { memoryEnabled };
     }),
   setMaxToolCallsPerMessage: (maxToolCallsPerMessage) =>
     set((state) => {
