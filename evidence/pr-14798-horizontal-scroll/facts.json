@@ -1,0 +1,28 @@
+{
+  "clientWidth": 638,
+  "scrollWidth": 853,
+  "logicalLines": 8,
+  "text": "curl https://studio-with-a-long-public-hostname.example.com/v1/chat/completions \\\n  -H \"Authorization: Bearer sk-unsloth-YOUR_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"model\": \"unsloth/flint-GGUF:UD-Q4_K_XL\",\n    \"messages\": [{\"role\": \"user\", \"content\": \"What is Unsloth? This line is long enough to wrap inside the panel too.\"}],\n    \"stream\": true\n  }'",
+  "whiteSpace": "pre",
+  "visualRows": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "pr": 14798,
+  "head": "bb51f9839c94eecabf8b25e9f9547cace8414852",
+  "scope": "Focused HighlightedCode render extracted from pinned PR source, exact code-plugin/themes and Streamdown 2.5.0; public placeholder fixture; not a full Studio server scene.",
+  "browser": "Chromium",
+  "viewport": {
+    "width": 700,
+    "height": 600,
+    "deviceScaleFactor": 2
+  },
+  "componentWidth": 640,
+  "scrolledRight": 215
+}
