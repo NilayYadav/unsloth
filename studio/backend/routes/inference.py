@@ -49979,6 +49979,95 @@ def _image_generation_defaults(status: dict) -> tuple[int, float]:
     )
 
 
+async def _batched_openai_images(
+    backend: Any,
+    status: dict,
+    body: ImageGenerationRequest,
+    width: int,
+    height: int,
+    steps: int,
+    guidance: float,
+    expected_load: Any,
+) -> Optional[dict]:
+    """Batch compatible diffusers requests, or return None to render individually.
+    sd.cpp and MLX lack prompt lists; FLUX.3 renders one image per call."""
+    from core.inference import image_request_batching
+    from core.inference.diffusion_engine_router import ENGINE_DIFFUSERS, active_engine_name
+    from core.inference.diffusion_families import DIFFUSION_CANCELLED_MSG
+    from core.inference.diffusion_flux3 import FLUX3_FAMILY_NAMES
+    from core.inference.generation_ticket import (
+        GenerationTicket,
+        TicketStopEvent,
+        generation_ticket,
+    )
+
+    running = getattr(backend, "generation_running", None)
+    if (
+        running is None
+        or active_engine_name() != ENGINE_DIFFUSERS
+        or status.get("family") in FLUX3_FAMILY_NAMES
+    ):
+        return None
+
+    # Set by a Stop during a model change, as for a generation queued on the engine's slot. It also stops
+    # the ticket the batch's generate() binds its own cancel to, so a Stop after the wait still lands.
+    ticket = GenerationTicket()
+    stopped = TicketStopEvent(ticket)
+
+    def busy() -> bool:
+        if stopped.is_set():
+            raise RuntimeError(DIFFUSION_CANCELLED_MSG)
+        try:
+            return bool(running())
+        except Exception:  # noqa: BLE001 -- no busy signal; render individually
+            return False
+
+    async def run_batch(prompts: list[str], seeds: list[int]) -> dict:
+        with generation_ticket(ticket):
+            return await asyncio.to_thread(
+                backend.generate,
+                prompt = prompts[0],
+                negative_prompt = body.negative_prompt,
+                width = width,
+                height = height,
+                steps = steps,
+                guidance = guidance,
+                prompts = prompts,
+                seeds = seeds,
+                batch_size = len(seeds),
+                expected_load = expected_load,
+            )
+
+    key = (
+        current_account_id(),
+        expected_load,
+        width,
+        height,
+        steps,
+        guidance,
+        body.negative_prompt or None,
+    )
+
+    def cancelled(exc: BaseException) -> bool:
+        return isinstance(exc, RuntimeError) and str(exc) == DIFFUSION_CANCELLED_MSG
+
+    waiter = getattr(backend, "generation_waiter", None)
+    with waiter(stopped) if waiter is not None else nullcontext():
+        result = await image_request_batching.generate(
+            key,
+            body.prompt,
+            body.n,
+            body.seed,
+            busy = busy,
+            run_batch = run_batch,
+            shared_outcome = cancelled,
+        )
+        # A Stop recorded while the batch ran is final: never fall back to rendering alone or retry.
+        if result is None and stopped.is_set():
+            raise RuntimeError(DIFFUSION_CANCELLED_MSG)
+        return result
+
+
 # Split out so the monitor row can wrap the whole handler without reindenting it.
 async def _generate_openai_images(
     body: ImageGenerationRequest,
@@ -50038,23 +50127,28 @@ async def _generate_openai_images(
         steps, guidance = await asyncio.to_thread(_image_generation_defaults, status)
         steps = steps if body.steps is None else body.steps
         guidance = guidance if body.guidance is None else body.guidance
+        expected_load = load_identity(
+            status.get("repo_id"), status.get("base_repo"), status.get("family")
+        )
         reset_media_generation_progress("image")
         try:
             with account_access.media_generation("diffusion"):
-                result = await asyncio.to_thread(
-                    backend.generate,
-                    prompt = body.prompt,
-                    negative_prompt = body.negative_prompt,
-                    width = width,
-                    height = height,
-                    steps = steps,
-                    guidance = guidance,
-                    seed = body.seed,
-                    batch_size = body.n,
-                    expected_load = load_identity(
-                        status.get("repo_id"), status.get("base_repo"), status.get("family")
-                    ),
+                result = await _batched_openai_images(
+                    backend, status, body, width, height, steps, guidance, expected_load
                 )
+                if result is None:
+                    result = await asyncio.to_thread(
+                        backend.generate,
+                        prompt = body.prompt,
+                        negative_prompt = body.negative_prompt,
+                        width = width,
+                        height = height,
+                        steps = steps,
+                        guidance = guidance,
+                        seed = body.seed,
+                        batch_size = body.n,
+                        expected_load = expected_load,
+                    )
             break
         except DiffusionModelReplacedError:
             if attempt > 0:
@@ -50112,7 +50206,7 @@ async def _generate_openai_images(
         "workflow": result.get("workflow"),
         "created_at": float(created),
     }
-    # The diffusers batch shares one seed; the native batch uses a distinct seed per image, so record each image's own seed.
+    # Keep per-image seeds and the request's base seed for gallery replay.
     per_image_seeds = result.get("seeds")
 
     def _persist() -> list[ImageGenerationData]:
