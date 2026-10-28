@@ -1152,8 +1152,8 @@ def mlx_resolve_drafter_offload(model_dir, knobs, drafter, *, auto: bool, **pric
 
     room = mlx_resolve_offload(model_dir, knobs, drafter = drafter, **priced)
     if not auto:
-        # A plan the load would then refuse the drafter on (nothing fits: all on disk, no step) helps nobody.
-        if "auto" in knobs and fits(room) is False:
+        # A chosen drafter may spend the prompt cache's share; room it still does not fit in would only slow the load.
+        if "auto" in knobs and fits(room, reserve = False) is False:
             return mlx_resolve_offload(model_dir, knobs, **priced), None
         return room, None
     alone = mlx_resolve_offload(model_dir, knobs, **priced)
@@ -2852,12 +2852,14 @@ def mlx_drafter_fit(
     offload = None,
     prefill_chunk = None,
     baseline = None,
+    reserve = True,
 ):
     """``(attaches, fitted context or None)`` for *source*'s drafter on an mlx-vlm load of *model_dir*:
     only a priced fit reserves it, a pinned context must fit whole, and a ``costless`` one must fit
     at least the context the load fits without it, on the *baseline* route (``mlx_offload_route``)
-    when the offload made room for it. ``attaches`` is None when the fit could not be priced."""
-    budget = mlx_memory_budget(retains_history = mlx_vlm_snapshot_store_available())
+    when the offload made room for it. ``attaches`` is None when the fit could not be priced.
+    ``reserve=False`` prices against MLX's own cap, spending the prompt cache's share."""
+    budget = mlx_memory_budget(retains_history = reserve and mlx_vlm_snapshot_store_available())
     ceiling = pinned or ceiling
     if budget is None or not ceiling or not model_dir:
         return None, None
@@ -5516,7 +5518,6 @@ class MLXInferenceBackend:
             _offloaded["prefill_chunk"] = self._prefill_step
         _priceable = not (is_distributed or is_lora or dtype is not None)
         spec_kind = _drafter_ctx = None
-        _drafter_fitted = False
         _vlm_route = speculates and not is_vision
         if speculates and _vlm_generation_is_diffusion(self._model):
             # Neither the single path nor the resident batch may decode a diffusion model speculatively.
@@ -5536,7 +5537,7 @@ class MLXInferenceBackend:
                 allowed = spec_drafters_allowed,
             )
 
-            def _fits(source):
+            def _fits(source, reserve = True):
                 if not _priceable:
                     return None, None
                 return mlx_drafter_fit(
@@ -5547,6 +5548,7 @@ class MLXInferenceBackend:
                     load_in_4bit = load_in_4bit,
                     costless = spec_mode == "auto",
                     baseline = offload_baseline["route"],
+                    reserve = reserve,
                     **_offloaded,
                 )
 
@@ -5556,10 +5558,11 @@ class MLXInferenceBackend:
                 spec_reason,
                 _drafter_ctx,
             ) = mlx_speculative.build_draft(
-                self._model, resolution, fits = _fits, draft_n_max = _positive_int(spec_draft_n_max)
-            )
-            _drafter_fitted = (
-                self._speculative_draft is not None and self._speculative_draft.drafter is not None
+                self._model,
+                resolution,
+                fits = _fits,
+                stretch = functools.partial(_fits, reserve = False),
+                draft_n_max = _positive_int(spec_draft_n_max),
             )
             logger.info(
                 "MLX speculative decoding: %s (mode %s, reason %s)",
@@ -5572,7 +5575,7 @@ class MLXInferenceBackend:
         _requested_bits = None if self._turboquant else _normalize_mlx_kv_bits(kv_bits)
         _fitted_ctx, _eligibility = (
             (_drafter_ctx, _eligibility)
-            if _drafter_fitted
+            if _drafter_ctx is not None
             else (None, _eligibility)
             if not _priceable or _positive_int(max_seq_length) is not None
             else _fitted_context(
