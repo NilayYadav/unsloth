@@ -1093,6 +1093,30 @@ class TestAnthropicPassthroughHealingText:
 
         asyncio.run(_run())
 
+    def test_call_cut_at_max_tokens_is_not_runnable(self, monkeypatch):
+        async def _run():
+            cut = "<tool_call><function=lookup><parameter=q>line1\nli"
+            data = await self._drive(
+                monkeypatch, _upstream_message(LOOKUP_XML + cut, finish_reason = "length")
+            )
+            (tool_use,) = [b for b in data["content"] if b["type"] == "tool_use"]
+            assert tool_use["input"] == {"q": "x"}
+            text = "".join(b["text"] for b in data["content"] if b["type"] == "text")
+            assert text == cut
+            assert data["stop_reason"] == "max_tokens"
+
+        asyncio.run(_run())
+
+    def test_call_quoted_inside_cut_call_is_not_runnable(self, monkeypatch):
+        async def _run():
+            cut = '<tool_call><function=lookup><parameter=q>run [TOOL_CALLS]lookup[ARGS]{"q": "rm"} li'
+            data = await self._drive(monkeypatch, _upstream_message(cut, finish_reason = "length"))
+            assert [b["type"] for b in data["content"]] == ["text"]
+            assert data["content"][0]["text"] == cut
+            assert data["stop_reason"] == "max_tokens"
+
+        asyncio.run(_run())
+
 
 class TestAnthropicEmitterHealing:
     def _events(
@@ -1214,6 +1238,26 @@ class TestAnthropicEmitterHealing:
             self._emitter(),
             [self._chunk(content = LOOKUP_XML), self._chunk(finish_reason = "length")],
         )
+        (message_delta,) = [e for e in events if e.get("type") == "message_delta"]
+        assert message_delta["delta"]["stop_reason"] == "max_tokens"
+
+    def test_call_cut_at_max_tokens_is_not_runnable(self):
+        cut = (
+            "<tool_call><function=Write><parameter=file_path>app.py</parameter>"
+            "<parameter=content>line1\nline2\nli"
+        )
+        events = self._events(
+            self._emitter(allowed = ("Write",)),
+            [self._chunk(content = cut), self._chunk(finish_reason = "length")],
+        )
+        starts = [e for e in events if e.get("type") == "content_block_start"]
+        assert [e["content_block"]["type"] for e in starts] == ["text"]
+        texts = [
+            e["delta"]["text"]
+            for e in events
+            if e.get("type") == "content_block_delta" and e["delta"]["type"] == "text_delta"
+        ]
+        assert "".join(texts) == cut
         (message_delta,) = [e for e in events if e.get("type") == "message_delta"]
         assert message_delta["delta"]["stop_reason"] == "max_tokens"
 
