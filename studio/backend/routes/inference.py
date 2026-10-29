@@ -14735,8 +14735,9 @@ def _mlx_estimate_drafter(
         target_name = model_identifier,
         allowed = _discoverable_drafters(model_identifier),
     )
-    for source in resolution.sources:
-        attaches, fitted = mlx_drafter_fit(
+
+    def fit(source, **kwargs):
+        return mlx_drafter_fit(
             model_dir,
             ceiling,
             request.max_seq_length or None,
@@ -14744,9 +14745,18 @@ def _mlx_estimate_drafter(
             load_in_4bit = load_in_4bit,
             costless = mode == "auto",
             baseline = baseline,
+            **kwargs,
             **(offload_route or {}),
         )
+
+    for source in resolution.sources:
+        attaches, fitted = fit(source)
         if attaches:
+            return (source.path, source.builtin), fitted, True
+    # Like the load: a chosen mode with none that fits attaches the first MLX's own cap admits.
+    for source in resolution.sources if mode != "auto" else ():
+        attaches, fitted = fit(source, reserve = False)
+        if attaches is not False:
             return (source.path, source.builtin), fitted, True
     return None, None, True
 
@@ -14799,19 +14809,18 @@ def _mlx_load_estimate(
         offload_baseline,
     )
     route = {**({"vision": True} if speculates else {}), **offload}
-    if not named_ctx and drafter is None:
+    if not named_ctx and fitted_ctx is None:
         fitted_ctx = _mlx_estimate_fitted_context(config, model_dir, load_in_4bit, kv_bits, **route)
     priced_ctx = named_ctx or fitted_ctx or _mlx_estimate_ceiling(model_dir)
     if not priced_ctx:
         return "unsizable", None
+    priced = dict(n_ctx = priced_ctx, kv_bits = kv_bits, load_in_4bit = load_in_4bit, **route)
     breakdown = mlx_memory_breakdown(
-        model_dir,
-        n_ctx = priced_ctx,
-        kv_bits = kv_bits,
-        load_in_4bit = load_in_4bit,
-        **route,
-        **({} if drafter is None else {"drafter": drafter}),
+        model_dir, **priced, **({} if drafter is None else {"drafter": drafter})
     )
+    if breakdown is None and drafter is not None:
+        # A chosen drafter attaches even where it cannot be sized: price the rest of the load.
+        breakdown = mlx_memory_breakdown(model_dir, **priced)
     if breakdown is None:
         return "unsizable", None
     retains_history = (
