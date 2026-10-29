@@ -411,12 +411,12 @@ test("sections have created and last modified dates, and Last modified is the de
   assert.doesNotMatch(readSrc("features/library/chats/chats-items.tsx"), /field="updated"/);
 });
 
-test("chat, project and section cards are square like folder and file cards, dated bottom left", () => {
+test("chat, project and section cards are as tall as their content, dated bottom left", () => {
   const items = readSrc("features/library/chats/chats-items.tsx");
   const card = items.slice(items.indexOf("const CARD = cn("), items.indexOf("const ICON ="));
   assert.doesNotMatch(card, /aspect-\[/);
   assert.match(card, /min-h-0 min-w-0/);
-  assert.match(items, /export const CHAT_CARD_ROW_MIN = CARD_MIN_HEIGHT;/);
+  assert.match(items, /export const CHAT_CARD_ROW_MIN =\s*"calc\(var\(--spacing\) \* 20 \+ 2\.75 \* var\(--text-ui-12p5\) \+ 3 \* var\(--text-ui-11p5\)\)"/);
   assert.match(
     readSrc("features/library/surface.ts"),
     /CARD_MIN_HEIGHT =\s*"calc\(var\(--spacing\) \* 26 \+ 2\.75 \* var\(--text-ui-13\) \+ 3 \* var\(--text-ui-11p5\)\)"/,
@@ -426,8 +426,8 @@ test("chat, project and section cards are square like folder and file cards, dat
     3,
   );
   const grid = readSrc("features/library/components/library-cards.tsx");
-  assert.match(grid, /max\(\$\{minRowHeight\}, calc\(\(100cqw - \$\{columns - 1\} \* var\(--spacing\) \* 5\) \/ \$\{columns\}\)\)/);
-  assert.match(grid, /<div className="@container">\{grid\}<\/div>/);
+  assert.match(grid, /gridAutoRows: minRowHeight \? `minmax\(\$\{minRowHeight\}, auto\)` : undefined/);
+  assert.doesNotMatch(grid, /100cqw/);
   const library = readSrc("features/library/chats/chats-library.tsx");
   assert.doesNotMatch(library, /<CardGrid(?! minRowHeight=\{CHAT_CARD_ROW_MIN\})/);
   assert.doesNotMatch(library, /aspect-\[8\/7\]/);
@@ -443,13 +443,14 @@ test("chat, project and section tiles share one box and hover tint", () => {
   assert.equal(items.split("group-hover/chat:bg-primary/10").length - 1, 1, "one tile style");
   assert.match(items, /<div className=\{cn\(TILE, className\)\}>/);
   assert.match(items, /<span className=\{TILE\}>/);
+  assert.match(items, /const CARD_ICON =\s*"[^"]*group-hover\/chat:text-primary"/);
   assert.doesNotMatch(items, /group-hover\/chat:opacity-0/);
 });
 
 test("grid cards share a two-line title and a footer of contents over date", () => {
   const items = readSrc("features/library/chats/chats-items.tsx");
   assert.match(items, /const CARD_TITLE =\s*"[^"]*\[overflow-wrap:anywhere\]/);
-  assert.match(items, /const CARD_TITLE =\s*"[^"]*font-medium text-ui-13 /);
+  assert.match(items, /const CARD_TITLE =\s*"[^"]*font-medium text-ui-12p5 /);
   const footer = items.slice(items.indexOf("function CardFooter("), items.indexOf("const CARD_TITLE"));
   assert.match(footer, /flex-col items-start/);
   assert.match(footer, /\{meta && <span className="w-full min-w-0 truncate">\{meta\}<\/span>\}\s*<span className="truncate">\{date\}<\/span>/);
@@ -467,6 +468,7 @@ test("grid cards share a two-line title and a footer of contents over date", () 
     assert.match(card, /<CardFooter/);
     assert.match(card, /showTile = true,/);
     assert.match(card, /className=\{cn\("flex items-center gap-2", !showTile && TILELESS_ROW\)\}/);
+    assert.match(card, /\{showTile && <(ChatTile chat=\{chat\}|CollectionTile icon=\{\w+\}) bare \/>\}/);
   }
   assert.doesNotMatch(cards[0], /modelLabel|model &&/);
   assert.match(cards[0], /<ChatBadges chat=\{chat\} marksOnly=\{showTile\} \/>/);

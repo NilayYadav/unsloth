@@ -365,22 +365,18 @@ export function CardGrid({
 }) {
   const container = useRef<HTMLDivElement>(null);
   const columns = useCardColumns(container);
-  const grid = (
+  return (
     <div
       ref={container}
       className={cn("grid gap-x-5", CARD_ROW_GAP)}
       style={{
         gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-        gridAutoRows: minRowHeight
-          ? `max(${minRowHeight}, calc((100cqw - ${columns - 1} * var(--spacing) * 5) / ${columns}))`
-          : undefined,
+        gridAutoRows: minRowHeight ? `minmax(${minRowHeight}, auto)` : undefined,
       }}
     >
       {children}
     </div>
   );
-  // cqw resolves against an ancestor container, never the grid itself.
-  return minRowHeight ? <div className="@container">{grid}</div> : grid;
 }
 
 export function FolderGrid({

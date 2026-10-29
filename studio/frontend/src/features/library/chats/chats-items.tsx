@@ -76,7 +76,7 @@ import {
 import { FILE_LIST_COLUMNS } from "../components/library-list";
 import { useLibrarySettingsStore } from "../settings-store";
 import { SortRadio } from "../components/library-toolbar";
-import { CARD_MIN_HEIGHT, CARD_SHADOW, OVERLAY_CONTROL, RAISED_SURFACE } from "../surface";
+import { CARD_SHADOW, OVERLAY_CONTROL, RAISED_SURFACE } from "../surface";
 
 const CARD = cn(
   RAISED_SURFACE,
@@ -85,7 +85,9 @@ const CARD = cn(
   "group/chat relative flex min-h-0 min-w-0 cursor-pointer flex-col gap-2.5 self-stretch rounded-2xl px-5 py-5 transition hover:bg-neutral-100 hover:shadow-none dark:hover:bg-accent/60",
 );
 
-export const CHAT_CARD_ROW_MIN = CARD_MIN_HEIGHT;
+// Fits the fullest card (bare icon, two-line title, two-line footer); rows grow past it, never to a square.
+export const CHAT_CARD_ROW_MIN =
+  "calc(var(--spacing) * 20 + 2.75 * var(--text-ui-12p5) + 3 * var(--text-ui-11p5))";
 import {
   type ChatContents,
   type ChatSort,
@@ -561,29 +563,30 @@ function ChatMenu({
 const TILE =
   "flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-foreground/70 transition-colors group-hover/chat:bg-primary/10 group-hover/chat:text-primary";
 const TILE_ICON = "size-5";
+// Grid cards show the kind icon on its own, without the tile box rows use.
+const CARD_ICON =
+  "size-5 shrink-0 text-foreground/70 transition-colors group-hover/chat:text-primary";
 
 function ChatTile({
   chat,
   className,
+  bare = false,
 }: {
   chat: SidebarItem;
   className?: string;
+  bare?: boolean;
 }) {
-  return (
-    <div className={cn(TILE, className)}>
-      {chat.type === "compare" ? (
-        <Columns2Icon strokeWidth={1.75} className={TILE_ICON} />
-      ) : chat.isFork ? (
-        <GitBranchIcon strokeWidth={1.75} className={TILE_ICON} />
-      ) : (
-        <HugeiconsIcon
-          icon={MessageCircleIcon}
-          strokeWidth={1.75}
-          className={TILE_ICON}
-        />
-      )}
-    </div>
-  );
+  const iconClass = bare ? CARD_ICON : TILE_ICON;
+  const icon =
+    chat.type === "compare" ? (
+      <Columns2Icon strokeWidth={1.75} className={iconClass} />
+    ) : chat.isFork ? (
+      <GitBranchIcon strokeWidth={1.75} className={iconClass} />
+    ) : (
+      <HugeiconsIcon icon={MessageCircleIcon} strokeWidth={1.75} className={iconClass} />
+    );
+  if (bare) return icon;
+  return <div className={cn(TILE, className)}>{icon}</div>;
 }
 
 function Badge({ children }: { children: ReactNode }) {
@@ -1183,7 +1186,7 @@ export function ChatCard({
       className={cn(CARD, selected && "ring-2 ring-foreground")}
     >
       <div className={cn("flex items-center gap-2", !showTile && TILELESS_ROW)}>
-        {showTile && <ChatTile chat={chat} />}
+        {showTile && <ChatTile chat={chat} bare />}
         <ChatBadges chat={chat} marksOnly={showTile} />
       </div>
       <ChatMenu chat={chat} archived={archived} variant="card" />
@@ -1229,7 +1232,7 @@ const TILELESS_TITLE = "pe-6";
 const TILELESS_ROW_NAME = "min-h-13";
 
 const CARD_TITLE =
-  "block w-full rounded-md text-left font-medium text-ui-13 leading-snug text-foreground outline-none [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-ring";
+  "block w-full rounded-md text-left font-medium text-ui-12p5 leading-snug text-foreground outline-none [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-ring";
 
 export function GroupHeading({
   children,
@@ -1251,7 +1254,8 @@ export function GroupHeading({
   );
 }
 
-function CollectionTile({ icon }: { icon: IconSvgElement }) {
+function CollectionTile({ icon, bare = false }: { icon: IconSvgElement; bare?: boolean }) {
+  if (bare) return <HugeiconsIcon icon={icon} strokeWidth={1.75} className={CARD_ICON} />;
   return (
     <span className={TILE}>
       <HugeiconsIcon icon={icon} strokeWidth={1.75} className={TILE_ICON} />
@@ -1420,7 +1424,7 @@ export function ProjectCard({
       className={CARD}
     >
       <div className={cn("flex items-center gap-2", !showTile && TILELESS_ROW)}>
-        {showTile && <CollectionTile icon={Folder02Icon} />}
+        {showTile && <CollectionTile icon={Folder02Icon} bare />}
         {actions.favoriteProjects.has(project.id) && <FavoriteMark />}
         {pinned && <PinMark />}
       </div>
@@ -1669,7 +1673,7 @@ export function SectionCard({
       className={CARD}
     >
       <div className={cn("flex items-center gap-2", !showTile && TILELESS_ROW)}>
-        {showTile && <CollectionTile icon={LayerIcon} />}
+        {showTile && <CollectionTile icon={LayerIcon} bare />}
         {actions.favoriteSections.has(section.id) && <FavoriteMark />}
       </div>
       <SectionMenu section={section} variant="card" />
