@@ -30877,12 +30877,7 @@ async def produce_openai_chat_completions(
                 else {}
             )
             _audio_heal = (
-                heal_gate(
-                    payload.auto_heal_tool_calls,
-                    _audio_tools,
-                    payload.tool_choice,
-                    response_format = _extract_response_format(payload),
-                )
+                heal_gate(payload.auto_heal_tool_calls, _audio_tools, payload.tool_choice)
                 if _audio_tools
                 else None
             )
