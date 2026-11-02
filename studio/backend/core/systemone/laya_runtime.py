@@ -2223,22 +2223,25 @@ def _probabilities(agent, row, k: int, qtype: int):
 
 
 def _wire_answer(answer: dict[str, Any]) -> dict[str, Any]:
+    # Runtimes each define their own confidence; the API's is the likeliest option's probability.
     kind = answer["type"]
     if kind == "noul":
         return {"type": "noul", "noul": float(answer["noul"])}
+    probabilities = {k: float(v) for k, v in answer["probabilities"].items()}
+    confidence = round(max(probabilities.values()), 4)
     if kind == "choice":
         return {
             "type": "choice",
             "choice": answer["choice"],
-            "confidence": float(answer["confidence"]),
-            "probabilities": {k: float(v) for k, v in answer["probabilities"].items()},
+            "confidence": confidence,
+            "probabilities": probabilities,
         }
     return {
         "type": "score",
         "score": float(answer["score"]),
-        "confidence": float(answer["confidence"]),
+        "confidence": confidence,
         "legend": answer["legend"],
-        "probabilities": {k: float(v) for k, v in answer["probabilities"].items()},
+        "probabilities": probabilities,
     }
 
 

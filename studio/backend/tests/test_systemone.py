@@ -143,6 +143,20 @@ def _post(client, **body):
     return client.post("/v1/systemone", json = body)
 
 
+def test_confidence_is_the_probability_of_the_answer_given(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(laya_runtime, "_load_checkpoint", _REAL_LOAD)
+    monkeypatch.setattr(laya_runtime, "_predict", _REAL_PREDICT)
+    monkeypatch.setattr(laya_runtime, "LOAD_WAIT_S", 600.0)
+    monkeypatch.setenv("UNSLOTH_SYSTEMONE_MODEL", str(_tiny_laya_checkpoint(tmp_path)))
+    monkeypatch.setenv("UNSLOTH_SYSTEMONE_DEVICE", "cpu")
+    response = _post(client, state = "w1 w2 w3")
+    assert response.status_code == 200, response.text
+    answers = response.json()["answers"]
+    for name in ("team", "tone"):
+        assert answers[name]["confidence"] == max(answers[name]["probabilities"].values())
+    assert "confidence" not in answers["urgent"]
+
+
 def test_answers_in_jev_wire_format(client, runtime):
     response = _post(client)
     assert response.status_code == 200, response.text

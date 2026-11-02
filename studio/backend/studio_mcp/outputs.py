@@ -375,6 +375,7 @@ class DecisionAnswer(ToolOutput):
     noul: Optional[float] = None
     choice: Optional[RouteText] = None
     score: Optional[float] = None
+    # The probability of the likeliest option, on every runtime.
     confidence: Optional[float] = None
     probabilities: Optional[dict[str, float]] = None
     legend: Optional[dict[str, RouteText]] = None

@@ -1251,15 +1251,15 @@ def test_a_gguf_entry_passes_llama_cpp_answers_through(home, client, stub):
     body = response.json()
     assert body["model"] == "laya-gguf"
     assert body["usage"] == {"input_tokens": 14, "output_tokens": 0}
-    # llama.cpp's normalised confidence, not the Clef formatter's winning probability.
     assert body["answers"]["route"] == {
         "type": "choice",
         "choice": "shipping",
-        "confidence": pytest.approx((2 / 3 - 1 / 2) / (1 - 1 / 2)),
+        "confidence": round(2 / 3, 4),
         "probabilities": {"billing": pytest.approx(1 / 3), "shipping": pytest.approx(2 / 3)},
     }
     assert body["answers"]["urgency"]["legend"] == {"0": "low", "1": "mid", "2": "high"}
     assert body["answers"]["urgency"]["score"] == pytest.approx(2 / 6 + 2 * 3 / 6)
+    assert body["answers"]["urgency"]["confidence"] == 0.5
     assert body["answers"]["angry"] == {"type": "noul", "noul": 0.7}
 
     # An over-long state is refused, never retried on PyTorch.
