@@ -4721,6 +4721,17 @@ export const pl = {
       useInDecisionApi: "Użyj w Decision API",
       decisionApiEnabled: "Decision API obsługuje teraz model {name}.",
       decisionApiFailed: "Nie udało się przełączyć Decision API na ten model.",
+      heldoutTitle: "Wyniki na danych odłożonych",
+      heldoutDescription: "Oceniono na {count} decyzjach spoza treningu",
+      heldoutBaseAccuracy: "Dokładność modelu bazowego",
+      heldoutTunedAccuracy: "Dokładność po dostrajaniu",
+      heldoutCalibrationError: "Błąd kalibracji",
+      heldoutTableHint:
+        "Wiersze to oczekiwana odpowiedź, kolumny to odpowiedź dostrojonego modelu.",
+      heldoutPrecision: "Precyzja",
+      heldoutRecall: "Czułość",
+      heldoutQuestionsShown:
+        "Wyświetlono {shown} z {total} pytań. Pozostałe są rzadsze lub mają zbyt wiele opcji.",
       openConfig: "Otwórz konfigurację trenowania",
       configLabel: "Konfiguracja trenowania",
       hyperparams: "Hiperparametry",

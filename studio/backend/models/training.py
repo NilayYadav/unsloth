@@ -976,6 +976,7 @@ class TrainingRunDetailResponse(BaseModel):
     run: TrainingRunSummary
     config: dict
     metrics: TrainingRunMetrics
+    decision_metrics: Optional[dict] = None
 
 
 class TrainingRunDeleteResponse(BaseModel):

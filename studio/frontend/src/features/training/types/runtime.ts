@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+import type { DecisionMetrics } from "../lib/decision-metrics";
+
 export type TrainingPhase =
   | "idle"
   | "downloading_model"
@@ -35,6 +37,7 @@ export interface TrainingStatusResponse {
     learning_rate?: number;
     // null = explicit clear (run stopped without saving); absent = unchanged.
     output_dir?: string | null;
+    decision_metrics?: DecisionMetrics | null;
     model_download_repo_id?: string | null;
   } | null;
   metric_history?: {
@@ -116,6 +119,7 @@ export interface TrainingRuntimeState {
   currentGradNorm: number | null;
   currentNumTokens: number | null;
   outputDir: string | null;
+  decisionMetrics: DecisionMetrics | null;
   lossHistory: TrainingSeriesPoint[];
   lrHistory: TrainingSeriesPoint[];
   gradNormHistory: TrainingSeriesPoint[];

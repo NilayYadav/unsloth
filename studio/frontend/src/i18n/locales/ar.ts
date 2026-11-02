@@ -4346,6 +4346,17 @@ export const ar = {
       useInDecisionApi: "استخدام في واجهة القرارات البرمجية",
       decisionApiEnabled: "تستخدم واجهة القرارات البرمجية الآن {name}.",
       decisionApiFailed: "تعذّر تبديل واجهة القرارات البرمجية إلى هذا النموذج.",
+      heldoutTitle: "نتائج البيانات المحجوزة",
+      heldoutDescription: "النتائج على {count} قرارًا خارج بيانات التدريب",
+      heldoutBaseAccuracy: "دقة النموذج الأساسي",
+      heldoutTunedAccuracy: "دقة النموذج بعد الضبط",
+      heldoutCalibrationError: "خطأ المعايرة",
+      heldoutTableHint:
+        "الصفوف هي الإجابة المتوقعة، والأعمدة إجابة النموذج بعد الضبط.",
+      heldoutPrecision: "الدقة النوعية",
+      heldoutRecall: "الاستدعاء",
+      heldoutQuestionsShown:
+        "عرض {shown} من {total} أسئلة. الأسئلة الباقية أقل شيوعًا أو لها خيارات كثيرة جدًا.",
       openConfig: "فتح تكوين التدريب",
       configLabel: "تكوين التدريب",
       hyperparams: "المعلمات الفائقة",

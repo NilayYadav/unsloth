@@ -4545,6 +4545,17 @@ export const sv = {
       decisionApiEnabled: "Decision API hanterar nu {name}.",
       decisionApiFailed:
         "Det gick inte att byta Decision API till den här modellen.",
+      heldoutTitle: "Resultat på undanhållen data",
+      heldoutDescription: "Bedömt på {count} beslut utanför träningen",
+      heldoutBaseAccuracy: "Basmodellens noggrannhet",
+      heldoutTunedAccuracy: "Noggrannhet efter finjustering",
+      heldoutCalibrationError: "Kalibreringsfel",
+      heldoutTableHint:
+        "Rader är det förväntade svaret, kolumner den finjusterade modellens svar.",
+      heldoutPrecision: "Precision",
+      heldoutRecall: "Recall",
+      heldoutQuestionsShown:
+        "Visar {shown} av {total} frågor. Resten är ovanligare eller har för många alternativ.",
       openConfig: "Öppna träningskonfiguration",
       configLabel: "Träningskonfiguration",
       hyperparams: "Hyperparametrar",

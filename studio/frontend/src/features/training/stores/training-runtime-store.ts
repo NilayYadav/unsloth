@@ -83,6 +83,7 @@ const initialState: TrainingRuntimeState = {
   currentGradNorm: null,
   currentNumTokens: null,
   outputDir: null,
+  decisionMetrics: null,
   lossHistory: [],
   lrHistory: [],
   gradNormHistory: [],
@@ -329,6 +330,7 @@ export const useTrainingRuntimeStore = create<TrainingRuntimeStore>()(
           currentGradNorm: null,
           currentNumTokens: null,
           outputDir: null,
+          decisionMetrics: null,
           lossHistory: [],
           lrHistory: [],
           gradNormHistory: [],
@@ -409,6 +411,7 @@ export const useTrainingRuntimeStore = create<TrainingRuntimeStore>()(
               currentGradNorm: null,
               currentNumTokens: null,
               outputDir: null,
+              decisionMetrics: null,
               lossHistory: [],
               lrHistory: [],
               gradNormHistory: [],
@@ -469,6 +472,8 @@ export const useTrainingRuntimeStore = create<TrainingRuntimeStore>()(
             payload.details?.output_dir !== undefined
               ? payload.details.output_dir
               : runtimeState.outputDir,
+          decisionMetrics:
+            payload.details?.decision_metrics ?? runtimeState.decisionMetrics,
           lossHistory: metricHistory.lossHistory
             ? mergeSeries(runtimeState.lossHistory, metricHistory.lossHistory)
             : runtimeState.lossHistory,

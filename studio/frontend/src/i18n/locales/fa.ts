@@ -4646,6 +4646,17 @@ export const fa = {
       useInDecisionApi: "استفاده در API تصمیم‌گیری",
       decisionApiEnabled: "API تصمیم‌گیری اکنون {name} را ارائه می‌دهد.",
       decisionApiFailed: "تغییر API تصمیم‌گیری به این مدل ممکن نشد.",
+      heldoutTitle: "نتایج داده‌های کنارگذاشته‌شده",
+      heldoutDescription: "ارزیابی‌شده روی {count} تصمیم خارج از آموزش",
+      heldoutBaseAccuracy: "دقت مدل پایه",
+      heldoutTunedAccuracy: "دقت مدل تنظیم‌شده",
+      heldoutCalibrationError: "خطای کالیبراسیون",
+      heldoutTableHint:
+        "ردیف‌ها پاسخ مورد انتظار و ستون‌ها پاسخ مدل تنظیم‌شده هستند.",
+      heldoutPrecision: "دقت",
+      heldoutRecall: "بازخوانی",
+      heldoutQuestionsShown:
+        "نمایش {shown} از {total} پرسش. بقیه کمتر رایج‌اند یا گزینه‌های بسیار زیادی دارند.",
       openConfig: "باز کردن پیکربندی آموزش",
       configLabel: "پیکربندی آموزش",
       hyperparams: "ابرپارامترها",

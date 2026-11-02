@@ -473,7 +473,7 @@ def _clef_logits(
     processor = None,
 ) -> tuple:
     # Per question logits plus one Laya-shaped item per question for the shared metrics.
-    from .clef import QUESTION_TYPES as CLEF_TYPES
+    from .clef import QUESTION_TYPES as CLEF_TYPES, question_options
 
     device = next(model.parameters()).device
     amp_dtype = _clef_amp_dtype(model, device)
@@ -494,14 +494,26 @@ def _clef_logits(
             z, _ = model(**inputs)
         z = z.float().cpu()
         flat = [
-            (target, label, qtype, item["row"])
+            (target, label, qtype, item["row"], name, question)
             for item in chunk
-            for target, label, qtype in zip(item["targets"], item["labels"], item["qtypes"])
+            for target, label, qtype, (name, question) in zip(
+                item["targets"],
+                item["labels"],
+                item["qtypes"],
+                item["source"]["questions"].items(),
+            )
         ]
-        for row, (target, label, qtype, record_row) in enumerate(flat):
+        for row, (target, label, qtype, record_row, name, question) in enumerate(flat):
             logits.append(z[row, : len(target)])
             questions.append(
-                {"target": target, "label": label, "qtype": laya_type[qtype], "row": record_row}
+                {
+                    "target": target,
+                    "label": label,
+                    "qtype": laya_type[qtype],
+                    "row": record_row,
+                    "question": name,
+                    "options": [key for key, _ in question_options(question)],
+                }
             )
     model.train(was_training)
     return logits, questions
@@ -1814,6 +1826,8 @@ class FastDecisionModel:
                         "target": target,
                         "label": label,
                         "row": index,
+                        "question": str(name),
+                        "options": _option_keys(internal),
                     }
                 )
         if skips:

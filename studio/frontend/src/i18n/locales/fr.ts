@@ -4430,6 +4430,17 @@ export const fr = {
       decisionApiEnabled: "L'API de décision utilise maintenant {name}.",
       decisionApiFailed:
         "Impossible de passer l'API de décision sur ce modèle.",
+      heldoutTitle: "Résultats sur les données réservées",
+      heldoutDescription: "Évalué sur {count} décisions hors entraînement",
+      heldoutBaseAccuracy: "Exactitude du modèle de base",
+      heldoutTunedAccuracy: "Exactitude après réglage fin",
+      heldoutCalibrationError: "Erreur de calibration",
+      heldoutTableHint:
+        "Les lignes sont la réponse attendue, les colonnes la réponse du modèle affiné.",
+      heldoutPrecision: "Précision",
+      heldoutRecall: "Rappel",
+      heldoutQuestionsShown:
+        "{shown} questions sur {total} affichées. Les autres sont moins fréquentes ou ont trop d'options.",
       openConfig: "Ouvrir la configuration d'entraînement",
       configLabel: "Configuration d'entraînement",
       hyperparams: "Hyperparamètres",

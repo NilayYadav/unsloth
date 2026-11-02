@@ -4375,6 +4375,17 @@ export const ptBR = {
       decisionApiEnabled: "A API de decisões agora usa {name}.",
       decisionApiFailed:
         "Não foi possível trocar a API de decisões para este modelo.",
+      heldoutTitle: "Resultados dos dados reservados",
+      heldoutDescription: "Avaliado em {count} decisões fora do treinamento",
+      heldoutBaseAccuracy: "Acurácia do modelo base",
+      heldoutTunedAccuracy: "Acurácia após o ajuste fino",
+      heldoutCalibrationError: "Erro de calibração",
+      heldoutTableHint:
+        "As linhas são a resposta esperada, as colunas são a resposta do modelo ajustado.",
+      heldoutPrecision: "Precisão",
+      heldoutRecall: "Revocação",
+      heldoutQuestionsShown:
+        "Mostrando {shown} de {total} perguntas. As demais são menos comuns ou têm opções demais.",
       openConfig: "Abrir configuração de treino",
       configLabel: "Configuração de Treino",
       hyperparams: "Hiperparâmetros",

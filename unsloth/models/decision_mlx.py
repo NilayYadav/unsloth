@@ -99,7 +99,7 @@ def _decision_clef_items(rows, options: Callable, encode: Callable, validate, re
             report["total"] += 1
             skip(index, "needs state, questions and gold")
             continue
-        kept, targets, labels = {}, [], []
+        kept, targets, labels, option_keys = {}, [], [], []
         for name, question in questions.items():
             report["total"] += 1
             if name not in gold:
@@ -114,10 +114,11 @@ def _decision_clef_items(rows, options: Callable, encode: Callable, validate, re
             except (TypeError, ValueError, KeyError) as exc:
                 skip(index, str(exc) or "is not a valid question", name)
                 continue
-            kept[str(name)], targets, labels = (
+            kept[str(name)], targets, labels, option_keys = (
                 clef_question,
                 targets + [target],
                 labels + [label],
+                option_keys + [keys],
             )
         if not kept:
             continue
@@ -132,6 +133,7 @@ def _decision_clef_items(rows, options: Callable, encode: Callable, validate, re
                 **encoded,
                 "targets": targets,
                 "labels": labels,
+                "options": option_keys,
                 "row": index,
                 "source": {"state": state, "questions": kept},
             }
@@ -201,6 +203,8 @@ def _decision_dataset(
                     "target": target,
                     "label": label,
                     "row": index,
+                    "question": str(name),
+                    "options": _option_keys(internal),
                 }
             )
     if skips:
@@ -488,8 +492,11 @@ def _decision_logits(model, tokenizer, items: list) -> tuple:
     # One Laya-shaped item per question for the shared metrics.
     logits, questions = [], []
     for item, rows in zip(items, _decision_zoo().clef_logits(model, items)):
-        kinds = [question["type"] for question in item["source"]["questions"].values()]
-        for row, target, label, kind in zip(rows, item["targets"], item["labels"], kinds):
+        questions_of_row = item["source"]["questions"]
+        kinds = [question["type"] for question in questions_of_row.values()]
+        for row, target, label, kind, name, keys in zip(
+            rows, item["targets"], item["labels"], kinds, questions_of_row, item["options"]
+        ):
             logits.append(torch.from_numpy(row))
             questions.append(
                 {
@@ -497,6 +504,8 @@ def _decision_logits(model, tokenizer, items: list) -> tuple:
                     "label": label,
                     "qtype": QUESTION_TYPES.index(kind),
                     "row": item["row"],
+                    "question": name,
+                    "options": keys,
                 }
             )
     return logits, questions

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+import type { DecisionMetrics } from "../lib/decision-metrics";
+
 export interface TrainingRunSummary {
   id: string;
   status: "running" | "completed" | "stopped" | "error";
@@ -49,6 +51,7 @@ export interface TrainingRunDetailResponse {
   run: TrainingRunSummary;
   config: Record<string, unknown>;
   metrics: TrainingRunMetrics;
+  decision_metrics?: DecisionMetrics | null;
 }
 
 export interface TrainingRunDeleteResponse {

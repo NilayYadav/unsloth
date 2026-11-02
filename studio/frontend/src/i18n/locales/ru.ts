@@ -4374,6 +4374,17 @@ export const ru = {
       useInDecisionApi: "Использовать в API решений",
       decisionApiEnabled: "API решений теперь использует {name}.",
       decisionApiFailed: "Не удалось переключить API решений на эту модель.",
+      heldoutTitle: "Результаты на отложенных данных",
+      heldoutDescription: "Оценка на {count} решениях вне обучения",
+      heldoutBaseAccuracy: "Точность базовой модели",
+      heldoutTunedAccuracy: "Точность после дообучения",
+      heldoutCalibrationError: "Ошибка калибровки",
+      heldoutTableHint:
+        "Строки — ожидаемый ответ, столбцы — ответ дообученной модели.",
+      heldoutPrecision: "Точность (precision)",
+      heldoutRecall: "Полнота",
+      heldoutQuestionsShown:
+        "Показано вопросов: {shown} из {total}. Остальные встречаются реже или содержат слишком много вариантов.",
       openConfig: "Открыть конфигурацию обучения",
       configLabel: "Конфигурация обучения",
       hyperparams: "Гиперпараметры",

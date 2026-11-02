@@ -349,7 +349,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             loss_sparkline TEXT,
             display_name TEXT,
             resume_blocked INTEGER NOT NULL DEFAULT 0,
-            resumed_from_run_id TEXT
+            resumed_from_run_id TEXT,
+            decision_metrics TEXT
         )
         """
     )
@@ -363,6 +364,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     # Nullable, so older rows stay NULL and fall back to the output_dir heuristic.
     if "resumed_from_run_id" not in existing_cols:
         conn.execute("ALTER TABLE training_runs ADD COLUMN resumed_from_run_id TEXT")
+    if "decision_metrics" not in existing_cols:
+        conn.execute("ALTER TABLE training_runs ADD COLUMN decision_metrics TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS training_metrics (
@@ -1606,6 +1609,7 @@ def finish_run(
     clear_output_dir: bool = False,
     resume_blocked: bool = False,
     config_json: Optional[str] = None,
+    decision_metrics: Optional[str] = None,
 ) -> None:
     conn = get_connection()
     try:
@@ -1615,6 +1619,7 @@ def finish_run(
             SET status = ?, ended_at = ?, final_step = ?, final_loss = ?,
                 duration_seconds = ?, loss_sparkline = ?,
                 config_json = COALESCE(?, config_json),
+                decision_metrics = ?,
                 output_dir = CASE
                     WHEN resume_blocked = 1 OR ? = 1 THEN NULL
                     WHEN ? IS NOT NULL THEN ?
@@ -1633,6 +1638,7 @@ def finish_run(
                 duration_seconds,
                 loss_sparkline,
                 config_json,
+                decision_metrics,
                 int(clear_output_dir),
                 output_dir,
                 output_dir,
@@ -1847,13 +1853,14 @@ def get_run(id: str) -> Optional[dict]:
             return None
         run = dict(row)
         run["project_name"] = _extract_project_name_from_config_json(run.get("config_json"))
-        sparkline = run.get("loss_sparkline")
-        if sparkline:
-            try:
-                run["loss_sparkline"] = json.loads(sparkline)
-            except (json.JSONDecodeError, TypeError):
-                logger.debug("Failed to parse loss_sparkline for run %s", id)
-                run["loss_sparkline"] = None
+        for column in ("loss_sparkline", "decision_metrics"):
+            value = run.get(column)
+            if value:
+                try:
+                    run[column] = json.loads(value)
+                except (json.JSONDecodeError, TypeError):
+                    logger.debug("Failed to parse %s for run %s", column, id)
+                    run[column] = None
         return run
     finally:
         conn.close()

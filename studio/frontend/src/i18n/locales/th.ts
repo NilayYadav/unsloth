@@ -4456,6 +4456,17 @@ export const th = {
       useInDecisionApi: "ใช้ใน Decision API",
       decisionApiEnabled: "Decision API ให้บริการ {name} แล้ว",
       decisionApiFailed: "ไม่สามารถเปลี่ยน Decision API ไปใช้โมเดลนี้ได้",
+      heldoutTitle: "ผลลัพธ์จากข้อมูลที่กันไว้",
+      heldoutDescription: "ประเมินจาก {count} การตัดสินใจที่ไม่ได้ใช้เทรน",
+      heldoutBaseAccuracy: "ความแม่นยำของโมเดลพื้นฐาน",
+      heldoutTunedAccuracy: "ความแม่นยำหลังไฟน์จูน",
+      heldoutCalibrationError: "ค่าความคลาดเคลื่อนการปรับเทียบ",
+      heldoutTableHint:
+        "แถวคือคำตอบที่คาดหวัง คอลัมน์คือคำตอบของโมเดลที่ไฟน์จูนแล้ว",
+      heldoutPrecision: "Precision",
+      heldoutRecall: "Recall",
+      heldoutQuestionsShown:
+        "แสดง {shown} จาก {total} คำถาม ที่เหลือพบน้อยกว่าหรือมีตัวเลือกมากเกินไป",
       openConfig: "เปิดการกำหนดค่าการเทรน",
       configLabel: "การกำหนดค่าการเทรน",
       hyperparams: "ไฮเปอร์พารามิเตอร์",

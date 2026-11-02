@@ -4754,6 +4754,18 @@ export const es419 = {
       decisionApiEnabled: "La API de decisiones ahora usa {name}.",
       decisionApiFailed:
         "No se pudo cambiar la API de decisiones a este modelo.",
+      heldoutTitle: "Resultados de los datos reservados",
+      heldoutDescription:
+        "Evaluado con {count} decisiones fuera del entrenamiento",
+      heldoutBaseAccuracy: "Precisión del modelo base",
+      heldoutTunedAccuracy: "Precisión tras el ajuste fino",
+      heldoutCalibrationError: "Error de calibración",
+      heldoutTableHint:
+        "Las filas son la respuesta esperada y las columnas, la respuesta del modelo ajustado.",
+      heldoutPrecision: "Precisión",
+      heldoutRecall: "Exhaustividad",
+      heldoutQuestionsShown:
+        "Se muestran {shown} de {total} preguntas. El resto son menos frecuentes o tienen demasiadas opciones.",
       openConfig: "Abrir configuración de entrenamiento",
       configLabel: "Configuración de entrenamiento",
       hyperparams: "Hiperparámetros",

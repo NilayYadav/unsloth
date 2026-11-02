@@ -4350,6 +4350,17 @@ export const en = {
       useInDecisionApi: "Use in Decision API",
       decisionApiEnabled: "The Decision API now serves {name}.",
       decisionApiFailed: "Couldn't switch the Decision API to this model.",
+      heldoutTitle: "Held-out results",
+      heldoutDescription: "Scored on {count} decisions kept out of training",
+      heldoutBaseAccuracy: "Base accuracy",
+      heldoutTunedAccuracy: "Fine-tuned accuracy",
+      heldoutCalibrationError: "Calibration error",
+      heldoutTableHint:
+        "Rows are the expected answer, columns the fine-tuned model's answer.",
+      heldoutPrecision: "Precision",
+      heldoutRecall: "Recall",
+      heldoutQuestionsShown:
+        "Showing {shown} of {total} questions. The rest are less common or have too many options.",
       openConfig: "Open training config",
       configLabel: "Training Config",
       hyperparams: "Hyperparams",

@@ -4357,6 +4357,17 @@ export const hi = {
       useInDecisionApi: "निर्णय API में इस्तेमाल करें",
       decisionApiEnabled: "निर्णय API अब {name} इस्तेमाल करता है।",
       decisionApiFailed: "निर्णय API को इस मॉडल पर नहीं बदला जा सका।",
+      heldoutTitle: "अलग रखे गए डेटा के परिणाम",
+      heldoutDescription: "ट्रेनिंग से बाहर रखे गए {count} निर्णयों पर आकलन",
+      heldoutBaseAccuracy: "बेस मॉडल की सटीकता",
+      heldoutTunedAccuracy: "फ़ाइन-ट्यून के बाद सटीकता",
+      heldoutCalibrationError: "कैलिब्रेशन त्रुटि",
+      heldoutTableHint:
+        "पंक्तियाँ अपेक्षित उत्तर हैं, कॉलम फ़ाइन-ट्यून किए गए मॉडल का उत्तर हैं।",
+      heldoutPrecision: "प्रिसीज़न",
+      heldoutRecall: "रिकॉल",
+      heldoutQuestionsShown:
+        "{total} में से {shown} प्रश्न दिखाए गए हैं। बाकी कम आम हैं या उनमें बहुत अधिक विकल्प हैं।",
       openConfig: "ट्रेनिंग कॉन्फ़िग खोलें",
       configLabel: "ट्रेनिंग कॉन्फ़िग",
       hyperparams: "हाइपरपैराम्स",

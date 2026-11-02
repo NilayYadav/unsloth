@@ -740,6 +740,7 @@ class TrainingProgress:
     # Drafter phase after the fine-tune: {strategy, step, total_steps, loss, top1, state}. Kept apart
     # from the SFT fields so its step counter never lands in the SFT loss history.
     drafter: Optional[dict] = None
+    decision_metrics: Optional[dict] = None
 
 
 # Marks an omitted mode, which keeps the loaded one; a literal default would overwrite it.
@@ -2358,8 +2359,9 @@ class TrainingBackend:
                         if self._db_config is not None
                         else None
                     )
+                    decision_metrics = self._progress.decision_metrics
                 else:
-                    config_json = None
+                    config_json = decision_metrics = None
             if claim:
                 self._finish_stopped_run(
                     run_id,
@@ -2374,6 +2376,7 @@ class TrainingBackend:
                     clear_output_dir = clear_output_dir,
                     resume_blocked = resume_blocked,
                     config_json = config_json,
+                    decision_metrics = decision_metrics,
                 )
         with self._lock:
             if target_proc is None or self._proc is target_proc:
@@ -2393,6 +2396,7 @@ class TrainingBackend:
         clear_output_dir: bool = False,
         resume_blocked: bool = False,
         config_json: Optional[str] = None,
+        decision_metrics: Optional[dict] = None,
     ) -> None:
         """Retries transient DB errors, since the watchdog is the only finalizer once _proc is dropped."""
         for attempt in range(_DB_FINALIZE_RETRIES):
@@ -2416,6 +2420,7 @@ class TrainingBackend:
                     clear_output_dir = clear_output_dir,
                     resume_blocked = resume_blocked,
                     config_json = config_json,
+                    decision_metrics = decision_metrics and _json.dumps(decision_metrics),
                 )
                 return
             except Exception:
@@ -3333,6 +3338,7 @@ class TrainingBackend:
                     self._output_dir = event_output_dir
                 self._progress.output_dir = self._output_dir
                 self._progress.status_message = msg
+                self._progress.decision_metrics = event.get("decision_metrics")
                 if not self._db_run_created and self.current_job_id and self._db_config:
                     db_action = "create_and_finalize"
                 else:
@@ -3578,6 +3584,7 @@ class TrainingBackend:
                     if self._db_config is not None
                     else None
                 )
+                decision_metrics = self._progress.decision_metrics
             self._flush_metrics_to_db(run_id = run_id)
             for attempt in range(_DB_FINALIZE_RETRIES):
                 try:
@@ -3597,6 +3604,7 @@ class TrainingBackend:
                         clear_output_dir = clear_output_dir,
                         resume_blocked = resume_blocked,
                         config_json = config_json,
+                        decision_metrics = decision_metrics and _json.dumps(decision_metrics),
                     )
                     return
                 except Exception:

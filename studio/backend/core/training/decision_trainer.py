@@ -16,11 +16,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from loggers import get_logger
+from utils.training_runs import drop_non_finite
 
 logger = get_logger(__name__)
 
 EVAL_MAX = 2000
 MIN_REPORTED_ITEMS = 50
+MAX_REPORTED_QUESTIONS = 8
+MAX_REPORTED_OPTIONS = 20
 # The from-LM recipe's head rate (scripts/train_decision_from_lm.py --head-lr).
 FRESH_HEAD_LEARNING_RATE = 3e-4
 STRUCT_COLUMNS_WARNING = (
@@ -129,6 +132,32 @@ def _read_local_rows(paths: list[str], load_dataset, warn: Callable[[str], None]
         else:
             raise ValueError(f"Unsupported local dataset format: {path.name}")
     return [row for row in rows if isinstance(row, dict)]
+
+
+def _heldout_report(base_metrics: dict, tuned_metrics: dict, decisions: int) -> dict:
+    def size(cells: dict) -> int:
+        return sum(sum(row.values()) for row in cells.values())
+
+    def options(cells: dict) -> set:
+        return set(cells).union(*cells.values())
+
+    confusion = tuned_metrics["confusion"]
+    shown = sorted(
+        (name for name in confusion if len(options(confusion[name])) <= MAX_REPORTED_OPTIONS),
+        key = lambda name: size(confusion[name]),
+        reverse = True,
+    )[:MAX_REPORTED_QUESTIONS]
+    return drop_non_finite(
+        {
+            "decisions": decisions,
+            "accuracy_base": round(base_metrics["accuracy"], 4),
+            "accuracy": round(tuned_metrics["accuracy"], 4),
+            "ece_base": round(base_metrics["ece"], 4),
+            "ece": round(tuned_metrics["ece"], 4),
+            "questions_total": len(confusion),
+            "questions": [{"name": name, "confusion": confusion[name]} for name in shown],
+        }
+    )
 
 
 def _hold_audio(rows: list[dict]) -> None:
@@ -744,9 +773,11 @@ def _run(event_queue: Any, stop_queue: Any, config: dict, output_dir: str) -> No
     logger.info("Decision model saved to %s: %s", output_dir, model.decision_config["training"])
 
     message = "Decision training completed"
+    report = None
     if base_metrics and tuned_metrics and _decision_count(eval_items) >= MIN_REPORTED_ITEMS:
         message = (
             f"Held-out accuracy {base_metrics['accuracy']:.2f} -> {tuned_metrics['accuracy']:.2f}, "
             f"calibration error {tuned_metrics['ece']:.2f}"
         )
-    send("complete", output_dir = output_dir, status_message = message)
+        report = _heldout_report(base_metrics, tuned_metrics, _decision_count(eval_items))
+    send("complete", output_dir = output_dir, status_message = message, decision_metrics = report)

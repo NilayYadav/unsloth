@@ -418,6 +418,12 @@ def test_train_calibrate_save_and_serve(checkpoint, tmp_path, lora):
 
     calibrated = FastDecisionModel.calibrate(model, tokenizer, held)
     assert calibrated["fitted_types"] == [0, 1, 2] and 0 <= calibrated["accuracy"] <= 1
+    assert sum(
+        count
+        for question in calibrated["confusion"].values()
+        for answers in question.values()
+        for count in answers.values()
+    ) == len(held)
     assert model.decision_config["temperature"] != [1.2, 1.1, 1.3]
     assert "temperature_by_options" not in model.decision_config
 
@@ -1160,6 +1166,7 @@ def test_clef_loads_scores_like_cloudflares_model_and_trains(clef_checkpoint, tm
     assert min(losses[-5:]) < losses[0] and after["loss"] < before["loss"], (losses, before, after)
     calibration = FastDecisionModel.calibrate(model, processor, holdout)
     assert "accuracy" in calibration
+    assert set(calibration["confusion"]) == set(holdout[0]["source"]["questions"])
     # Fitted to the gold labels, so the calibrated confidence tracks being right.
     head_temperature = model.decision_config["head_temperature"]
     assert (
@@ -1288,6 +1295,21 @@ def test_record_accuracy_needs_every_question_of_a_row_right():
     ]
     metrics = decision._metrics(logits, items, [1.0] * 3)
     assert metrics["accuracy"] == pytest.approx(2 / 3) and metrics["record_accuracy"] == 0.5
+
+
+def test_metrics_count_each_questions_answers_by_option():
+    logits = [torch.tensor([2.0, 0.0]), torch.tensor([0.0, 2.0]), torch.tensor([2.0, 0.0])]
+    urgent = {"question": "urgent", "options": ["false", "true"], "qtype": 2}
+    topic = {"question": "topic", "options": ["bug", "billing"], "qtype": 0}
+    items = [
+        {**urgent, "label": 0, "target": [1.0, 0.0], "row": 0},
+        {**urgent, "label": 0, "target": [1.0, 0.0], "row": 1},
+        {**topic, "label": 1, "target": [0.0, 1.0], "row": 0},
+    ]
+    assert decision._metrics(logits, items, [1.0] * 3)["confusion"] == {
+        "urgent": {"false": {"false": 1, "true": 1}},
+        "topic": {"billing": {"bug": 1}},
+    }
 
 
 def _clef_head_inputs():

@@ -4668,6 +4668,17 @@ export const vi = {
       useInDecisionApi: "Dùng trong API quyết định",
       decisionApiEnabled: "API quyết định hiện đang phục vụ {name}.",
       decisionApiFailed: "Không thể chuyển API quyết định sang mô hình này.",
+      heldoutTitle: "Kết quả trên dữ liệu giữ lại",
+      heldoutDescription: "Đánh giá trên {count} quyết định ngoài huấn luyện",
+      heldoutBaseAccuracy: "Độ chính xác mô hình gốc",
+      heldoutTunedAccuracy: "Độ chính xác sau tinh chỉnh",
+      heldoutCalibrationError: "Sai số hiệu chuẩn",
+      heldoutTableHint:
+        "Hàng là câu trả lời mong đợi, cột là câu trả lời của mô hình đã tinh chỉnh.",
+      heldoutPrecision: "Precision",
+      heldoutRecall: "Recall",
+      heldoutQuestionsShown:
+        "Đang hiển thị {shown} trên {total} câu hỏi. Các câu còn lại ít gặp hơn hoặc có quá nhiều lựa chọn.",
       openConfig: "Mở cấu hình huấn luyện",
       configLabel: "Cấu hình huấn luyện",
       hyperparams: "Siêu tham số",

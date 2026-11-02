@@ -4712,6 +4712,17 @@ export const uk = {
       useInDecisionApi: "Використовувати в Decision API",
       decisionApiEnabled: "Тепер Decision API обслуговує {name}.",
       decisionApiFailed: "Не вдалося перемкнути Decision API на цю модель.",
+      heldoutTitle: "Результати на відкладених даних",
+      heldoutDescription: "Оцінено на {count} рішеннях поза навчанням",
+      heldoutBaseAccuracy: "Точність базової моделі",
+      heldoutTunedAccuracy: "Точність після донавчання",
+      heldoutCalibrationError: "Похибка калібрування",
+      heldoutTableHint:
+        "Рядки — очікувана відповідь, стовпці — відповідь донавченої моделі.",
+      heldoutPrecision: "Точність (precision)",
+      heldoutRecall: "Повнота",
+      heldoutQuestionsShown:
+        "Показано запитань: {shown} із {total}. Решта трапляються рідше або мають забагато варіантів.",
       openConfig: "Відкрити конфігурацію навчання",
       configLabel: "Конфігурація навчання",
       hyperparams: "Гіперпараметри",

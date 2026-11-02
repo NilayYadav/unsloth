@@ -251,6 +251,8 @@ def test_fine_tune_is_calibrated_saved_and_served(base, studio_home, client):
     )
     complete = _of(events, "complete")[-1]
     assert complete["status_message"].startswith("Held-out accuracy ")
+    assert complete["decision_metrics"]["decisions"] >= 50
+    assert {q["name"] for q in complete["decision_metrics"]["questions"]} == set(QUESTIONS)
     output = complete["output_dir"]
     assert _of(events, "output_dir")[0]["output_dir"] == output
 

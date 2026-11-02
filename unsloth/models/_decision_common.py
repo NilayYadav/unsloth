@@ -371,20 +371,28 @@ def _metrics(logits, items, temperatures) -> dict:
     import numpy as np
     import torch
 
-    conf, correct, loss, records = [], [], [], {}
+    conf, correct, loss, records, confusion = [], [], [], {}, {}
     for z, item, temperature in zip(logits, items, temperatures):
         log_p = torch.log_softmax(z / temperature, -1)
+        predicted = int(log_p.argmax())
         conf.append(float(log_p.exp().max()))
-        correct.append(float(int(log_p.argmax()) == item["label"]))
+        correct.append(float(predicted == item["label"]))
         loss.append(float(-(torch.tensor(item["target"]) * log_p).sum()))
         row = item.get("row", ("item", len(correct)))
         records[row] = records.get(row, True) and bool(correct[-1])
+        if "question" in item:
+            options = item["options"]
+            cells = confusion.setdefault(item["question"], {}).setdefault(
+                options[item["label"]], {}
+            )
+            cells[options[predicted]] = cells.get(options[predicted], 0) + 1
     return {
         "accuracy": float(np.mean(correct)),
         "ece": _laya().common.ece_score(np.array(conf), np.array(correct)),
         "loss": float(np.mean(loss)),
         # Every question of a row right, the record-level precision Cloudflare rewards.
         "record_accuracy": float(np.mean(list(records.values()))),
+        "confusion": confusion,
     }
 
 

@@ -4416,6 +4416,17 @@ export const he = {
       decisionApiEnabled: "ה-Decision API מגיש כעת את {name}.",
       decisionApiFailed:
         "לא ניתן היה להעביר את ה-Decision API למודל הזה.",
+      heldoutTitle: "תוצאות על נתונים שהופרשו",
+      heldoutDescription: "נמדד על {count} החלטות שלא שימשו לאימון",
+      heldoutBaseAccuracy: "דיוק מודל הבסיס",
+      heldoutTunedAccuracy: "דיוק לאחר כוונון",
+      heldoutCalibrationError: "שגיאת כיול",
+      heldoutTableHint:
+        "השורות הן התשובה הצפויה, והעמודות הן תשובת המודל המכוונן.",
+      heldoutPrecision: "דיוק חיובי",
+      heldoutRecall: "היזכרות",
+      heldoutQuestionsShown:
+        "מוצגות {shown} מתוך {total} שאלות. השאר פחות נפוצות או שיש להן יותר מדי אפשרויות.",
       openConfig: "פתח תצורת אימון",
       configLabel: "תצורת אימון",
       hyperparams: "היפר-פרמטרים",

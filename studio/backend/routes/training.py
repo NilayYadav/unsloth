@@ -2925,6 +2925,7 @@ def _build_training_status(
             "eta_seconds": getattr(progress, "eta_seconds", None) if is_active else None,
             "output_dir": getattr(backend, "_output_dir", None) or None,
             "drafter": getattr(progress, "drafter", None),
+            "decision_metrics": getattr(progress, "decision_metrics", None),
             "model_download_repo_id": (
                 getattr(backend, "_model_download_repo_id", None) if is_active else None
             ),

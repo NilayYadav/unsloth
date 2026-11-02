@@ -15,6 +15,7 @@ import { translate, useT } from "@/i18n";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type ReactElement, useEffect, useState } from "react";
 import { ChartsSection } from "./sections/charts-section";
+import { DecisionMetricsSection } from "./sections/decision-metrics-section";
 import { ProgressSection } from "./sections/progress-section";
 import { mapRunConfigToOverride } from "./sections/run-config-override";
 import { PlayIcon } from "lucide-react";
@@ -227,6 +228,9 @@ export function HistoricalTrainingView({
         isHistorical={true}
         configOverride={configOverride}
       />
+      {detail.decision_metrics && (
+        <DecisionMetricsSection metrics={detail.decision_metrics} />
+      )}
       <ChartsSection
         currentStep={viewData.currentStep}
         totalSteps={viewData.totalSteps}

@@ -65,6 +65,8 @@ export type {
   LocalModelInfo,
   ModelConfigResponse,
 } from "./api/models-api";
+export { confusionTable } from "./lib/decision-metrics";
+export type { DecisionMetrics } from "./lib/decision-metrics";
 export type {
   TrainingPhase,
   TrainingViewData,

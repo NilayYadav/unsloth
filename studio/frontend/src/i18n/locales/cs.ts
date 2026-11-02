@@ -4689,6 +4689,17 @@ export const cs = {
       useInDecisionApi: "Použít v Decision API",
       decisionApiEnabled: "Decision API nyní obsluhuje model {name}.",
       decisionApiFailed: "Decision API se nepodařilo přepnout na tento model.",
+      heldoutTitle: "Výsledky na odložených datech",
+      heldoutDescription: "Vyhodnoceno na {count} rozhodnutích mimo trénování",
+      heldoutBaseAccuracy: "Přesnost základního modelu",
+      heldoutTunedAccuracy: "Přesnost doladěného modelu",
+      heldoutCalibrationError: "Chyba kalibrace",
+      heldoutTableHint:
+        "Řádky jsou očekávaná odpověď, sloupce odpověď doladěného modelu.",
+      heldoutPrecision: "Přesnost (precision)",
+      heldoutRecall: "Úplnost (recall)",
+      heldoutQuestionsShown:
+        "Zobrazeno {shown} z {total} otázek. Ostatní jsou méně časté nebo mají příliš mnoho možností.",
       openConfig: "Otevřít konfiguraci trénování",
       configLabel: "Konfigurace trénování",
       hyperparams: "Hyperparametry",

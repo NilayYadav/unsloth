@@ -4420,6 +4420,18 @@ export const de = {
       decisionApiEnabled: "Die Entscheidungs-API verwendet jetzt {name}.",
       decisionApiFailed:
         "Die Entscheidungs-API konnte nicht auf dieses Modell umgestellt werden.",
+      heldoutTitle: "Ergebnisse der zurückgehaltenen Daten",
+      heldoutDescription:
+        "Bewertet mit {count} Entscheidungen außerhalb des Trainings",
+      heldoutBaseAccuracy: "Genauigkeit des Basismodells",
+      heldoutTunedAccuracy: "Genauigkeit nach Fine-Tuning",
+      heldoutCalibrationError: "Kalibrierungsfehler",
+      heldoutTableHint:
+        "Zeilen sind die erwartete Antwort, Spalten die Antwort des feinabgestimmten Modells.",
+      heldoutPrecision: "Präzision",
+      heldoutRecall: "Recall",
+      heldoutQuestionsShown:
+        "{shown} von {total} Fragen werden angezeigt. Die übrigen sind seltener oder haben zu viele Optionen.",
       openConfig: "Trainingskonfiguration öffnen",
       configLabel: "Trainingskonfiguration",
       hyperparams: "Hyperparameter",

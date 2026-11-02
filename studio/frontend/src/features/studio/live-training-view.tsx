@@ -12,6 +12,7 @@ import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { ChartsSection } from "./sections/charts-section";
+import { DecisionMetricsSection } from "./sections/decision-metrics-section";
 import { OffloadPanel } from "./sections/offload-panel";
 import { ProgressSection } from "./sections/progress-section";
 import {
@@ -56,6 +57,7 @@ export function LiveTrainingView(): ReactElement {
       sessionStartStep: state.sessionStartStep,
       evalEnabled: state.evalEnabled,
       outputDir: state.outputDir,
+      decisionMetrics: state.decisionMetrics,
       isTrainingRunning: state.isTrainingRunning,
       startModelName: state.startModelName,
       startProjectName: state.startProjectName,
@@ -189,6 +191,9 @@ export function LiveTrainingView(): ReactElement {
           />
         </div>
         <OffloadPanel isTrainingRunning={viewData.isTrainingRunning} />
+        {runtime.decisionMetrics && (
+          <DecisionMetricsSection metrics={runtime.decisionMetrics} />
+        )}
         <ChartsSection
           currentStep={viewData.currentStep}
           totalSteps={viewData.totalSteps}

@@ -4415,6 +4415,18 @@ export const it = {
       decisionApiEnabled: "L'API decisionale ora usa {name}.",
       decisionApiFailed:
         "Impossibile passare l'API decisionale a questo modello.",
+      heldoutTitle: "Risultati sui dati esclusi",
+      heldoutDescription:
+        "Valutato su {count} decisioni escluse dall'addestramento",
+      heldoutBaseAccuracy: "Accuratezza del modello base",
+      heldoutTunedAccuracy: "Accuratezza dopo il fine-tuning",
+      heldoutCalibrationError: "Errore di calibrazione",
+      heldoutTableHint:
+        "Le righe sono la risposta attesa, le colonne la risposta del modello ottimizzato.",
+      heldoutPrecision: "Precisione",
+      heldoutRecall: "Richiamo",
+      heldoutQuestionsShown:
+        "Mostrate {shown} domande su {total}. Le altre sono meno frequenti o hanno troppe opzioni.",
       openConfig: "Apri la configurazione di addestramento",
       configLabel: "Configurazione di addestramento",
       hyperparams: "Iperparametri",

@@ -4721,6 +4721,18 @@ export const nl = {
       decisionApiEnabled: "De Decision API gebruikt nu {name}.",
       decisionApiFailed:
         "Kan de Decision API niet naar dit model overschakelen.",
+      heldoutTitle: "Resultaten op achtergehouden data",
+      heldoutDescription:
+        "Beoordeeld op {count} beslissingen buiten de training",
+      heldoutBaseAccuracy: "Nauwkeurigheid basismodel",
+      heldoutTunedAccuracy: "Nauwkeurigheid na fine-tuning",
+      heldoutCalibrationError: "Kalibratiefout",
+      heldoutTableHint:
+        "Rijen zijn het verwachte antwoord, kolommen het antwoord van het getunede model.",
+      heldoutPrecision: "Precisie",
+      heldoutRecall: "Recall",
+      heldoutQuestionsShown:
+        "{shown} van {total} vragen getoond. De rest komt minder vaak voor of heeft te veel opties.",
       openConfig: "Trainingsconfiguratie openen",
       configLabel: "Trainingsconfiguratie",
       hyperparams: "Hyperparameters",

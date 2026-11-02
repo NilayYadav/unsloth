@@ -316,6 +316,7 @@ async def get_training_run_detail(
             run = summary,
             config = config,
             metrics = TrainingRunMetrics(**metrics_data),
+            decision_metrics = run.get("decision_metrics"),
         ),
         via_api_key = via_api_key,
     )

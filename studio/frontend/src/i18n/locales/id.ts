@@ -4672,6 +4672,17 @@ export const id = {
       useInDecisionApi: "Gunakan di API Keputusan",
       decisionApiEnabled: "API Keputusan sekarang melayani {name}.",
       decisionApiFailed: "Tidak dapat mengalihkan API Keputusan ke model ini.",
+      heldoutTitle: "Hasil data yang disisihkan",
+      heldoutDescription: "Dinilai pada {count} keputusan di luar pelatihan",
+      heldoutBaseAccuracy: "Akurasi model dasar",
+      heldoutTunedAccuracy: "Akurasi setelah fine-tuning",
+      heldoutCalibrationError: "Galat kalibrasi",
+      heldoutTableHint:
+        "Baris adalah jawaban yang diharapkan, kolom adalah jawaban model hasil fine-tuning.",
+      heldoutPrecision: "Presisi",
+      heldoutRecall: "Recall",
+      heldoutQuestionsShown:
+        "Menampilkan {shown} dari {total} pertanyaan. Sisanya lebih jarang atau memiliki terlalu banyak opsi.",
       openConfig: "Buka konfigurasi pelatihan",
       configLabel: "Konfigurasi Pelatihan",
       hyperparams: "Hyperparameter",

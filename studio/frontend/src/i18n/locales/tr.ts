@@ -4670,6 +4670,18 @@ export const tr = {
       useInDecisionApi: "Karar API'sinde kullan",
       decisionApiEnabled: "Karar API'si artık {name} modelini sunuyor.",
       decisionApiFailed: "Karar API'si bu modele geçirilemedi.",
+      heldoutTitle: "Ayrılan veri sonuçları",
+      heldoutDescription:
+        "Eğitim dışında tutulan {count} karar üzerinde ölçüldü",
+      heldoutBaseAccuracy: "Temel model doğruluğu",
+      heldoutTunedAccuracy: "İnce ayar sonrası doğruluk",
+      heldoutCalibrationError: "Kalibrasyon hatası",
+      heldoutTableHint:
+        "Satırlar beklenen yanıt, sütunlar ince ayarlı modelin yanıtıdır.",
+      heldoutPrecision: "Kesinlik",
+      heldoutRecall: "Duyarlılık",
+      heldoutQuestionsShown:
+        "{total} sorudan {shown} tanesi gösteriliyor. Diğerleri daha seyrek veya çok fazla seçeneğe sahip.",
       openConfig: "Eğitim yapılandırmasını aç",
       configLabel: "Eğitim Yapılandırması",
       hyperparams: "Hiperparametreler",

@@ -823,3 +823,68 @@ def test_training_run_detail_reads_the_db_off_the_event_loop(monkeypatch):
 
     assert response.run.id == "a"
     assert {get_run, get_run_metrics, sharing} <= set(offloaded)
+
+
+def test_run_without_held_out_results_opens_from_a_migrated_database(monkeypatch, tmp_path):
+    from storage import studio_db
+
+    monkeypatch.setenv("UNSLOTH_STUDIO_HOME", str(tmp_path))
+    monkeypatch.setattr(studio_db, "_schema_ready", set())
+    studio_db.create_run(
+        id = "a",
+        model_name = "unsloth/test-model",
+        dataset_name = "test-dataset",
+        config_json = "{}",
+        started_at = "2026-01-01T00:00:00Z",
+        total_steps = 10,
+    )
+    conn = studio_db.get_connection()
+    conn.execute("ALTER TABLE training_runs DROP COLUMN decision_metrics")
+    conn.commit()
+    conn.close()
+    studio_db._schema_ready.clear()
+
+    studio_db.finish_run(
+        "a",
+        status = "completed",
+        ended_at = "2026-01-01T01:00:00Z",
+        final_step = 10,
+        final_loss = 0.5,
+        duration_seconds = 60.0,
+    )
+    monkeypatch.setattr(training_history, "get_run", studio_db.get_run)
+    monkeypatch.setattr(training_history, "get_run_metrics", lambda run_id: {})
+    monkeypatch.setattr(training_history, "get_preview_sharing_enabled", lambda: False)
+    monkeypatch.setattr(
+        training_history, "can_resume_run", lambda run, *, resource_cache = None: False
+    )
+    monkeypatch.setattr(training_history, "artifacts_present", lambda path: False)
+
+    response = asyncio.run(
+        training_history.get_training_run_detail("a", current_subject = "test-user")
+    )
+
+    assert response.run.status == "completed" and response.decision_metrics is None
+    assert studio_db.list_runs()["total"] == 1
+    studio_db.close_wal_keeper()
+
+
+def test_run_detail_returns_the_stored_held_out_results(monkeypatch):
+    report = {"decisions": 60, "accuracy": 0.9}
+    monkeypatch.setattr(
+        training_history,
+        "get_run",
+        lambda run_id: _run_row(id = "a", output_dir = "/tmp/a", decision_metrics = report),
+    )
+    monkeypatch.setattr(training_history, "get_run_metrics", lambda run_id: {})
+    monkeypatch.setattr(training_history, "get_preview_sharing_enabled", lambda: False)
+    monkeypatch.setattr(
+        training_history, "can_resume_run", lambda run, *, resource_cache = None: False
+    )
+    monkeypatch.setattr(training_history, "artifacts_present", lambda path: False)
+
+    response = asyncio.run(
+        training_history.get_training_run_detail("a", current_subject = "test-user")
+    )
+
+    assert response.decision_metrics == report
