@@ -1364,6 +1364,7 @@ class WordTokenizer:
 
     def __init__(self):
         self.calls = []
+        self.texts = []
 
     def __call__(
         self,
@@ -1371,6 +1372,7 @@ class WordTokenizer:
         add_special_tokens = False,
     ):
         self.calls.append(len(text))
+        self.texts.append(text)
         return {"input_ids": [len(word) for word in text.split()]}
 
 
@@ -1453,7 +1455,7 @@ _TEAMS = {f"team_{i}": "tickets and questions about this product area " * 2 for 
     [
         (_ESCALATE, dict(list(_TEAMS.items())[:4]), None),
         (_ESCALATE, _TEAMS, "instructions would be cut short"),
-        ("Which queue?", {"billing": "word " * 60, "outage": None}, None),
+        ("Which queue?", {"billing": "word " * 47, "outage": None}, None),
     ],
 )
 def test_choice_instructions_laya_would_cut_are_refused(
@@ -1468,6 +1470,32 @@ def test_choice_instructions_laya_would_cut_are_refused(
     message = response.json()["detail"]["message"]
     assert "'route'" in message and refusal in message
     assert "answers" not in response.json()
+
+
+@pytest.mark.parametrize(
+    "question, status",
+    [
+        ({"type": "choice", "criteria": {"billing": "word " * 47, "outage": None}}, 200),
+        ({"type": "choice", "criteria": {"billing": "word " * 48, "outage": None}}, 422),
+        ({"type": "score", "criteria": ["word " * 46, "calm"]}, 200),
+        ({"type": "score", "criteria": ["word " * 47, "calm"]}, 422),
+        ({"type": "noul", "criteria": {"true": "word " * 47}}, 200),
+        ({"type": "noul", "criteria": {"true": "word " * 48}}, 422),
+    ],
+)
+def test_option_past_the_laya_token_limit_is_refused(client, word_laya, question, status):
+    response = _post(client, questions = {"route": {**question, "instructions": "Which queue?"}})
+    assert response.status_code == status, response.text
+    if status == 422:
+        message = response.json()["detail"]["message"]
+        assert "'route'" in message and "48-token limit" in message
+
+
+@pytest.mark.parametrize("instructions", [{"ask": "これは緊急ですか"}, ["これは緊急ですか"]])
+def test_structured_instructions_reach_laya_as_written(client, word_laya, instructions):
+    question = {"type": "noul", "instructions": instructions}
+    assert _post(client, questions = {"urgent": question}).status_code == 200
+    assert any("これは緊急ですか" in text for text in word_laya.tok.texts)
 
 
 @pytest.mark.parametrize("words, cut", [(900, False), (901, True), (5000, True)])

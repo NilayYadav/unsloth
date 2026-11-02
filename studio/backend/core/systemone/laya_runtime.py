@@ -1662,7 +1662,12 @@ def _agent_for(checkpoint: Checkpoint, wait: float):
 
 
 def _to_laya(question: dict[str, Any]) -> dict[str, Any]:
-    out = {"type": question["type"], "instructions": question.get("instructions") or ""}
+    import json
+
+    instructions = question.get("instructions") or ""
+    if not isinstance(instructions, str):
+        instructions = json.dumps(instructions, ensure_ascii = False)
+    out = {"type": question["type"], "instructions": instructions}
     if question.get("criteria") is not None:
         out["criteria"] = question["criteria"]
     return out
@@ -1671,6 +1676,7 @@ def _to_laya(question: dict[str, Any]) -> dict[str, Any]:
 # Long states tokenized in growing prefixes; margin keeps kept tokens clear of the cut (prefix tokenization differs).
 _PREFIX_MARGIN = 64
 _HEAD_CACHE_SIZE = 1024
+_OPTION_MAX_TOKENS = 48
 
 
 def _state_ids(tok, state, room: int) -> tuple[list[int], bool]:
@@ -1700,7 +1706,12 @@ def _head(agent, question: dict[str, Any], max_len: int, head_max_len: int):
         internal = agent._to_internal(question)
         tok = agent.tok
         options = [" " + o.replace(tok.mask_token, " ") for o in render_options(internal)]
-        sizes = [1 + min(48, len(tok(o, add_special_tokens = False)["input_ids"])) for o in options]
+        sizes = [1 + len(tok(o, add_special_tokens = False)["input_ids"]) for o in options]
+        if max(sizes) > 1 + _OPTION_MAX_TOKENS:
+            raise ValueError(
+                f"options would be cut short to Laya's {_OPTION_MAX_TOKENS}-token limit per "
+                "option. Use shorter criteria"
+            )
         # build_sequence's rule: past this budget, each option keeps only its share of it.
         budget = head_max_len - 16
         share = max(4, budget // len(sizes))
