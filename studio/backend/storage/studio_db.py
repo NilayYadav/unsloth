@@ -200,6 +200,12 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     }
     if "root_path" not in chat_project_cols:
         conn.execute("ALTER TABLE chat_projects ADD COLUMN root_path TEXT")
+    if "subagents_enabled" not in chat_project_cols:
+        conn.execute(
+            "ALTER TABLE chat_projects ADD COLUMN subagents_enabled INTEGER NOT NULL DEFAULT 0"
+        )
+    if "subagent_effort" not in chat_project_cols:
+        conn.execute("ALTER TABLE chat_projects ADD COLUMN subagent_effort TEXT")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_chat_projects_archived_updated_at ON chat_projects(archived, updated_at)"
     )
@@ -968,6 +974,8 @@ def _chat_project_from_row(row: sqlite3.Row) -> dict:
         "instructions": data.get("instructions") or "",
         "rootPath": root_path or None,
         "sandboxPath": os.path.join(root_path, "sandbox") if root_path else None,
+        "subagentsEnabled": bool(data.get("subagents_enabled")),
+        "subagentEffort": data.get("subagent_effort") or None,
         "archived": bool(data["archived"]),
         "createdAt": data["created_at"],
         "updatedAt": data["updated_at"],
@@ -1150,12 +1158,14 @@ def upsert_chat_project(project: dict) -> dict:
         conn.execute(
             """
             INSERT INTO chat_projects
-                (id, name, instructions, root_path, archived, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (id, name, instructions, root_path, subagents_enabled, subagent_effort, archived, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 instructions = excluded.instructions,
                 root_path = COALESCE(chat_projects.root_path, excluded.root_path),
+                subagents_enabled = excluded.subagents_enabled,
+                subagent_effort = excluded.subagent_effort,
                 archived = excluded.archived,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at
@@ -1165,6 +1175,8 @@ def upsert_chat_project(project: dict) -> dict:
                 project["name"],
                 project.get("instructions") or "",
                 root_path,
+                1 if project.get("subagentsEnabled") else 0,
+                project.get("subagentEffort") or None,
                 1 if project.get("archived") else 0,
                 int(project["createdAt"]),
                 int(project["updatedAt"]),
@@ -1180,6 +1192,8 @@ def update_chat_project(id: str, patch: dict) -> Optional[dict]:
     allowed = {
         "name": ("name", patch.get("name")),
         "instructions": ("instructions", patch.get("instructions")),
+        "subagentsEnabled": ("subagents_enabled", 1 if patch.get("subagentsEnabled") else 0),
+        "subagentEffort": ("subagent_effort", patch.get("subagentEffort") or None),
         "archived": ("archived", 1 if patch.get("archived") else 0),
         "createdAt": ("created_at", patch.get("createdAt")),
         "updatedAt": ("updated_at", patch.get("updatedAt")),

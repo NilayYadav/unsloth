@@ -134,6 +134,26 @@ def test_chat_projects_delete_cascades_threads_and_messages(tmp_path, monkeypatc
     assert (tmp_path / "Projects" / "Research-project").exists()
 
 
+def test_chat_project_subagent_settings_round_trip(tmp_path, monkeypatch):
+    _reset_studio_db(tmp_path, monkeypatch)
+    project = studio_db.upsert_chat_project(_project())
+    assert project["subagentsEnabled"] is False
+    assert project["subagentEffort"] is None
+
+    project = studio_db.update_chat_project(
+        "project-1", {"subagentsEnabled": True, "subagentEffort": "high"}
+    )
+    assert project["subagentsEnabled"] is True
+    assert project["subagentEffort"] == "high"
+
+    project = studio_db.update_chat_project("project-1", {"name": "Renamed"})
+    assert project["subagentsEnabled"] is True
+
+    project = studio_db.update_chat_project("project-1", {"subagentEffort": None})
+    assert project["subagentEffort"] is None
+    assert studio_db.list_chat_projects()[0]["subagentsEnabled"] is True
+
+
 def test_chat_project_delete_files_removes_workspace(
     tmp_path, monkeypatch, workspace_projects_home
 ):

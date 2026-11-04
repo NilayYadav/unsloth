@@ -20,6 +20,7 @@ from typing import Callable, Generator, Optional
 
 from loggers import get_logger
 
+from core.inference.subagents import SUBAGENT_TOOL_NAME
 from core.inference.tool_call_parser import (
     _TOOL_ALL_PATS,
     BUDGET_EXHAUSTED_NUDGE,
@@ -146,6 +147,7 @@ def run_safetensors_tool_loop(
     tool_call_timeout: int = 300,
     session_id: Optional[str] = None,
     rag_scope: Optional[dict] = None,
+    subagent_runner: Optional[Callable[[dict], Generator[dict, None, str]]] = None,
 ) -> Generator[dict, None, None]:
     """Drive an agentic tool loop on top of a cumulative-text generator.
 
@@ -519,6 +521,8 @@ def run_safetensors_tool_loop(
                 and kb_search_count >= RAG_MAX_SEARCHES_PER_TURN
             ):
                 result = RAG_SEARCH_CAP_NUDGE
+            elif subagent_runner is not None and decision.tool_name == SUBAGENT_TOOL_NAME:
+                result = yield from subagent_runner(decision.arguments)
             else:
                 try:
                     result = execute_tool(

@@ -824,6 +824,7 @@ class InferenceOrchestrator:
         rag_scope: Optional[dict] = None,
         use_adapter: Optional[Union[bool, str]] = None,
         stats_holder: Optional[dict] = None,
+        subagent_runner = None,
         **_unused,
     ):
         """Run the safetensors agentic tool loop in the parent process,
@@ -883,6 +884,7 @@ class InferenceOrchestrator:
             tool_call_timeout = tool_call_timeout,
             session_id = session_id,
             rag_scope = rag_scope,
+            subagent_runner = subagent_runner,
         )
 
     def generate_with_adapter_control(

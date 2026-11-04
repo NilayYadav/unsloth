@@ -46,6 +46,7 @@ import type {
   OpenAIMessageContent,
   OpenAIReasoningContentPart,
 } from "../types/api";
+import type { SubagentEffort } from "../types";
 import type { ChatModelSummary } from "../types/runtime";
 import {
   getStoredChatThread,
@@ -1048,6 +1049,16 @@ async function resolveProjectInstructions(
   return project.instructions?.trim() ?? "";
 }
 
+async function resolveProjectSubagents(
+  threadId: string | undefined,
+): Promise<{ effort: SubagentEffort | null } | null> {
+  const projectId = await resolveProjectId(threadId);
+  if (!projectId) return null;
+  const project = await getStoredChatProject(projectId).catch(() => null);
+  if (!project || project.archived || !project.subagentsEnabled) return null;
+  return { effort: project.subagentEffort ?? null };
+}
+
 async function resolveProjectId(
   threadId: string | undefined,
 ): Promise<string | null> {
@@ -1408,6 +1419,7 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
       const resolvedThreadId =
         (unstable_threadId ?? runtime.activeThreadId) || undefined;
       const sandboxSessionId = await resolveSandboxSessionId(resolvedThreadId);
+      const projectSubagents = await resolveProjectSubagents(resolvedThreadId);
       const resolvedThreadKey = resolvedThreadId ?? null;
       const pendingImageEditReferenceForRun = runtime.pendingImageEditReference;
       const selectedImageEditReference =
@@ -2389,7 +2401,8 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
               codeToolsEnabled ||
               renderHtmlToolEnabledForThisTurn ||
               mcpEnabledForChat ||
-              ragEnabled)
+              ragEnabled ||
+              projectSubagents)
               ? {
                   enable_tools: true,
                   enabled_tools: [
@@ -2400,7 +2413,11 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
                     ...(renderHtmlToolEnabledForThisTurn
                       ? ["render_html"]
                       : []),
+                    ...(projectSubagents ? ["spawn_subagent"] : []),
                   ],
+                  ...(projectSubagents?.effort
+                    ? { subagent_effort: projectSubagents.effort }
+                    : {}),
                   mcp_enabled: mcpEnabledForChat,
                   // Scope: thread_id = this thread's docs, kb_id = a KB.
                   ...(ragEnabled

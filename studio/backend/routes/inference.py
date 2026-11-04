@@ -871,6 +871,33 @@ _TOOL_ARTIFACT_TIP = (
 )
 
 
+def _with_subagent_tool(payload, tools: list[dict]) -> list[dict]:
+    from core.inference.subagents import (
+        SUBAGENT_TOOL_NAME,
+        build_subagent_tool,
+        is_project_session,
+    )
+    if not (
+        payload.enabled_tools
+        and SUBAGENT_TOOL_NAME in payload.enabled_tools
+        and is_project_session(payload.session_id)
+    ):
+        return tools
+    return tools + [build_subagent_tool(tools, payload.subagent_effort)]
+
+
+def _has_subagent_tool(tools: list[dict]) -> bool:
+    from core.inference.subagents import SUBAGENT_TOOL_NAME
+    return any((t.get("function") or {}).get("name") == SUBAGENT_TOOL_NAME for t in tools or [])
+
+
+def _add_planner_nudge(nudge: str, tools: list[dict]) -> str:
+    if not _has_subagent_tool(tools):
+        return nudge
+    from core.inference.subagents import PLANNER_NUDGE
+    return nudge + " " + PLANNER_NUDGE if nudge else PLANNER_NUDGE
+
+
 def _build_tool_action_nudge(*, tools: list[dict], model_name: str) -> str:
     tool_names = {
         (tool.get("function") or {}).get("name")
@@ -3128,6 +3155,9 @@ async def openai_chat_completions(
             if _mcp_allowed:
                 tools_to_use = tools_to_use + await get_enabled_mcp_tools()
 
+            if _tools_on:
+                tools_to_use = _with_subagent_tool(payload, tools_to_use)
+
             # Skip the tool loop when no tool survived, so the safetensors
             # loop's "empty = allow all" semantic can't reach built-in tools
             # the caller didn't opt into. Callers who omit enabled_tools still
@@ -3160,6 +3190,8 @@ async def openai_chat_completions(
                 _date_line = f"The current date is {_date.today().isoformat()}."
                 _nudge = _date_line + " " + _rag_nudge if not _nudge else _nudge + " " + _rag_nudge
 
+            _nudge = _add_planner_nudge(_nudge, tools_to_use)
+
             if _nudge:
                 # Append nudge to system prompt (preserve user's prompt)
                 if system_prompt:
@@ -3179,6 +3211,39 @@ async def openai_chat_completions(
                         _msg["content"],
                         auto_heal_tool_calls = _gguf_auto_heal_tool_calls,
                     ).strip()
+
+            _gguf_subagent_runner = None
+            if _has_subagent_tool(tools_to_use):
+                from core.inference.subagents import make_subagent_runner
+                def _gguf_subagent_loop(sub_messages, sub_tools, sub_effort, sub_budget):
+                    return llama_backend.generate_chat_completion_with_tools(
+                        messages = sub_messages,
+                        tools = sub_tools,
+                        temperature = payload.temperature,
+                        top_p = payload.top_p,
+                        top_k = payload.top_k,
+                        min_p = payload.min_p,
+                        max_tokens = effective_max_tokens,
+                        repetition_penalty = payload.repetition_penalty,
+                        presence_penalty = payload.presence_penalty,
+                        cancel_event = cancel_event,
+                        enable_thinking = sub_effort != "low",
+                        reasoning_effort = sub_effort,
+                        auto_heal_tool_calls = _gguf_auto_heal_tool_calls,
+                        max_tool_iterations = sub_budget if sub_tools else 0,
+                        tool_call_timeout = payload.tool_call_timeout
+                        if payload.tool_call_timeout is not None
+                        else 300,
+                        session_id = payload.session_id,
+                        rag_scope = payload.rag_scope,
+                    )
+
+                _gguf_subagent_runner = make_subagent_runner(
+                    run_loop = _gguf_subagent_loop,
+                    parent_tools = tools_to_use,
+                    fixed_effort = payload.subagent_effort,
+                    cancel_event = cancel_event,
+                )
 
             def gguf_generate_with_tools():
                 return llama_backend.generate_chat_completion_with_tools(
@@ -3207,6 +3272,7 @@ async def openai_chat_completions(
                     session_id = payload.session_id,
                     rag_scope = payload.rag_scope,
                     disable_parallel_tool_use = payload.parallel_tool_calls is False,
+                    subagent_runner = _gguf_subagent_runner,
                 )
 
             _tool_sentinel = object()
@@ -3654,6 +3720,9 @@ async def openai_chat_completions(
         if _sf_mcp_allowed:
             _sf_tools_to_use = _sf_tools_to_use + await get_enabled_mcp_tools()
 
+        if _sf_tools_on:
+            _sf_tools_to_use = _with_subagent_tool(payload, _sf_tools_to_use)
+
         # Mirror the GGUF path: refuse to enter the tool loop when nothing
         # survived, so a model-emitted built-in call can't piggy-back on the
         # empty allow-list.
@@ -3685,6 +3754,8 @@ async def openai_chat_completions(
                 else _sf_nudge + " " + _sf_rag_nudge
             )
 
+        _sf_nudge = _add_planner_nudge(_sf_nudge, _sf_tools_to_use)
+
         _sf_system_prompt = system_prompt
         if _sf_nudge:
             if _sf_system_prompt:
@@ -3715,6 +3786,54 @@ async def openai_chat_completions(
         # Request-scoped usage/timings receptacle (filled at gen_done).
         _sf_stats_holder: dict = {}
 
+        _sf_subagent_runner = None
+        if _has_subagent_tool(_sf_tools_to_use):
+            from core.inference.subagents import make_subagent_runner
+            def _sf_subagent_loop(sub_messages, sub_tools, sub_effort, sub_budget):
+                sub_kwargs = dict(
+                    temperature = payload.temperature,
+                    top_p = payload.top_p,
+                    top_k = payload.top_k,
+                    min_p = payload.min_p,
+                    repetition_penalty = payload.repetition_penalty,
+                    cancel_event = cancel_event,
+                    enable_thinking = sub_effort != "low",
+                    reasoning_effort = sub_effort,
+                )
+                if not sub_tools:
+                    for text in backend.generate_chat_response(
+                        messages = sub_messages,
+                        system_prompt = "",
+                        image = None,
+                        max_new_tokens = effective_max_tokens or 2048,
+                        **sub_kwargs,
+                    ):
+                        if isinstance(text, str):
+                            yield {"type": "content", "text": text}
+                    return
+                yield from backend.generate_chat_completion_with_tools(
+                    messages = sub_messages,
+                    tools = sub_tools,
+                    system_prompt = "",
+                    max_tokens = effective_max_tokens,
+                    auto_heal_tool_calls = _sf_auto_heal_tool_calls,
+                    max_tool_iterations = sub_budget,
+                    tool_call_timeout = payload.tool_call_timeout
+                    if payload.tool_call_timeout is not None
+                    else 300,
+                    session_id = payload.session_id,
+                    rag_scope = payload.rag_scope,
+                    use_adapter = payload.use_adapter,
+                    **sub_kwargs,
+                )
+
+            _sf_subagent_runner = make_subagent_runner(
+                run_loop = _sf_subagent_loop,
+                parent_tools = _sf_tools_to_use,
+                fixed_effort = payload.subagent_effort,
+                cancel_event = cancel_event,
+            )
+
         def sf_generate_with_tools():
             return backend.generate_chat_completion_with_tools(
                 messages = _sf_chat_messages,
@@ -3739,6 +3858,7 @@ async def openai_chat_completions(
                 rag_scope = payload.rag_scope,
                 use_adapter = payload.use_adapter,
                 stats_holder = _sf_stats_holder,
+                subagent_runner = _sf_subagent_runner,
             )
 
         _sf_tool_sentinel = object()

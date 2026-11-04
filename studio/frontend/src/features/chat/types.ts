@@ -22,10 +22,14 @@ export interface ProjectRecord {
   instructions?: string;
   rootPath?: string | null;
   sandboxPath?: string | null;
+  subagentsEnabled?: boolean;
+  subagentEffort?: SubagentEffort | null;
   archived: boolean;
   createdAt: number;
   updatedAt: number;
 }
+
+export type SubagentEffort = "low" | "medium" | "high";
 
 export interface ThreadRecord {
   id: string;

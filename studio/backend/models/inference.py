@@ -694,6 +694,10 @@ class ChatCompletionRequest(BaseModel):
         None,
         description = "[x-unsloth] Session/thread ID for scoping tool execution sandbox.",
     )
+    subagent_effort: Optional[Literal["low", "medium", "high"]] = Field(
+        None,
+        description = "[x-unsloth] Fixed reasoning effort for spawn_subagent executors in project chats. None lets the planner choose per executor.",
+    )
     rag_scope: Optional[dict] = Field(
         None,
         description = (

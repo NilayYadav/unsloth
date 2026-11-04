@@ -20,6 +20,7 @@ import {
   thinkToggleAriaLabel,
 } from "@/components/assistant-ui/think-aria-label";
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback";
+import { SubagentToolUI } from "@/components/assistant-ui/tool-ui-subagent";
 import { ToolGroup } from "@/components/assistant-ui/tool-group";
 import { CodeExecutionToolUI } from "@/components/assistant-ui/tool-ui-code-execution";
 import { ImageGenerationToolUI } from "@/components/assistant-ui/tool-ui-image-generation";
@@ -2542,6 +2543,7 @@ const AssistantMessage: FC = () => {
                 code_execution: CodeExecutionToolUI,
                 image_generation: ImageGenerationToolUI,
                 render_html: RenderHtmlToolUI,
+                spawn_subagent: SubagentToolUI,
               },
               Fallback: ToolFallback,
             },

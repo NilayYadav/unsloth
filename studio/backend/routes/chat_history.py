@@ -87,6 +87,8 @@ class ChatProject(BaseModel):
     instructions: str = ""
     rootPath: Optional[str] = None
     sandboxPath: Optional[str] = None
+    subagentsEnabled: bool = False
+    subagentEffort: Optional[Literal["low", "medium", "high"]] = None
     archived: bool = False
     createdAt: int
     updatedAt: int
@@ -95,6 +97,8 @@ class ChatProject(BaseModel):
 class ChatProjectPatch(BaseModel):
     name: Optional[str] = None
     instructions: Optional[str] = None
+    subagentsEnabled: Optional[bool] = None
+    subagentEffort: Optional[Literal["low", "medium", "high"]] = None
     archived: Optional[bool] = None
     createdAt: Optional[int] = None
     updatedAt: Optional[int] = None

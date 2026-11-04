@@ -63,6 +63,7 @@ import {
 } from "./external-providers";
 import { useChatModelRuntime } from "./hooks/use-chat-model-runtime";
 import { useChatProjects } from "./hooks/use-chat-projects";
+import { ProjectAgentsPanel } from "./components/project-agents-panel";
 import {
   type SidebarItem,
   useChatSidebarItems,
@@ -105,7 +106,7 @@ import {
   useSelectedChatArtifact,
 } from "./artifacts/store";
 import type { ChatArtifact, ChatArtifactSurface } from "./artifacts/types";
-import type { ChatView, MessageRecord } from "./types";
+import type { ChatView, MessageRecord, ProjectRecord } from "./types";
 import {
   getStoredChatThread,
   isExpectedBackgroundChatStorageError,
@@ -833,16 +834,20 @@ function extractMessageText(content: MessageRecord["content"]): string {
 function ProjectLanding({
   projectId,
   projectName,
+  project,
   items,
 }: {
   projectId: string;
   projectName: string;
+  project: ProjectRecord | null;
   items: SidebarItem[];
 }): ReactElement {
   const navigate = useNavigate();
   const activeThreadId = useChatRuntimeStore((s) => s.activeThreadId);
   const initialActiveThreadRef = useRef<string | null>(null);
-  const [projectTab, setProjectTab] = useState<"chats" | "sources">("chats");
+  const [projectTab, setProjectTab] = useState<
+    "chats" | "sources" | "agents"
+  >("chats");
   const [pendingNewThreadId, setPendingNewThreadId] = useState<string | null>(
     null,
   );
@@ -967,9 +972,19 @@ function ProjectLanding({
               >
                 Sources
               </button>
+              <button
+                type="button"
+                onClick={() => setProjectTab("agents")}
+                data-active={projectTab === "agents"}
+                className="h-10 rounded-full border px-5 text-[14px] font-semibold transition-colors data-[active=true]:border-border data-[active=true]:bg-muted data-[active=true]:text-foreground data-[active=false]:border-transparent data-[active=false]:text-muted-foreground data-[active=false]:hover:bg-nav-surface-hover"
+              >
+                Agents
+              </button>
             </div>
 
-            {projectTab === "sources" ? (
+            {projectTab === "agents" ? (
+              <ProjectAgentsPanel project={project} />
+            ) : projectTab === "sources" ? (
               <div className="mt-8 flex flex-col items-center justify-center gap-3 rounded-[16px] border border-dashed border-border/70 bg-muted/30 px-6 py-16 text-center">
                 <span className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
                   <HugeiconsIcon
@@ -2246,6 +2261,7 @@ export function ChatPage(): ReactElement {
             key={view.projectId}
             projectId={view.projectId}
             projectName={currentProject?.name ?? "Project"}
+            project={currentProject}
             items={currentProjectItems}
           />
         ) : view.mode === "single" ? (

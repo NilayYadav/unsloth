@@ -23,7 +23,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Generator, Iterable, List, Optional
+from typing import Callable, Generator, Iterable, List, Optional
 
 import httpx
 
@@ -4365,6 +4365,7 @@ class LlamaCppBackend:
         rag_scope: Optional[dict] = None,
         seed: Optional[int] = None,
         disable_parallel_tool_use: bool = False,
+        subagent_runner: Optional[Callable[[dict], Generator[dict, None, str]]] = None,
     ) -> Generator[dict, None, None]:
         """
         Agentic loop: let the model call tools, execute them, and continue.
@@ -4374,6 +4375,7 @@ class LlamaCppBackend:
           {"type": "content", "text": "token"}            -- streamed content tokens (cumulative)
           {"type": "reasoning", "text": "token"}          -- streamed reasoning tokens (cumulative)
         """
+        from core.inference.subagents import SUBAGENT_TOOL_NAME
         from core.inference.tools import build_rag_autoinject, execute_tool
 
         if not self.is_loaded:
@@ -5074,6 +5076,8 @@ class LlamaCppBackend:
                         and _kb_search_count >= RAG_MAX_SEARCHES_PER_TURN
                     ):
                         result = RAG_SEARCH_CAP_NUDGE
+                    elif subagent_runner is not None and decision.tool_name == SUBAGENT_TOOL_NAME:
+                        result = yield from subagent_runner(decision.arguments)
                     else:
                         result = execute_tool(
                             decision.tool_name,
