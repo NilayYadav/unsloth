@@ -395,6 +395,29 @@ def test_repeated_clear_operation_does_not_delete_later_threads(tmp_path, monkey
     assert studio_db.get_chat_thread("after-clear") is not None
 
 
+def test_chat_project_subagent_settings_round_trip(tmp_path, monkeypatch):
+    _reset_studio_db(tmp_path, monkeypatch)
+    project = studio_db.upsert_chat_project(_project())
+    assert project["subagentsEnabled"] is False
+    assert project["subagentEffort"] is None
+
+    project = studio_db.update_chat_project(
+        "project-1", {"subagentsEnabled": True, "subagentEffort": "high"}
+    )
+    assert project["subagentsEnabled"] is True
+    assert project["subagentEffort"] == "high"
+
+    project = studio_db.update_chat_project("project-1", {"name": "Renamed"})
+    assert project["subagentsEnabled"] is True
+
+    project = studio_db.upsert_chat_project({**_project(), "name": "Resaved"})
+    assert project["subagentsEnabled"] is True
+    assert project["subagentEffort"] == "high"
+
+    project = studio_db.update_chat_project("project-1", {"subagentEffort": None})
+    assert project["subagentEffort"] is None
+
+
 def test_chat_project_delete_files_removes_workspace(
     tmp_path, monkeypatch, workspace_projects_home
 ):

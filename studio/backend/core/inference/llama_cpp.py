@@ -37389,6 +37389,7 @@ class LlamaCppBackend:
         compact_context: bool = False,
         website_policy: Optional[dict] = None,
         live_permissions = None,
+        subagent_runner: Optional[Callable[[dict], Generator[dict, None, str]]] = None,
     ) -> Generator[dict, None, None]:
         """
         Agentic loop: let the model call tools, execute them, and continue.
@@ -37426,6 +37427,7 @@ class LlamaCppBackend:
             never_needs_approval,
         )
         from core.inference.mcp_image import note_attached_image
+        from core.inference.subagents import SUBAGENT_TOOL_NAME
 
         # full and bypass_permissions are one switch, first wins; off keeps the sandbox but never prompts; unset defaults to auto; unknown falls back to ask.
         from state.tool_policy import (
@@ -40238,13 +40240,20 @@ class LlamaCppBackend:
                         )
                         _pending_context_usage = None
                         try:
-                            result = yield from stream_tool_execution(
-                                _invoke_tool,
-                                tool_name = decision.tool_name,
-                                tool_call_id = decision.tool_call_id,
-                                cancel_event = cancel_event,
-                                started_events = _started_events,
-                            )
+                            if (
+                                subagent_runner is not None
+                                and decision.tool_name == SUBAGENT_TOOL_NAME
+                            ):
+                                yield from _started_events
+                                result = yield from subagent_runner(decision.arguments)
+                            else:
+                                result = yield from stream_tool_execution(
+                                    _invoke_tool,
+                                    tool_name = decision.tool_name,
+                                    tool_call_id = decision.tool_call_id,
+                                    cancel_event = cancel_event,
+                                    started_events = _started_events,
+                                )
                         except _LlamaStreamCancelled:
                             # Nudge only on evidence of truncation, since short results like OK can be complete; a false nudge makes the model discard a write or repeat it.
                             raise

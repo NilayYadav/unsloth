@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+import { SubagentToolUI } from "@/components/assistant-ui/tool-ui-subagent";
 import { ChevronDownStandardIcon } from "@/lib/chevron-icons";
 import { AiSpeechIcon, BookmarkIcon, FileSearchIcon, TrashIcon } from "@/lib/hugeicons-derived";
 import { createPortal } from "react-dom";
@@ -8193,6 +8194,7 @@ const ReadSkillToolUIConfirmable = withToolConfirmation((props) => (
   <ReadSkillToolUI {...props} />
 ));
 const ToolFallbackConfirmable = withToolConfirmation(ToolFallback);
+const SubagentToolUIConfirmable = withToolConfirmation(SubagentToolUI);
 
 /**
  * Module scope on purpose: `MessagePrimitivePartByIndex` compares `components.tools` by
@@ -8217,6 +8219,7 @@ const ASSISTANT_PART_COMPONENTS = {
       generate_image: ImageGenerationToolUIConfirmable,
       generate_video: VideoGenerationToolUIConfirmable,
       render_html: RenderHtmlToolUIConfirmable,
+      spawn_subagent: SubagentToolUIConfirmable,
     },
     Fallback: ToolFallbackConfirmable,
   },

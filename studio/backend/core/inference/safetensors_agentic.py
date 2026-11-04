@@ -21,6 +21,7 @@ from typing import Callable, Generator, Optional
 from loggers import get_logger
 
 from core.inference.llama_cpp import _has_answer_artifact
+from core.inference.subagents import SUBAGENT_TOOL_NAME
 from core.inference.tool_call_parser import (
     _GEMMA_BARE_TC_PREFIX_RE,
     _balanced_brace_end,
@@ -583,6 +584,7 @@ def run_safetensors_tool_loop(
     context_fitter: Optional[Callable[[list, list, list], dict]] = None,
     tool_choice = None,
     disable_parallel_tool_use: bool = False,
+    subagent_runner: Optional[Callable[[dict], Generator[dict, None, str]]] = None,
 ) -> Generator[dict, None, None]:
     """Yields status, content, tool_start and tool_end event dicts; content is cumulative text per turn."""
     if mcp_image is not None:
@@ -1645,12 +1647,15 @@ def run_safetensors_tool_loop(
                     return execute_tool(_decision.tool_name, _decision.arguments, **kwargs)
 
                 try:
-                    result = yield from stream_tool_execution(
-                        _invoke_tool,
-                        tool_name = decision.tool_name,
-                        tool_call_id = decision.tool_call_id,
-                        cancel_event = cancel_event,
-                    )
+                    if subagent_runner is not None and decision.tool_name == SUBAGENT_TOOL_NAME:
+                        result = yield from subagent_runner(decision.arguments)
+                    else:
+                        result = yield from stream_tool_execution(
+                            _invoke_tool,
+                            tool_name = decision.tool_name,
+                            tool_call_id = decision.tool_call_id,
+                            cancel_event = cancel_event,
+                        )
                 except Exception as exc:
                     logger.exception("Tool %s raised: %s", decision.tool_name, exc)
                     result = f"Error: tool raised an exception: {exc}"

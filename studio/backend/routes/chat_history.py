@@ -320,6 +320,8 @@ class ChatProject(BaseModel):
     sandboxPath: Optional[str] = None
     # Read only: a saved record cannot set the folder.
     workingFolder: Optional[str] = None
+    subagentsEnabled: bool = False
+    subagentEffort: Optional[Literal["low", "medium", "high"]] = None
     archived: bool = False
     createdAt: SqliteInt
     updatedAt: SqliteInt
@@ -348,6 +350,8 @@ class ChatProjectDeleted(ChatProject):
 class ChatProjectPatch(BaseModel):
     name: Optional[str] = None
     instructions: Optional[str] = None
+    subagentsEnabled: Optional[bool] = None
+    subagentEffort: Optional[Literal["low", "medium", "high"]] = None
     archived: Optional[bool] = None
     createdAt: Optional[SqliteInt] = None
     updatedAt: Optional[SqliteInt] = None
@@ -1417,7 +1421,7 @@ def patch_project(
     current_subject: str = Depends(get_current_subject),
 ):
     patch = payload.model_dump(exclude_unset = True)
-    for field in ("name", "archived", "createdAt", "updatedAt"):
+    for field in ("name", "archived", "subagentsEnabled", "createdAt", "updatedAt"):
         if field in patch and patch[field] is None:
             raise HTTPException(status_code = 400, detail = f"{field} cannot be null")
     project = update_chat_project(project_id, patch)

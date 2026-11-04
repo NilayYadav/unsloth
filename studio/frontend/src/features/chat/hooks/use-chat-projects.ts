@@ -6,7 +6,7 @@ import {
   CHAT_HISTORY_UPDATED_EVENT,
   CHAT_PROJECTS_UPDATED_EVENT,
 } from "../api/chat-api";
-import type { ProjectRecord } from "../types";
+import type { ProjectRecord, SubagentEffort } from "../types";
 import {
   createStoredChatProject,
   deleteStoredChatProject,
@@ -189,6 +189,13 @@ export async function updateChatProjectInstructions(
   instructions: string,
 ): Promise<void> {
   await updateStoredChatProject(projectId, { instructions: instructions.trim() });
+}
+
+export async function updateChatProjectSubagents(
+  projectId: string,
+  patch: { subagentsEnabled?: boolean; subagentEffort?: SubagentEffort | null },
+): Promise<void> {
+  await updateStoredChatProject(projectId, patch);
 }
 
 export async function deleteChatProject(

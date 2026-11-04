@@ -684,6 +684,7 @@ export interface OpenAIChatCompletionsRequest {
   max_tool_calls_per_message?: number;
   tool_call_timeout?: number;
   session_id?: string;
+  subagent_effort?: "low" | "medium" | "high";
   /** The user message that started this turn; keys the turn's file checkpoints for /rewind. */
   user_message_id?: string;
   cancel_id?: string;

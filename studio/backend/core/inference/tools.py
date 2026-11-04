@@ -6383,8 +6383,8 @@ _ALWAYS_SAFE_TOOLS = frozenset(
 
 
 def never_needs_approval(name: str) -> bool:
-    """search_conversation only reads this chat's own compacted turns (#11671)."""
-    return name == "search_conversation"
+    """search_conversation only reads this chat's own compacted turns (#11671); spawn_subagent's executors gate each call themselves."""
+    return name in ("search_conversation", "spawn_subagent")
 
 
 def is_always_safe_tool(name: str) -> bool:

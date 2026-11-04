@@ -321,7 +321,7 @@ import {
   toolPaneScope,
   toolThreadScope,
 } from "../tool-output-scope";
-import type { ModelType, ThreadRecord } from "../types";
+import type { ModelType, SubagentEffort, ThreadRecord } from "../types";
 import { isMultimodalResponse } from "../types/api";
 import type {
   CpuFallbackReason,
@@ -2320,6 +2320,7 @@ export async function buildLocalTokenCountExtras(
   const ragOn = ragEnabled || projectRagEnabled;
   // Same id the completion sends (resolveSandboxSessionId).
   const sessionId = sandboxSessionIdFor(threadId, ragProjectId);
+  const projectSubagents = await resolveProjectSubagents(ragProjectId);
 
   // re-fetch for every counted user turn so skills created since page load match request pricing.
   await settleSkillsForText(userTexts(messages).join("\n"));
@@ -2336,6 +2337,7 @@ export async function buildLocalTokenCountExtras(
     !mcpEnabledForChat &&
     !ragOn &&
     !deepResearchEnabled &&
+    !projectSubagents &&
     browserTools.length === 0 &&
     localMediaTools.length === 0 &&
     skillTools.length === 0
@@ -2368,7 +2370,9 @@ export async function buildLocalTokenCountExtras(
       ...skillTools,
       ...browserTools,
       ...localMediaTools,
+      ...(projectSubagents ? ["spawn_subagent"] : []),
     ],
+    ...(projectSubagents?.effort ? { subagent_effort: projectSubagents.effort } : {}),
     mcp_enabled: mcpEnabledForChat,
     ...(sessionId ? { session_id: sessionId } : {}),
     // Top level, not in rag_scope: archived threads add search_conversation regardless of RAG.
@@ -2432,6 +2436,15 @@ async function resolveUseAdapter(
   } catch {
     return undefined;
   }
+}
+
+async function resolveProjectSubagents(
+  projectId: string | null,
+): Promise<{ effort: SubagentEffort | null } | null> {
+  if (!projectId) return null;
+  const project = await getStoredChatProject(projectId).catch(() => null);
+  if (!project || project.archived || !project.subagentsEnabled) return null;
+  return { effort: project.subagentEffort ?? null };
 }
 
 async function resolveProjectInstructions(projectId: string | null): Promise<string> {
@@ -5040,6 +5053,7 @@ export function createOpenAIStreamAdapter(
       const projectRagEnabled = ragProjectId
         ? await projectHasSources(ragProjectId)
         : false;
+      const projectSubagents = await resolveProjectSubagents(ragProjectId);
       const externalSelection = parseExternalModelId(params.checkpoint);
       const isExternalRequest = externalSelection !== null;
       const externalRouting = resolveExternalRouting(params.checkpoint);
@@ -6940,7 +6954,8 @@ export function createOpenAIStreamAdapter(
                 skillTools.length > 0 ||
                 browserTools.length > 0 ||
                 localMediaTools.length > 0 ||
-                deepResearchArmed)
+                deepResearchArmed ||
+                projectSubagents)
               ? {
                   enable_tools: true,
                   enabled_tools: [
@@ -6955,7 +6970,11 @@ export function createOpenAIStreamAdapter(
                       : []),
                     ...browserTools,
                     ...localMediaTools,
+                    ...(projectSubagents ? ["spawn_subagent"] : []),
                   ],
+                  ...(projectSubagents?.effort
+                    ? { subagent_effort: projectSubagents.effort }
+                    : {}),
                   mcp_enabled: mcpEnabledForChat,
                   ...(ragEnabled || projectRagEnabled
                     ? {

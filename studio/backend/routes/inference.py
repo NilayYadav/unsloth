@@ -5802,6 +5802,28 @@ def _build_tool_action_nudge(
     full_access_only: bool = False,
     user_folder: bool = False,
 ) -> str:
+    nudge = _tool_action_nudge_body(
+        tools = tools,
+        model_name = model_name,
+        full_access = full_access,
+        full_access_only = full_access_only,
+        user_folder = user_folder,
+    )
+    if full_access_only:
+        return nudge
+    from core.inference.subagents import with_planner_nudge
+
+    return with_planner_nudge(nudge, tools)
+
+
+def _tool_action_nudge_body(
+    *,
+    tools: list[dict],
+    model_name: str,
+    full_access: bool = False,
+    full_access_only: bool = False,
+    user_folder: bool = False,
+) -> str:
     """full_access_only keeps just the environment sentences (Full access, project folder) and skills catalog, not the general guidance."""
     tool_names = {
         (tool.get("function") or {}).get("name")
@@ -6191,6 +6213,10 @@ async def _select_request_tools(
         from state.tool_policy import get_tool_policy
         if get_tool_policy() is not False:
             tools = tools + [DEEP_RESEARCH_TOOL]
+    if tools_on:
+        from core.inference.subagents import build_subagent_tool, subagents_requested
+        if subagents_requested(payload):
+            tools = tools + [build_subagent_tool(tools, getattr(payload, "subagent_effort", None))]
     delegated = _delegated_tool_names.get()
     if delegated is not None:
         tools = [tool for tool in tools if tool["function"]["name"] in delegated]
@@ -32130,9 +32156,49 @@ async def produce_openai_chat_completions(
 
             def gguf_generate_with_tools():
                 from core.inference.skill_mentions import load_mentioned_skills
+                from core.inference.subagents import has_subagent_tool, make_subagent_runner
                 from state.tool_approvals import LiveToolPermissions
 
                 gguf_live_permissions = LiveToolPermissions(payload.session_id, cancel_event)
+                gguf_subagent_runner = None
+                if has_subagent_tool(tools_to_use):
+
+                    def _gguf_subagent_loop(sub_messages, sub_tools, sub_effort, sub_budget):
+                        return llama_backend.generate_chat_completion_with_tools(
+                            live_permissions = gguf_live_permissions,
+                            messages = sub_messages,
+                            tools = sub_tools,
+                            temperature = payload.temperature,
+                            top_p = payload.top_p,
+                            top_k = payload.top_k,
+                            min_p = payload.min_p,
+                            max_tokens = effective_max_tokens,
+                            repetition_penalty = payload.repetition_penalty,
+                            presence_penalty = payload.presence_penalty,
+                            cancel_event = cancel_event,
+                            enable_thinking = sub_effort != "low",
+                            reasoning_effort = sub_effort,
+                            auto_heal_tool_calls = _gguf_auto_heal_tool_calls,
+                            max_tool_iterations = sub_budget if sub_tools else 0,
+                            tool_call_timeout = payload.tool_call_timeout
+                            if payload.tool_call_timeout is not None
+                            else 300,
+                            session_id = payload.session_id,
+                            thread_id = payload.thread_id,
+                            rag_scope = payload.rag_scope,
+                            confirm_tool_calls = _effective_confirm
+                            and not bool(payload.bypass_permissions),
+                            bypass_permissions = bool(payload.bypass_permissions),
+                            permission_mode = payload.permission_mode,
+                            sandbox_level = payload.sandbox_level,
+                        )
+
+                    gguf_subagent_runner = make_subagent_runner(
+                        run_loop = _gguf_subagent_loop,
+                        parent_tools = tools_to_use,
+                        fixed_effort = payload.subagent_effort,
+                        cancel_event = cancel_event,
+                    )
 
                 skill_instruction_ids = set()
                 yield from load_mentioned_skills(
@@ -32207,6 +32273,7 @@ async def produce_openai_chat_completions(
                     context_policy = _request_context_policy(payload),
                     compaction_headroom_ratio = _request_compaction_headroom_ratio(payload),
                     compact_context = getattr(payload, "compact_context", None) is True,
+                    subagent_runner = gguf_subagent_runner,
                 )
 
             _tool_admission_mode = "chat_tool_stream" if payload.stream else "chat_tool_nonstream"
@@ -34177,6 +34244,60 @@ async def produce_openai_chat_completions(
             {"website_policy": _sf_website_policy} if _sf_website_policy else {}
         )
 
+        from core.inference.subagents import has_subagent_tool, make_subagent_runner
+
+        _sf_subagent_runner = None
+        if has_subagent_tool(_sf_tools_to_use):
+
+            def _sf_subagent_loop(sub_messages, sub_tools, sub_effort, sub_budget):
+                sub_sampling = dict(
+                    temperature = payload.temperature,
+                    top_p = payload.top_p,
+                    top_k = payload.top_k,
+                    min_p = payload.min_p,
+                    repetition_penalty = payload.repetition_penalty,
+                    cancel_event = cancel_event,
+                    enable_thinking = sub_effort != "low",
+                    reasoning_effort = sub_effort,
+                )
+                if not sub_tools:
+                    for text in backend.generate_chat_response(
+                        messages = sub_messages,
+                        max_new_tokens = effective_max_tokens or 2048,
+                        **sub_sampling,
+                    ):
+                        if isinstance(text, str):
+                            yield {"type": "content", "text": text}
+                    return
+                yield from backend.generate_chat_completion_with_tools(
+                    messages = sub_messages,
+                    tools = sub_tools,
+                    system_prompt = "",
+                    max_tokens = effective_max_tokens,
+                    auto_heal_tool_calls = _sf_auto_heal_tool_calls,
+                    max_tool_iterations = sub_budget,
+                    tool_call_timeout = payload.tool_call_timeout
+                    if payload.tool_call_timeout is not None
+                    else 300,
+                    session_id = payload.session_id,
+                    thread_id = payload.thread_id,
+                    rag_scope = payload.rag_scope,
+                    confirm_tool_calls = _sf_effective_confirm
+                    and not bool(payload.bypass_permissions),
+                    bypass_permissions = bool(payload.bypass_permissions),
+                    permission_mode = payload.permission_mode,
+                    sandbox_level = payload.sandbox_level,
+                    use_adapter = payload.use_adapter,
+                    **sub_sampling,
+                )
+
+            _sf_subagent_runner = make_subagent_runner(
+                run_loop = _sf_subagent_loop,
+                parent_tools = _sf_tools_to_use,
+                fixed_effort = payload.subagent_effort,
+                cancel_event = cancel_event,
+            )
+
         def sf_generate_with_tools():
             return backend.generate_chat_completion_with_tools(
                 messages = _sf_chat_messages,
@@ -34226,6 +34347,7 @@ async def produce_openai_chat_completions(
                 context_policy = _request_context_policy(payload),
                 compaction_headroom_ratio = _request_compaction_headroom_ratio(payload),
                 compact_context = getattr(payload, "compact_context", None) is True,
+                subagent_runner = _sf_subagent_runner,
                 **_sf_website_policy_kwargs,
             )
 

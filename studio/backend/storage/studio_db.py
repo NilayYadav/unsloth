@@ -449,6 +449,12 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE chat_projects ADD COLUMN working_folder TEXT")
     if "working_folder_identity" not in chat_project_cols:
         conn.execute("ALTER TABLE chat_projects ADD COLUMN working_folder_identity TEXT")
+    if "subagents_enabled" not in chat_project_cols:
+        conn.execute(
+            "ALTER TABLE chat_projects ADD COLUMN subagents_enabled INTEGER NOT NULL DEFAULT 0"
+        )
+    if "subagent_effort" not in chat_project_cols:
+        conn.execute("ALTER TABLE chat_projects ADD COLUMN subagent_effort TEXT")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_chat_projects_archived_updated_at ON chat_projects(archived, updated_at)"
     )
@@ -2181,6 +2187,8 @@ def _chat_project_from_row(row: sqlite3.Row) -> dict:
         "sandboxPath": os.path.join(root_path, "sandbox") if root_path else None,
         "workingFolder": data.get("working_folder") or None,
         "workingFolderIdentity": data.get("working_folder_identity") or None,
+        "subagentsEnabled": bool(data.get("subagents_enabled")),
+        "subagentEffort": data.get("subagent_effort") or None,
         "archived": bool(data["archived"]),
         "createdAt": data["created_at"],
         "updatedAt": data["updated_at"],
@@ -3242,6 +3250,8 @@ def update_chat_project(id: str, patch: dict) -> Optional[dict]:
     allowed = {
         "name": ("name", patch.get("name")),
         "instructions": ("instructions", patch.get("instructions")),
+        "subagentsEnabled": ("subagents_enabled", 1 if patch.get("subagentsEnabled") else 0),
+        "subagentEffort": ("subagent_effort", patch.get("subagentEffort") or None),
         "archived": ("archived", 1 if patch.get("archived") else 0),
         "createdAt": ("created_at", patch.get("createdAt")),
         "updatedAt": ("updated_at", patch.get("updatedAt")),

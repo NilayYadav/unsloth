@@ -3692,6 +3692,7 @@ class InferenceOrchestrator:
         compact_context: bool = False,
         tool_choice = None,
         disable_parallel_tool_use: bool = False,
+        subagent_runner = None,
         **_unused,
     ):
         """Run the safetensors agentic tool loop in the parent process, calling the worker for each
@@ -3885,6 +3886,7 @@ class InferenceOrchestrator:
             context_fitter = _fit_iteration,
             tool_choice = tool_choice,
             disable_parallel_tool_use = disable_parallel_tool_use,
+            subagent_runner = subagent_runner,
         )
 
     def generate_with_adapter_control(
