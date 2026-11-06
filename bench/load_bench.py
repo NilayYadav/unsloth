@@ -128,7 +128,8 @@ async def one(p, init, info, rep) -> dict:
                   "anchor_sum_move": round(sum(moves), 3)}
     out = {"rep": rep, **out_anchor, "t_textarea": res["textarea"], "t_first_msg": first, "t_all_msgs": allm, "t_settled": settled,
            "final_msgs": samples[-1][1] if samples else 0, "final_parked": samples[-1][2] if samples else 0,
-           "long_frames": len(longg), "long_frames_ms": sum(longg), "max_gap_ms": max(gaps) if gaps else None,
+           "long_frames": len(longg), "frames_over_250": sum(1 for g in gaps if g > 250),
+           "frames_over_500": sum(1 for g in gaps if g > 500), "long_frames_ms": sum(longg), "max_gap_ms": max(gaps) if gaps else None,
            "frames": len(gaps), "timeline": samples[:400], "anchor_trace": anchor[:3000], **shape}
     print("LOAD", json.dumps({"arm": a.arm, "engine": eng, "material": a.material,
                               **{k: v for k, v in out.items() if k not in ("timeline", "anchor_trace")}}), flush=True)
