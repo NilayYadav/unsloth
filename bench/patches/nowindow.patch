@@ -1,0 +1,13 @@
+diff --git a/studio/frontend/src/components/assistant-ui/windowed-message-body.tsx b/studio/frontend/src/components/assistant-ui/windowed-message-body.tsx
+index 2d4d2b55b1..ddaa717dc3 100644
+--- a/studio/frontend/src/components/assistant-ui/windowed-message-body.tsx
++++ b/studio/frontend/src/components/assistant-ui/windowed-message-body.tsx
+@@ -8,7 +8,7 @@ import { isWebKitGTK } from "@/components/ui/theme-view-transition";
+ import { observeMessageWindow } from "./message-window-controller";
+ import { useAdjustForContentInsertedAbove } from "./use-intent-aware-autoscroll";
+ 
+-const ENABLED = typeof navigator !== "undefined"
++const ENABLED = Date.now() < 0 && typeof navigator !== "undefined"
+   && isWebKitGTK(navigator.platform, navigator.userAgent);
+ 
+ export function WindowedMessageBody({ children, enabled = true }: {

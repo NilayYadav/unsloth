@@ -1,0 +1,13 @@
+diff --git a/studio/frontend/src/components/assistant-ui/progressive-messages.tsx b/studio/frontend/src/components/assistant-ui/progressive-messages.tsx
+index 292731b894..92c8879d48 100644
+--- a/studio/frontend/src/components/assistant-ui/progressive-messages.tsx
++++ b/studio/frontend/src/components/assistant-ui/progressive-messages.tsx
+@@ -42,7 +42,7 @@ import { isWebKitGTK } from "@/components/ui/theme-view-transition";
+ 
+ const WEBKIT_GTK = typeof navigator !== "undefined"
+   && isWebKitGTK(navigator.platform, navigator.userAgent);
+-const MOUNT_CHUNK = WEBKIT_GTK ? 2 : CHUNK_MESSAGES;
++const MOUNT_CHUNK = CHUNK_MESSAGES;
+ const ANCHOR_PRECISION = WEBKIT_GTK ? 1 / 64 : 1;
+ 
+ /** Module-level: consumers are imperative DOM readers, and a thread can mount twice (Compare). */

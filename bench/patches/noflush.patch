@@ -1,0 +1,13 @@
+diff --git a/studio/frontend/src/components/assistant-ui/progressive-messages.tsx b/studio/frontend/src/components/assistant-ui/progressive-messages.tsx
+index 292731b894..b8d59a1cdb 100644
+--- a/studio/frontend/src/components/assistant-ui/progressive-messages.tsx
++++ b/studio/frontend/src/components/assistant-ui/progressive-messages.tsx
+@@ -331,7 +331,7 @@ function useProgressiveMountWindow(
+         setMountWindow((current) => widen(current, count, MOUNT_CHUNK));
+       };
+       // Keep the prepend and its scroll correction inside the same WebKit rendering frame.
+-      if (WEBKIT_GTK) flushSync(commit);
++      if (WEBKIT_GTK && Date.now() < 0) flushSync(commit);
+       else startTransition(commit);
+     };
+     frame = requestAnimationFrame(advance);
