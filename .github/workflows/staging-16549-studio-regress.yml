@@ -1,0 +1,147 @@
+name: staging-16549 bookmark browser check
+'on':
+  push:
+    branches:
+    - pr-16549-bookmarks-ci
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: bookmarks-16549-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ui-indicator:
+    name: Loaded-models indicator (cross-browser)
+    runs-on: ubuntu-latest
+    env:
+      UNSLOTH_DISABLE_UPDATE_CHECK: '1'
+      CUDA_VISIBLE_DEVICES: ''
+      UNSLOTH_NO_LOCAL_GPU: '1'
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        repository: unslothai/unsloth
+        ref: 3f4c1abaeec224a822f554a4c84b9034eb8d249a
+        persist-credentials: false
+    - name: Linux deps
+      timeout-minutes: 20
+      env:
+        RETRY_ATTEMPTS: '2'
+        RETRY_ATTEMPT_TIMEOUT: '360'
+      run: "bash .github/scripts/retry-with-apt-lock.sh sudo sh -c \\\n  'apt-get\
+        \ install -y --no-install-recommends libcurl4-openssl-dev libssl-dev jq ||\
+        \ { apt-get update && apt-get install -y --no-install-recommends libcurl4-openssl-dev\
+        \ libssl-dev jq; }'\n"
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+      with:
+        node-version: '22'
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+      with:
+        python-version: '3.12'
+    - name: Install Unsloth (--local, --no-torch)
+      uses: ./.github/actions/install-unsloth-local
+      with:
+        gh-token: ${{ secrets.GITHUB_TOKEN }}
+        hf-token: ${{ github.event_name != 'pull_request' && secrets.HF_TOKEN || ''
+          }}
+    - name: Pin the Playwright version so the browser cache has a key
+      id: pw
+      run: 'pip install ''playwright>=1.45,<2''
+
+        echo "version=$(python -c ''import playwright; from importlib.metadata import
+        version; print(version("playwright"))'')" >> "$GITHUB_OUTPUT"
+
+        '
+    - name: Restore the Playwright browser cache
+      id: pw-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      continue-on-error: true
+      with:
+        path: ~/.cache/ms-playwright
+        key: ms-playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-cfw-v2
+    - name: Restore the apt archive cache (webkit's .deb set)
+      id: apt-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      continue-on-error: true
+      with:
+        path: ${{ github.workspace }}/.apt-archives
+        key: apt-archives-${{ runner.os }}-${{ env.ImageOS }}-${{ env.ImageVersion
+          }}-cfw-v1
+    - name: Install Playwright browsers
+      id: pw-install
+      timeout-minutes: 25
+      env:
+        RETRY_ATTEMPTS: '2'
+        RETRY_ATTEMPT_TIMEOUT: '300'
+        APT_ACQUIRE_RETRIES: '0'
+      run: "# No --with-deps: it runs its own unbounded `apt-get update`.\nif [ \"\
+        ${{ steps.pw-cache.outputs.cache-hit }}\" != \"true\" ]; then\n  bash .github/scripts/retry-with-apt-lock.sh\
+        \ \\\n    python -m playwright install chromium firefox webkit\nfi\n\n# Probe\
+        \ whether the system libraries are actually missing before running apt.\n\
+        probe() {\n  python - \"$@\" <<'PY'\nimport sys\nfrom playwright.sync_api\
+        \ import sync_playwright\n\nmissing = []\nwith sync_playwright() as p:\n \
+        \   for name in sys.argv[1:]:\n        try:\n            browser = getattr(p,\
+        \ name).launch()\n            browser.close()\n        except Exception as\
+        \ exc:\n            missing.append(f\"{name}: {type(exc).__name__}\")\nif\
+        \ missing:\n    print(\"engines that will not start: \" + \"; \".join(missing))\n\
+        \    sys.exit(1)\nprint(\"all three engines launch; system libraries are present\"\
+        )\nPY\n}\n\nif probe chromium firefox webkit; then\n  echo \"::notice::skipped\
+        \ playwright install-deps; the runner image already has the libraries\"\n\
+        else\n  echo \"system libraries are missing, installing them\"\n  # Reuse\
+        \ last run's .debs; apt re-fetches any that do not match its index.\n  if\
+        \ [ -d \"${{ github.workspace }}/.apt-archives\" ]; then\n    sudo cp \"${{\
+        \ github.workspace }}\"/.apt-archives/*.deb /var/cache/apt/archives/ 2>/dev/null\
+        \ || true\n    echo \"seeded $(ls \"${{ github.workspace }}\"/.apt-archives/*.deb\
+        \ 2>/dev/null | wc -l) cached .deb files\"\n  fi\n  bash .github/scripts/retry-with-apt-lock.sh\
+        \ \\\n    python -m playwright install-deps chromium firefox webkit\n  mkdir\
+        \ -p \"${{ github.workspace }}/.apt-archives\"\n  sudo cp /var/cache/apt/archives/*.deb\
+        \ \"${{ github.workspace }}/.apt-archives/\" 2>/dev/null || true\n  sudo chown\
+        \ -R \"$(id -u):$(id -g)\" \"${{ github.workspace }}/.apt-archives\" || true\n\
+        \  # Fail loudly here rather than as an opaque per-test timeout later.\n \
+        \ probe chromium firefox webkit\nfi\n"
+    - name: Save the apt archive cache
+      if: (github.ref == 'refs/heads/main' || (github.ref == 'refs/heads/upstream-main'
+        && github.repository != 'unslothai/unsloth')) && steps.apt-cache.outputs.cache-hit
+        != 'true'
+      continue-on-error: true
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      with:
+        path: ${{ github.workspace }}/.apt-archives
+        key: ${{ steps.apt-cache.outputs.cache-primary-key }}
+    - name: Save the Playwright browser cache
+      if: always() && (github.ref == 'refs/heads/main' || (github.ref == 'refs/heads/upstream-main'
+        && github.repository != 'unslothai/unsloth')) && steps.pw-cache.outputs.cache-hit
+        != 'true' && steps.pw-install.outcome == 'success'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      continue-on-error: true
+      with:
+        path: ~/.cache/ms-playwright
+        key: ms-playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-cfw-v2
+    - name: Cross-browser loaded-models indicator
+      run: "mkdir -p logs\ninstalled_home=\"${UNSLOTH_STUDIO_HOME:-$HOME/.unsloth/studio}\"\
+        \ntest -x \"$installed_home/unsloth_studio/bin/python\" \\\n  || { echo \"\
+        ::error::no studio venv under $installed_home\"; exit 1; }\npids=\"\"\nfor\
+        \ spec in \"18899 chromium\" \"18900 firefox\" \"18901 webkit\"; do\n  port=\"\
+        ${spec% *}\"\n  engine=\"${spec#* }\"\n  home=\"${{ github.workspace }}/.studio-indicator-$engine\"\
+        \n  mkdir -p \"$home\"\n  ln -sfn \"$installed_home/unsloth_studio\" \"$home/unsloth_studio\"\
+        \n  UNSLOTH_STUDIO_HOME=\"$home\" \\\n    bash .github/scripts/run-studio-indicator-browser.sh\
+        \ \"$port\" \"$engine\" \\\n    >\"logs/indicator-$engine.out\" 2>&1 &\n \
+        \ pids=\"$pids $!:$engine\"\ndone\n# Wait on all engines so one failure does\
+        \ not hide another.\nrc=0\nfor entry in $pids; do\n  if ! wait \"${entry%%:*}\"\
+        ; then\n    echo \"::error::loaded-models indicator failed in ${entry##*:}\"\
+        \n    rc=1\n  fi\ndone\nfor f in logs/indicator-*.out; do\n  echo \"::group::$f\"\
+        \n  cat \"$f\"\n  echo \"::endgroup::\"\ndone\nexit \"$rc\"\n"
+    - name: Upload Playwright artifacts
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+      with:
+        name: studio-ui-indicator-artifacts
+        path: 'logs/playwright-indicator-*
+
+          logs/studio-indicator-*.log
+
+          logs/indicator-*.out
+
+          '
+        retention-days: 1
