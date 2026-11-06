@@ -38,8 +38,32 @@ REC = r"""
 (() => {
   const S = window.__load = {samples: [], gaps: [], textarea: null};
   let last = null;
+  // Reader stability: the row at the viewport centre, picked once (re-picked if it leaves the DOM), and its top
+  // relative to the viewport every frame, recorded on change. The bench never scrolls, so any move is the app's.
+  S.anchor = [];
+  let row = null, prev = null;
+  const track = (t) => {
+    const vp = document.querySelector('.aui-thread-viewport');
+    if (!vp) return;
+    const box = vp.getBoundingClientRect();
+    if (!row || !row.isConnected) {
+      row = null;
+      const rows = vp.querySelectorAll('[data-role][data-message-id]');
+      const mid = box.top + box.height / 2;
+      for (let i = rows.length - 1; i >= Math.max(0, rows.length - 24); i--) {
+        const r = rows[i].getBoundingClientRect();
+        if (r.top <= mid && r.bottom > mid) { row = rows[i]; break; }
+      }
+      if (!row) return;
+      S.anchor.push([Math.round(t), 'pick', row.getAttribute('data-message-id')]);
+      prev = null;
+    }
+    const top = row.getBoundingClientRect().top - box.top;
+    if (prev === null || top !== prev) S.anchor.push([Math.round(t), top, vp.scrollTop, vp.scrollHeight - vp.scrollTop - vp.clientHeight]);
+    prev = top;
+  };
   const tick = (t) => { if (last !== null) S.gaps.push([Math.round(t), Math.round(t - last)]); last = t;
-                        if (!S.stop) requestAnimationFrame(tick); };
+                        if (!S.stop) { if (S.textarea !== null) track(t); requestAnimationFrame(tick); } };
   requestAnimationFrame(tick);
   const sample = () => {
     if (S.stop) return;
@@ -84,12 +108,30 @@ async def one(p, init, info, rep) -> dict:
     upto = allm or settled or 0
     gaps = [g for t, g in res["gaps"] if t <= upto]
     longg = [g for g in gaps if g > 50]
-    out = {"rep": rep, "t_textarea": res["textarea"], "t_first_msg": first, "t_all_msgs": allm, "t_settled": settled,
+    # Anchor moves from the first pick + 1 s (initial tail pin and first paint settle) to all mounted + 1 s.
+    anchor = res.get("anchor", [])
+    picks = [x for x in anchor if x[1] == "pick"]
+    lo = (picks[0][0] + 1000) if picks else None
+    hi = (allm or settled or 0) + 1000
+    moves = []
+    prevtop = None
+    for x in anchor:
+        if x[1] == "pick":
+            prevtop = None
+            continue
+        if prevtop is not None and lo is not None and lo <= x[0] <= hi:
+            moves.append(abs(x[1] - prevtop))
+        prevtop = x[1]
+    out_anchor = {"anchor_picks": len(picks), "anchor_moves": sum(1 for m in moves if m >= 1),
+                  "anchor_subpx_moves": sum(1 for m in moves if 0 < m < 1),
+                  "anchor_max_move": round(max(moves), 3) if moves else 0,
+                  "anchor_sum_move": round(sum(moves), 3)}
+    out = {"rep": rep, **out_anchor, "t_textarea": res["textarea"], "t_first_msg": first, "t_all_msgs": allm, "t_settled": settled,
            "final_msgs": samples[-1][1] if samples else 0, "final_parked": samples[-1][2] if samples else 0,
            "long_frames": len(longg), "long_frames_ms": sum(longg), "max_gap_ms": max(gaps) if gaps else None,
-           "frames": len(gaps), "timeline": samples[:400], **shape}
+           "frames": len(gaps), "timeline": samples[:400], "anchor_trace": anchor[:3000], **shape}
     print("LOAD", json.dumps({"arm": a.arm, "engine": eng, "material": a.material,
-                              **{k: v for k, v in out.items() if k != "timeline"}}), flush=True)
+                              **{k: v for k, v in out.items() if k not in ("timeline", "anchor_trace")}}), flush=True)
     return out
 
 

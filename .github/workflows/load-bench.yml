@@ -1,7 +1,7 @@
 name: load-bench
 on:
   push:
-    branches: ["bench/load-ci"]
+    branches: ["bench/load-fix"]
 permissions:
   contents: read
 jobs:
@@ -23,7 +23,7 @@ jobs:
       - name: Long-thread load time, WebKit, arms interleaved (3 rounds, Glass off and on)
         env:
           BENCH_WORK: ${{ runner.temp }}/lagbench
-          LOAD_ARMS: at16902=bench/at16902,main-now=bench/main-now,chunk32=bench/main-now+chunk32.patch,nowindow=bench/main-now+nowindow.patch,noflush=bench/main-now+noflush.patch
+          LOAD_ARMS: at16902=bench/at16902,main-now=bench/main-now,fix=bench/main-now+fix.patch,fixjump=bench/main-now+fixjump.patch
           LOAD_ROUNDS: "3"
           LOAD_TURNS: "1 150"
           LOAD_ENGINE: webkit
