@@ -12,7 +12,7 @@ index 7fde7fe6dd..6f19d672a8 100644
  const controllers = new WeakMap<HTMLElement, MessageWindowController>();
  
 diff --git a/studio/frontend/src/components/assistant-ui/progressive-messages.tsx b/studio/frontend/src/components/assistant-ui/progressive-messages.tsx
-index 292731b894..8b1beac594 100644
+index 292731b894..f2ebffb651 100644
 --- a/studio/frontend/src/components/assistant-ui/progressive-messages.tsx
 +++ b/studio/frontend/src/components/assistant-ui/progressive-messages.tsx
 @@ -29,6 +29,7 @@ import {
@@ -49,7 +49,7 @@ index 292731b894..8b1beac594 100644
      | null
    >(null);
    const idleRef = useRef<HeldAnchor | null>(null);
-+  const chunkRef = useRef(MOUNT_CHUNK);
++  const chunkRef = useRef(0);
    const scrollActivity = useRef<ReturnType<typeof watchProgressiveScroll> | null>(null);
  
    useEffect(() => {
@@ -82,22 +82,23 @@ index 292731b894..8b1beac594 100644
      if (mountWindow == null) {
        idleRef.current = null;
 +      // The next thread's first steps start small again.
-+      chunkRef.current = MOUNT_CHUNK;
++      chunkRef.current = 0;
        return;
      }
      let frame = 0;
 diff --git a/studio/frontend/src/components/assistant-ui/progressive-mount-controller.ts b/studio/frontend/src/components/assistant-ui/progressive-mount-controller.ts
-index 33f444b2d0..6f65f8b6d6 100644
+index 33f444b2d0..aea92c0d44 100644
 --- a/studio/frontend/src/components/assistant-ui/progressive-mount-controller.ts
 +++ b/studio/frontend/src/components/assistant-ui/progressive-mount-controller.ts
-@@ -94,6 +94,22 @@ export function widen(current: MountWindow, count: number, chunk = CHUNK_MESSAGE
+@@ -94,6 +94,23 @@ export function widen(current: MountWindow, count: number, chunk = CHUNK_MESSAGE
    return { start };
  }
  
 +/**
 + * WebKitGTK step size. Rows prepended within `reach` px above the viewport top stay unparked and can
 + * move what the reader sees, so they mount `near` at a time; past that they are parked as they land,
-+ * so the step grows fourfold per frame up to `max` (each commit has a fixed cost there).
++ * so the step grows fourfold per frame up to `max` (each commit has a fixed cost there). `previous`
++ * is 0 before the first step, which stays `near` so it does not delay the tail's first paint.
 + */
 +export function nextMountChunk(
 +  previous: number,
@@ -107,7 +108,7 @@ index 33f444b2d0..6f65f8b6d6 100644
 +  max = CHUNK_MESSAGES,
 +): number {
 +  if (frontierAbovePx == null || !(frontierAbovePx > reach)) return near;
-+  return Math.min(16, Math.max(near, previous) * 4);
++  return Math.min(16, Math.max(near, previous * 4));
 +}
 +
  /** Out-of-window indices are not rendered at all: hiding would not avoid the mount cost. */
