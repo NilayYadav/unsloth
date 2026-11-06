@@ -1,3 +1,4 @@
+# retrigger: macOS arm64 runner was not acquired on the first attempt
 name: menus-bench
 on:
   push:
