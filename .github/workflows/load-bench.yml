@@ -1,7 +1,7 @@
 name: load-bench
 on:
   push:
-    branches: ["bench/load-fix"]
+    branches: ["bench/load-fix-chromium"]
 permissions:
   contents: read
 jobs:
@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [a, b]
+        runner: [c]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -23,11 +23,11 @@ jobs:
       - name: Long-thread load time, WebKit, arms interleaved (3 rounds, Glass off and on)
         env:
           BENCH_WORK: ${{ runner.temp }}/lagbench
-          LOAD_ARMS: at16902=bench/at16902,main-now=bench/main-now,fix=bench/main-now+fix.patch,fixjump=bench/main-now+fixjump.patch
+          LOAD_ARMS: main-now=bench/main-now,fix=bench/main-now+fix.patch
           LOAD_ROUNDS: "3"
           LOAD_TURNS: "1 150"
-          LOAD_ENGINE: webkit
-          LOAD_MATERIALS: solid,glass
+          LOAD_ENGINE: chromium
+          LOAD_MATERIALS: solid
         run: |
           mkdir -p job/out
           cp bench/pack_menus.tgz job/
