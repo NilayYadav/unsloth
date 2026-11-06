@@ -24,10 +24,10 @@ jobs:
         run: |
           mkdir -p job/out
           git ls-remote https://github.com/danielhanchen/unsloth-staging-2 "refs/heads/bench/wo-*" | tee job/out/arm_ref.txt
-      - name: Menu bench, base vs fix on one runner (1-turn vs 150-turn thread, Solid)
+      - name: Menu bench, base vs fix vs components on one runner (1-turn vs 150-turn thread, Solid)
         env:
           BENCH_WORK: ${{ runner.temp }}/lagbench
-          MENU_ARM_REFS: wo-base=bench/wo-base,wo-fix=bench/wo-fix
+          MENU_ARM_REFS: wo-base=bench/wo-base,wo-fix=bench/wo-fix,wo-shim=bench/wo-shim,wo-blur=bench/wo-blur
           MENU_GLASS: "0"
           MENU_REPS: "2"
           MENU_TURNS: "1 150"
