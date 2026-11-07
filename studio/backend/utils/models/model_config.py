@@ -1518,6 +1518,17 @@ def is_vision_model(
     )
 
 
+def audio_vlm_vision_checked(
+    model_name: str,
+    hf_token: Optional[str] = None,
+    local_files_only: bool = False,
+    revision: Optional[str] = None,
+) -> Tuple[bool, bool]:
+    """(declares a vision tower, config.json readable). Raw config, not AutoConfig: that probe cannot run repo code."""
+    raw = _raw_config_has_vision_config(model_name, hf_token, local_files_only, revision)
+    return bool(raw), raw is not None
+
+
 def is_vision_model_checked(
     model_name: str,
     hf_token: Optional[str] = None,
