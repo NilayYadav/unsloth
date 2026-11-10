@@ -2928,6 +2928,15 @@ function useStudioRuntimeAdapters(
             remoteId,
           );
         }
+        const shownThreadId = aui.threads().getState().mainThreadId;
+        if (
+          !msgs.length &&
+          (shownThreadId === remoteId ||
+            shownThreadId === aui.threadListItem().getState().id)
+        ) {
+          // Importing an empty history clears the thread, and with it a message sent during the load.
+          return completeLoad(aui.thread().export(), remoteId);
+        }
         return completeLoad(
           ExportedMessageRepository.fromArray(msgs.map(toThreadMessage)),
           remoteId,
