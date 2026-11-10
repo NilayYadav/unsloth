@@ -17,6 +17,7 @@ ATTACHMENT_MESSAGE_ID = "chat-attachment-message"
 ATTACHMENT_ID = "chat-attachment-id"
 
 PROJECT_ID = "chat-project"
+AGENT_ID = "chat-agent"
 
 FORK_THREAD_ID = "chat-fork-source-thread"
 FORK_MESSAGE_ID = "chat-fork-source-message"
@@ -139,6 +140,19 @@ def seed_chat_project_for_delete(account) -> dict[str, str]:
     return {"project_id": PROJECT_ID}
 
 
+@seeder("chat-agent")
+def seed_chat_agent_for_delete(account) -> dict[str, str]:
+    from storage import studio_db
+    from utils.account_context import run_as
+
+    run_as(
+        account,
+        studio_db.upsert_chat_agent,
+        {"id": AGENT_ID, "name": CHAT_SENTINEL, "createdAt": 1000, "updatedAt": 1000},
+    )
+    return {"agent_id": AGENT_ID}
+
+
 @seeder("chat-fork-source")
 def seed_chat_fork_source(account) -> dict[str, str]:
     from storage import studio_db
@@ -185,6 +199,7 @@ FACTORIES = {
     "routes.chat_history:DELETE:/attachments/{message_id}/{attachment_id}": Factory(
         "chat-attachment", fragment = '"ok":true'
     ),
+    "routes.chat_history:DELETE:/agents/{agent_id}": Factory("chat-agent", success = 204),
     "routes.chat_history:DELETE:/projects/{project_id}": Factory(
         "chat-project", fragment = CHAT_SENTINEL
     ),

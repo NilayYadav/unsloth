@@ -215,6 +215,7 @@ import {
   useChatProjects,
 } from "@/features/chat/hooks/use-chat-projects";
 import { NewProjectDialog } from "@/features/chat/components/new-project-dialog";
+import { AgentsMenuItem } from "@/features/chat/agents/agents-menu-item";
 import { ResearchMessage } from "@/features/chat/components/research-message";
 import {
   DeepResearchComposerButton,
@@ -7421,6 +7422,7 @@ const ComposerToolsMenu: FC<{
         </DropdownMenuSubContent>
       </DropdownMenuSub>
     ),
+    agents: <AgentsMenuItem />,
   };
   const { pinned: pinnedPlusItems, overflow: overflowPlusItems } =
     splitPlusMenuItems(plusOrder, plusPins);

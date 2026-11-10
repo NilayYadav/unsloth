@@ -72,6 +72,7 @@ import {
   useDeviceInventorySources,
 } from "@/features/hub/inventory";
 import { modelIdsMatch } from "@/features/hub/lib/model-identity";
+import { useChatAgentsStore } from "./agents/agents-store";
 import { ChatHeaderMenu } from "./components/chat-header-menu";
 import { DeleteChatFilesSwitch } from "./components/delete-chat-files-switch";
 import { chatLocalModelOptions } from "./local-model-options";
@@ -4569,6 +4570,20 @@ export function ChatPage({
     },
     [handleCheckpointChange, loraModels],
   );
+  // Start chat on an agent is the pick: its chat loads the agent's model as the picker would.
+  const agentModelLoad = useChatAgentsStore((state) => state.pendingModelLoad);
+  useEffect(() => {
+    if (
+      !active ||
+      !agentModelLoad ||
+      view.mode !== "single" ||
+      view.threadId !== agentModelLoad.threadId
+    ) {
+      return;
+    }
+    useChatAgentsStore.setState({ pendingModelLoad: null });
+    handleSwitchBackToChatModel(agentModelLoad);
+  }, [active, agentModelLoad, view, handleSwitchBackToChatModel]);
   // Opening a chat may only take a slot that already serves its model as is: a reload stays a click.
   const handleAutoSwitchToChatModel = useCallback(
     (target: ChatModelSwitchTarget, stillWanted: () => boolean) => {

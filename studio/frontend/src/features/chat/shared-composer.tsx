@@ -163,6 +163,7 @@ import {
 import { PromptCountBadge } from "./prompt-storage/prompt-count-badge";
 import { insertSavedPrompt } from "./prompt-storage/insert-prompt";
 import { McpComposerButton } from "./mcp-composer-button";
+import { AgentsMenuItem } from "./agents/agents-menu-item";
 import { SkillsComposerButton, useSkillsSwitch } from "./skills-composer-button";
 import { PermissionModeComposerPill } from "./permission-mode-select";
 import { reasoningCapsFromLoad } from "./lib/apply-inference-status-to-store";
@@ -2733,6 +2734,7 @@ export function SharedComposer({
         </DropdownMenuSubContent>
       </DropdownMenuSub>
     ),
+    agents: <AgentsMenuItem />,
   };
   const { pinned: pinnedPlusItems, overflow: overflowPlusItems } =
     splitPlusMenuItems(plusOrder, plusPins);

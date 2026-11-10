@@ -144,6 +144,7 @@ import {
   LayerIcon,
   ApiIcon,
   Clock01Icon,
+  Robot01Icon,
 } from "@hugeicons/core-free-icons";
 import { Folder02Icon, FolderExportIcon } from "@/lib/folder-icons";
 import { Copy01Icon } from "@/lib/copy-icon";
@@ -3524,6 +3525,19 @@ export function AppSidebar() {
           </span>
         </button>
       ),
+    },
+    agents: {
+      icon: Robot01Icon,
+      label: t("shell.navigation.agents"),
+      badge: t("shell.navigation.newBadge"),
+      active: pathname === "/agents",
+      onClick: () => {
+        navigateFromRow({ to: "/agents" });
+        closeMobileIfOpen();
+      },
+      onIntent: () => {
+        preloadSilently(router.preloadRoute({ to: "/agents" }));
+      },
     },
   };
   const navRowPinned = (item: SidebarNavItemPref) =>

@@ -452,6 +452,23 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS chat_agents (
+            id TEXT NOT NULL PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            model_id TEXT,
+            model_gguf_variant TEXT,
+            system_prompt TEXT NOT NULL DEFAULT '',
+            tools_json TEXT NOT NULL DEFAULT '{}',
+            mcp_server_ids_json TEXT NOT NULL DEFAULT '[]',
+            skills_json TEXT NOT NULL DEFAULT '[]',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS chat_threads (
             id TEXT NOT NULL PRIMARY KEY,
             title TEXT NOT NULL,
@@ -2211,6 +2228,22 @@ def _chat_project_from_row(row: sqlite3.Row) -> dict:
     }
 
 
+def _chat_agent_from_row(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "description": row["description"],
+        "modelId": row["model_id"],
+        "modelGgufVariant": row["model_gguf_variant"],
+        "systemPrompt": row["system_prompt"],
+        "tools": json.loads(row["tools_json"]),
+        "mcpServerIds": json.loads(row["mcp_server_ids_json"]),
+        "skills": json.loads(row["skills_json"]),
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
 def _chat_message_from_row(row: sqlite3.Row) -> dict:
     data = dict(row)
     message = {
@@ -3464,6 +3497,68 @@ def delete_chat_project(id: str, delete_files: bool = False) -> Optional[dict]:
     except Exception:
         conn.rollback()
         raise
+    finally:
+        conn.close()
+
+
+def list_chat_agents() -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM chat_agents ORDER BY updated_at DESC, created_at DESC"
+        ).fetchall()
+        return [_chat_agent_from_row(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def upsert_chat_agent(agent: dict) -> dict:
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO chat_agents
+                (id, name, description, model_id, model_gguf_variant, system_prompt,
+                 tools_json, mcp_server_ids_json, skills_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                model_id = excluded.model_id,
+                model_gguf_variant = excluded.model_gguf_variant,
+                system_prompt = excluded.system_prompt,
+                tools_json = excluded.tools_json,
+                mcp_server_ids_json = excluded.mcp_server_ids_json,
+                skills_json = excluded.skills_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                agent["id"],
+                agent["name"],
+                agent.get("description") or "",
+                agent.get("modelId") or None,
+                agent.get("modelGgufVariant") or None,
+                agent.get("systemPrompt") or "",
+                json.dumps(agent.get("tools") or {}),
+                json.dumps(agent.get("mcpServerIds") or []),
+                json.dumps(agent.get("skills") or []),
+                int(agent["createdAt"]),
+                int(agent["updatedAt"]),
+            ),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM chat_agents WHERE id = ?", (agent["id"],)).fetchone()
+        return _chat_agent_from_row(row)
+    finally:
+        conn.close()
+
+
+def delete_chat_agent(id: str) -> bool:
+    conn = get_connection()
+    try:
+        cursor = conn.execute("DELETE FROM chat_agents WHERE id = ?", (id,))
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()
 

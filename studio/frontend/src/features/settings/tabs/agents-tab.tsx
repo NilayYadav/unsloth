@@ -447,7 +447,7 @@ function SubagentSection({
   );
 }
 
-export function AgentsTab() {
+export function CodingAgents({ embedded = false }: { embedded?: boolean }) {
   const t = useT();
   const pillId = useId();
   const serverUrl = usePlatformStore((s) => s.serverUrl);
@@ -1046,7 +1046,7 @@ export function AgentsTab() {
 
   return (
     <div className="settings-page">
-      <header className="flex min-w-0 flex-col gap-1">
+      <header className={cn("flex min-w-0 flex-col gap-1", embedded && "hidden")}>
         <div className="flex min-w-0 items-baseline gap-2">
           <h1
             data-settings-label={t("settings.agents.title")}
@@ -1524,7 +1524,9 @@ export function AgentsTab() {
             type="button"
             className="rounded-sm font-medium text-foreground underline underline-offset-2 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             onClick={() =>
-              useSettingsDialogStore.getState().setActiveTab("api-keys")
+              embedded
+                ? useSettingsDialogStore.getState().openDialog("api-keys")
+                : useSettingsDialogStore.getState().setActiveTab("api-keys")
             }
           >
             {t("settings.mcp.createKey")}
@@ -1533,4 +1535,8 @@ export function AgentsTab() {
       </SettingsSection>
     </div>
   );
+}
+
+export function AgentsTab() {
+  return <CodingAgents />;
 }

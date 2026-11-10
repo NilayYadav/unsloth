@@ -16,6 +16,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    StringConstraints,
     ValidationError,
     field_serializer,
     field_validator,
@@ -57,6 +58,7 @@ from storage.studio_db import (
     unreaped_clear_operation_image_ids,
     count_chat_threads,
     count_forks_for_message,
+    delete_chat_agent,
     delete_chat_attachment,
     delete_chat_project,
     delete_chat_threads_with_active_runs,
@@ -69,6 +71,7 @@ from storage.studio_db import (
     get_chat_pins,
     get_chat_message,
     next_message_created_at,
+    list_chat_agents,
     list_chat_attachments_page,
     list_chat_projects,
     list_chat_sidebar_rows,
@@ -88,6 +91,7 @@ from storage.studio_db import (
     sync_chat_messages,
     update_chat_project,
     update_chat_thread,
+    upsert_chat_agent,
     upsert_chat_project,
     upsert_chat_legacy_imports,
     upsert_chat_message,
@@ -368,6 +372,35 @@ class ChatThreadListResponse(BaseModel):
 
 class ChatProjectListResponse(BaseModel):
     projects: list[ChatProject]
+
+
+class ChatAgentTools(BaseModel):
+    model_config = ConfigDict(extra = "forbid")
+    webSearch: bool = False
+    code: bool = False
+    images: bool = False
+
+
+class ChatAgent(BaseModel):
+    id: str = Field(min_length = 1, max_length = 128)
+    name: Annotated[str, StringConstraints(strip_whitespace = True, min_length = 1, max_length = 200)]
+    description: str = Field(default = "", max_length = 2000)
+    modelId: Optional[str] = Field(default = None, max_length = 2000)
+    modelGgufVariant: Optional[str] = Field(default = None, max_length = 200)
+    systemPrompt: str = ""
+    tools: ChatAgentTools = Field(default_factory = ChatAgentTools)
+    mcpServerIds: list[Annotated[str, Field(max_length = 128)]] = Field(
+        default_factory = list, max_length = 100
+    )
+    skills: list[Annotated[str, Field(max_length = 128)]] = Field(
+        default_factory = list, max_length = 200
+    )
+    createdAt: SqliteInt
+    updatedAt: SqliteInt
+
+
+class ChatAgentListResponse(BaseModel):
+    agents: list[ChatAgent]
 
 
 class ChatSidebarRowsRequest(BaseModel):
@@ -1320,6 +1353,22 @@ def delete_attachment(
         raise HTTPException(status_code = 404, detail = "Attachment not found")
     chat_originals.sweep()
     return {"ok": True}
+
+
+@router.get("/agents", response_model = ChatAgentListResponse)
+def list_agents(current_subject: str = Depends(get_current_subject)):
+    return ChatAgentListResponse(agents = list_chat_agents())
+
+
+@router.post("/agents", response_model = ChatAgent)
+def save_agent(payload: ChatAgent, current_subject: str = Depends(get_current_subject)):
+    return ChatAgent(**upsert_chat_agent(payload.model_dump()))
+
+
+@router.delete("/agents/{agent_id}", status_code = 204)
+def delete_agent(agent_id: str, current_subject: str = Depends(get_current_subject)):
+    if not delete_chat_agent(agent_id):
+        raise HTTPException(status_code = 404, detail = f"Agent {agent_id} not found")
 
 
 @router.get("/projects", response_model = ChatProjectListResponse)

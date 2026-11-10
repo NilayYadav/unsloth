@@ -5,7 +5,7 @@ import { useTimeFormat } from "@/lib/time-format";
 import { InformationCircleIcon } from "@hugeicons/core-free-icons";
 import { Folder01Icon } from "@/lib/folder-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type ReactNode, useId, useMemo, useRef, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,16 +29,13 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  buildExternalModelId,
-  chatLocalModelOptions,
-  type ExternalProviderConfig,
+  type ConnectionChoice,
   externalReasoningTakesEffort,
   getExternalReasoningCapabilities,
   useChatProjects,
   useChatRuntimeStore,
-  useExternalProvidersStore,
+  useModelChoices,
 } from "@/features/chat";
-import { useDeviceInventorySources } from "@/features/hub";
 import { type TranslationKey, useLocale, useT } from "@/i18n";
 import { isTauri } from "@/lib/api-base";
 import { ChevronDownStandardIcon } from "@/lib/chevron-icons";
@@ -163,38 +160,6 @@ function levelLabel(level: TaskReasoningEffort, modelId: string | undefined): st
 }
 
 type LoadedReasoning = { supportsReasoning: boolean; reasoningStyle: string; reasoningAlwaysOn: boolean };
-
-type ConnectionChoice = { id: string; modelId: string; provider: ExternalProviderConfig };
-
-/** Models a task can run on: local and connected providers, never one needing a download. */
-function useModelChoices(current: string | null) {
-  const inventory = useDeviceInventorySources(["localModels", "cachedGguf"]);
-  const providers = useExternalProvidersStore((state) => state.providers);
-  const connectionsEnabled = useExternalProvidersStore((state) => state.connectionsEnabled);
-  return useMemo(() => {
-    const local = chatLocalModelOptions(inventory.localModels.rows).map(({ id, name }) => ({ id, name }));
-    // GGUF only: a run switches back afterwards only to a GGUF.
-    for (const repo of inventory.cachedGguf.rows) {
-      if (!local.some((option) => option.id === repo.repo_id)) {
-        local.push({ id: repo.repo_id, name: repo.repo_id });
-      }
-    }
-    const connections = (connectionsEnabled ? providers : []).map((provider) => ({
-      provider,
-      models: provider.models.map(
-        (modelId): ConnectionChoice => ({ id: buildExternalModelId(provider.id, modelId), modelId, provider }),
-      ),
-    }));
-    const known =
-      current === null ||
-      local.some((option) => option.id === current) ||
-      connections.some((group) => group.models.some((option) => option.id === current));
-    // A saved choice that is gone (deleted, disconnected) stays visible rather than silently changing.
-    const missing = known ? null : current;
-    const connection = connections.flatMap((group) => group.models).find((option) => option.id === current);
-    return { local, connections, missing, connection };
-  }, [inventory.localModels.rows, inventory.cachedGguf.rows, providers, connectionsEnabled, current]);
-}
 
 /** Efforts the task's model takes; all of them for an unloaded model (a run resolves it), empty when none. */
 function effortChoices(

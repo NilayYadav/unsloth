@@ -35,6 +35,7 @@ import {
   LayoutTwoColumnIcon,
   LibrariesIcon,
   McpServerIcon,
+  Robot01Icon,
   Scroll01Icon,
   Telescope02Icon,
 } from "@hugeicons/core-free-icons";
@@ -171,6 +172,17 @@ const PLUS_MENU_SETTINGS: {
     icon: (
       <HugeiconsIcon
         icon={ProjectIcon}
+        strokeWidth={2}
+        className={PLUS_MENU_ICON_CLASS}
+      />
+    ),
+  },
+  {
+    id: "agents",
+    labelKey: "shell.navigation.agents",
+    icon: (
+      <HugeiconsIcon
+        icon={Robot01Icon}
         strokeWidth={2}
         className={PLUS_MENU_ICON_CLASS}
       />
