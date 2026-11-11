@@ -1526,6 +1526,8 @@ def _graceful_shutdown(server = None):
         except Exception as e:
             logger.warning("Could not cancel in-flight loads: %s", e)
         if _llama_cpp_backend is not None:
+            from core.inference.llama_keepwarm import save_kv_for_restart
+            save_kv_for_restart(_llama_cpp_backend)
             # teardown = True marks an app-level stop, not the retry ladder reaping a child it replaces; only that may end an in-flight health wait.
             _llama_cpp_backend._kill_process(teardown = True)
         unload_extra_models()

@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import json
+import os
 import shutil
 import threading
 import time
@@ -720,13 +722,73 @@ def restore_kv_resume(backend, manifest) -> None:
         _delete_resume_files(manifest)
 
 
+_RESTART_MANIFEST = "resume-manifest.json"
+_RESTART_SAVE_BUDGET_S = 20.0
+
+
+def save_kv_for_restart(backend) -> None:
+    manifest = None
+    try:
+        from utils.openai_auto_switch_settings import get_auto_unload_keep_kv
+        from utils.paths.storage_roots import llama_slot_cache_root
+
+        if inference_in_flight() or not get_auto_unload_keep_kv():
+            return
+        deadline = time.monotonic() + _RESTART_SAVE_BUDGET_S
+        manifest = backend.save_slots_for_resume(lambda: time.monotonic() >= deadline)
+        if not manifest:
+            return
+        path = llama_slot_cache_root() / _RESTART_MANIFEST
+        # Written last and atomically: a kill mid-save leaves slot files no manifest names.
+        partial = path.with_suffix(".tmp")
+        with open(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as fh:
+            json.dump(manifest, fh)
+        os.replace(partial, path)
+        logger.info("Saved chat KV for restore after restart")
+    except Exception as exc:
+        logger.debug("chat KV save before shutdown failed: %s", exc)
+        if manifest:
+            _delete_resume_files(manifest)
+
+
+def _as_tuples(value):
+    return tuple(map(_as_tuples, value)) if isinstance(value, list) else value
+
+
+def _claim_restart_manifest(root: Path, saved: set) -> set:
+    path = root / _RESTART_MANIFEST
+    try:
+        manifest = json.loads(path.read_text(encoding = "utf-8"))
+    except (OSError, ValueError):
+        manifest = None
+    for leftover in (path, path.with_suffix(".tmp")):
+        with contextlib.suppress(OSError):
+            leftover.unlink()
+    try:
+        from utils.openai_auto_switch_settings import get_auto_unload_keep_kv
+
+        names = {str(entry["filename"]) for entry in manifest["slots"]}
+        if not names or not names <= saved or manifest["dir"] != str(root):
+            return set()
+        if not get_auto_unload_keep_kv():
+            return set()
+        stash_unload_kv({key: _as_tuples(value) for key, value in manifest.items()})
+        return names
+    except Exception:
+        return set()
+
+
 def sweep_slot_save_dir() -> None:
     try:
         from utils.paths.storage_roots import llama_slot_cache_root
 
-        for path in llama_slot_cache_root().glob("resume-*.bin"):
-            with contextlib.suppress(OSError):
-                path.unlink()
+        root = llama_slot_cache_root()
+        saved = {path.name: path for path in root.glob("resume-*.bin")}
+        kept = _claim_restart_manifest(root, set(saved))
+        for name, path in saved.items():
+            if name not in kept:
+                with contextlib.suppress(OSError):
+                    path.unlink()
         from utils.paths.storage_roots import mlx_prompt_cache_root
 
         for path in mlx_prompt_cache_root().glob("resume-*"):

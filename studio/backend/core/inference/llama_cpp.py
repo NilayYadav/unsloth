@@ -8340,6 +8340,69 @@ def _extra_args_have_tensor_split(
     return bool(str((env or {}).get("LLAMA_ARG_TENSOR_SPLIT", "")).strip())
 
 
+def _block_sigint() -> None:
+    # Ctrl-C signals the whole process group; llama-server has to outlive it for the shutdown slot save.
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+
+
+# macOS has no parent-death signal, so a llama-server that sits out Ctrl-C needs this to die with Studio.
+_KILL_WITH_STUDIO = """
+import os, select, signal, sys
+studio, server = int(sys.argv[1]), int(sys.argv[2])
+exits = [
+    select.kevent(pid, select.KQ_FILTER_PROC, select.KQ_EV_ADD, select.KQ_NOTE_EXIT)
+    for pid in (server, studio)
+]
+queue = select.kqueue()
+try:
+    queue.control(exits[:1], 0)
+except OSError:
+    sys.exit()
+try:
+    gone = [event.ident for event in queue.control(exits[1:], 2)]
+except OSError:
+    gone = [studio]
+if server not in gone:
+    os.kill(server, signal.SIGKILL)
+"""
+
+
+_Popen = subprocess.Popen
+
+
+def _spawn_chat_server(spawn):
+    if sys.platform != "darwin":
+        return _spawn_on_lifetime_thread(spawn)
+    # No preexec_fn on macOS: both children inherit this thread's signal mask.
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+    try:
+        server = spawn()
+        # A stand-in's pid could belong to a stranger.
+        if isinstance(server, _Popen):
+            try:
+                _Popen(
+                    [sys.executable, "-c", _KILL_WITH_STUDIO, str(os.getpid()), str(server.pid)],
+                    stdin = subprocess.DEVNULL,
+                    stdout = subprocess.DEVNULL,
+                    stderr = subprocess.DEVNULL,
+                )
+            except Exception:
+                server.kill()
+                raise
+        return server
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+
+
+def _holds_blocked_sigint(pid) -> bool:
+    try:
+        with open(f"/proc/{pid}/status", encoding = "ascii") as status:
+            pending = next(line for line in status if line.startswith("ShdPnd:"))
+        return bool(int(pending.split()[1], 16) & (1 << (signal.SIGINT - 1)))
+    except (OSError, StopIteration, ValueError):
+        return False
+
+
 @functools.lru_cache(maxsize = 1)
 def _local_ssl_context() -> ssl.SSLContext:
     # httpx loads CA certificates even for loopback HTTP. Share that setup, not streaming sockets.
@@ -23604,7 +23667,7 @@ class LlamaCppBackend:
                 self._health_wait_cancelled = True
                 return False
             # PDEATHSIG follows the forking thread; the MTP-crash reload's thread exits.
-            _spawned = _spawn_on_lifetime_thread(
+            _spawned = _spawn_chat_server(
                 lambda: subprocess.Popen(
                     cmd,
                     stdout = subprocess.PIPE,
@@ -23614,7 +23677,7 @@ class LlamaCppBackend:
                     errors = "replace",
                     env = env,
                     **_windows_hidden_subprocess_kwargs(),
-                    **_child_popen_kwargs(),
+                    **_child_popen_kwargs(_block_sigint),
                 )
             )
             self._process = _spawned
@@ -31356,7 +31419,7 @@ class LlamaCppBackend:
                                 self._close_attempt_log()
                                 self._health_wait_cancelled = True
                                 return False
-                            _spawned = _spawn_on_lifetime_thread(
+                            _spawned = _spawn_chat_server(
                                 lambda: subprocess.Popen(
                                     run_cmd,
                                     stdout = subprocess.PIPE,
@@ -31367,7 +31430,7 @@ class LlamaCppBackend:
                                     env = env,
                                     cwd = _spawn_cwd,
                                     **_windows_hidden_subprocess_kwargs(),
-                                    **_child_popen_kwargs(),
+                                    **_child_popen_kwargs(_block_sigint),
                                 )
                             )
                             self._process = _spawned
@@ -34682,6 +34745,10 @@ class LlamaCppBackend:
         try:
             if terminable:
                 _grace = self._quit_signal_grace_left(_pid)
+                if _grace is not None and _holds_blocked_sigint(_pid):
+                    # Its Ctrl-C is still pending, so this is the first signal it acts on.
+                    self._process.terminate()
+                    _grace = _QUIT_SIGNAL_EXIT_GRACE_S
                 if _grace is not None:
                     # The quit signal already reached it; a second one aborts llama-server on Metal.
                     try:
