@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from auth.authentication import get_current_subject
+from core.inference.ask_agent_tool import askable_agents
 from routes.chat_history import router
 from storage import studio_db
 
@@ -21,6 +22,8 @@ def _agent(**overrides) -> dict:
         "tools": {"webSearch": True, "code": False, "images": False},
         "mcpServerIds": ["mcp-docs"],
         "skills": ["pdf"],
+        "canAsk": ["agent-7"],
+        "filesForAskedOnly": True,
         "createdAt": 1_700_000_000_000,
         "updatedAt": 1_700_000_000_000,
     }
@@ -67,6 +70,8 @@ def test_saving_an_existing_agent_edits_it_and_keeps_when_it_was_created(client)
         tools = {"webSearch": False, "code": True, "images": False},
         mcpServerIds = [],
         skills = [],
+        canAsk = [],
+        filesForAskedOnly = False,
         createdAt = 5,
         updatedAt = 1_700_000_000_500,
     )
@@ -101,6 +106,8 @@ def test_an_agent_needs_only_a_name(client):
         "tools": {"webSearch": False, "code": False, "images": False},
         "mcpServerIds": [],
         "skills": [],
+        "canAsk": [],
+        "filesForAskedOnly": False,
         "createdAt": 1,
         "updatedAt": 1,
     }
@@ -108,7 +115,12 @@ def test_an_agent_needs_only_a_name(client):
 
 @pytest.mark.parametrize(
     "overrides",
-    [{"name": "   "}, {"tools": {"terminal": True}}, {"mcpServerIds": "mcp-docs"}],
+    [
+        {"name": "   "},
+        {"tools": {"terminal": True}},
+        {"mcpServerIds": "mcp-docs"},
+        {"canAsk": ["agent-7", "agent-1"]},
+    ],
 )
 def test_an_agent_that_is_not_well_formed_is_rejected_and_not_saved(client, overrides):
     assert client.post("/api/chat/agents", json = _agent(**overrides)).status_code == 422
@@ -123,3 +135,44 @@ def test_a_deleted_agent_is_gone_and_deleting_it_again_is_not_found(client):
 
     assert [a["id"] for a in client.get("/api/chat/agents").json()["agents"]] == ["agent-2"]
     assert client.delete("/api/chat/agents/agent-1").status_code == 404
+
+
+def test_agents_an_agent_can_ask_are_kept_as_saved_and_only_the_ones_here_can_be_asked(client):
+    client.post("/api/chat/agents", json = _agent(id = "agent-2", name = "Reader", canAsk = ["agent-1"]))
+    client.post("/api/chat/agents", json = _agent(canAsk = ["agent-2", "gone", "agent-2"]))
+
+    def saved():
+        agents = client.get("/api/chat/agents").json()["agents"]
+        return next(agent["canAsk"] for agent in agents if agent["id"] == "agent-1")
+
+    assert saved() == ["agent-2", "gone"]
+    assert [agent["name"] for agent in askable_agents("agent-1")] == ["Reader"]
+
+    client.delete("/api/chat/agents/agent-2")
+
+    assert saved() == ["agent-2", "gone"]
+    assert askable_agents("agent-1") == []
+
+
+def test_agents_saved_before_they_could_ask_each_other_still_load(client, tmp_path):
+    client.post("/api/chat/agents", json = _agent())
+    conn = studio_db.get_connection()
+    conn.execute("ALTER TABLE chat_agents DROP COLUMN can_ask_json")
+    conn.execute("ALTER TABLE chat_agents DROP COLUMN files_for_asked_only")
+    conn.commit()
+    conn.close()
+    studio_db._schema_ready.clear()
+
+    assert client.get("/api/chat/agents").json() == {
+        "agents": [_agent(canAsk = [], filesForAskedOnly = False)]
+    }
+
+
+def test_a_chat_remembers_the_agent_it_was_started_from(client):
+    thread = {"id": "t1", "modelType": "base", "createdAt": 1, "agentId": "agent-1"}
+
+    assert client.post("/api/chat/threads", json = thread).json()["agentId"] == "agent-1"
+
+    client.post("/api/chat/threads", json = {**thread, "title": "Renamed", "agentId": None})
+
+    assert client.get("/api/chat/threads/t1").json()["agentId"] == "agent-1"

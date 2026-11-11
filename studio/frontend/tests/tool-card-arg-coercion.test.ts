@@ -139,6 +139,7 @@ const COERCED: ReadonlyArray<
   ["tool-ui-terminal.tsx", "TerminalToolUIImpl", ["command"]],
   ["tool-ui-knowledge-base.tsx", "KnowledgeBaseToolUIImpl", ["query"]],
   ["tool-ui-read-skill.tsx", "ReadSkillToolUIImpl", ["name", "resource"]],
+  ["tool-ui-ask-agent.tsx", "AskAgentToolUIImpl", ["name", "task", "files"]],
   ["tool-ui-web-search.tsx", "WebSearchToolUIImpl", ["query", "url"]],
   [
     "tool-ui-code-execution.tsx",

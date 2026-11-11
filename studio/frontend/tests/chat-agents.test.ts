@@ -8,6 +8,7 @@ import {
   agentCopyName,
   agentFileName,
   agentFileText,
+  canAskIds,
   parseAgentFile,
   uniqueAgentName,
 } from "../src/features/chat/agents/agent-file.ts";
@@ -15,6 +16,7 @@ import {
   type AgentRecord,
   planAgentStart,
 } from "../src/features/chat/agents/agent-start.ts";
+import { withFilesKeptForAskedAgents } from "../src/features/chat/agents/ask-agent-files.ts";
 import { normalizePlusMenuOrder } from "../src/features/chat/stores/plus-menu-prefs-store.ts";
 import { sanitizeThreadScopedSettings } from "../src/features/chat/utils/thread-scoped-settings.ts";
 
@@ -29,6 +31,8 @@ function agent(overrides: Partial<AgentRecord> = {}): AgentRecord {
     tools: { webSearch: true, code: false, images: false },
     mcpServerIds: ["docs"],
     skills: ["pdf"],
+    canAsk: [],
+    filesForAskedOnly: false,
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -110,12 +114,12 @@ test("an exported agent imports back with the same setup and none of its ids or 
   const source = agent({ description: "Reads papers", tools: { webSearch: true, code: true, images: false } });
   const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...setup } = source;
 
-  assert.deepEqual(parseAgentFile(agentFileText(source)), setup);
+  assert.deepEqual(parseAgentFile(agentFileText(source, [source])), setup);
   assert.equal(agentFileName(agent({ name: "Notes: a/b?" })), "Notes_ a_b_.agent.json");
 });
 
 test("a file that is not an exported agent is refused", () => {
-  const valid = JSON.parse(agentFileText(agent()));
+  const valid = JSON.parse(agentFileText(agent(), []));
 
   assert.equal(parseAgentFile("not json"), null);
   assert.equal(parseAgentFile("[]"), null);
@@ -140,6 +144,8 @@ test("an imported file with wrong or oversized fields is cut down to a setup the
         tools: { webSearch: "yes", code: true },
         mcpServerIds: ["docs", "docs", 3, "", "x".repeat(129)],
         skills: "pdf",
+        canAsk: ["Reader", "Reader", 4, "y".repeat(201)],
+        filesForAskedOnly: "yes",
       },
     }),
   );
@@ -153,7 +159,58 @@ test("an imported file with wrong or oversized fields is cut down to a setup the
     tools: { webSearch: false, code: true, images: false },
     mcpServerIds: ["docs"],
     skills: [],
+    canAsk: ["Reader"],
+    filesForAskedOnly: false,
   });
+});
+
+test("the agents an agent can ask are exported by name and found again by name", () => {
+  const reader = agent({ id: "r-here", name: "Reader" });
+  const desk = agent({ id: "d", name: "Desk", canAsk: ["r-here", "deleted"], filesForAskedOnly: true });
+
+  const setup = parseAgentFile(agentFileText(desk, [desk, reader]));
+
+  assert.deepEqual(setup?.canAsk, ["Reader"]);
+  assert.equal(setup?.filesForAskedOnly, true);
+  const elsewhere = [agent({ id: "r-there", name: "reader" })];
+  assert.deepEqual(canAskIds(["Reader", "Coder"], elsewhere), ["r-there", "Coder"]);
+});
+
+test("files kept for asked agents reach the chat's model as a name and a size only", () => {
+  const secret = "The vault code is 4417.\nDo not share it.";
+  const history = [
+    {
+      role: "user",
+      attachments: [
+        { name: "notes.txt", content: [{ type: "text", text: `<attachment name=notes.txt>\n${secret}\n</attachment>` }] },
+        { name: "scan.pdf", content: [{ type: "text", text: "[PDF: scan.pdf]\npage one" }] },
+        { name: "photo.png", content: [{ type: "image", image: "data:image/png;base64,AAAA" }] },
+        { name: "data.parquet", content: [{ type: "text", text: "[data.parquet: only the python tool can read this file]" }] },
+        { name: "Pasted.txt", content: [{ type: "text", text: "<pasted_text name=Pasted.txt>\ntyped by hand\n</pasted_text>" }] },
+      ],
+    },
+    { role: "assistant" },
+  ];
+
+  const { messages, askAgentFiles } = withFilesKeptForAskedAgents(history);
+
+  assert.deepEqual(askAgentFiles, [
+    { name: "notes.txt", text: secret },
+    { name: "scan.pdf", text: "[PDF: scan.pdf]\npage one" },
+  ]);
+  const sent = JSON.stringify(messages);
+  assert.ok(!sent.includes("4417") && !sent.includes("page one"));
+  assert.deepEqual(messages[0].attachments?.[0], {
+    name: "notes.txt",
+    content: [
+      {
+        type: "text",
+        text: '[notes.txt (40 B) is attached. Its content is not shown to you. To have it read, call ask_agent with "notes.txt" in files.]',
+      },
+    ],
+  });
+  assert.deepEqual(messages[0].attachments?.slice(2), history[0].attachments?.slice(2));
+  assert.equal(messages[1], history[1]);
 });
 
 test("an imported or copied agent never takes a name that is in use", () => {

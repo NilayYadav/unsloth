@@ -17,6 +17,8 @@ export interface AgentRecord {
   tools: AgentTools;
   mcpServerIds: string[];
   skills: string[];
+  canAsk: string[];
+  filesForAskedOnly: boolean;
   createdAt: number;
   updatedAt: number;
 }

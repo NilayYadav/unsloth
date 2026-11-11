@@ -75,6 +75,14 @@ export const useChatAgentsStore = create<ChatAgentsState>()((set, get) => ({
   },
 }));
 
+export async function savedAgent(id: string | null | undefined): Promise<AgentRecord | null> {
+  if (!id) return null;
+  if (useChatAgentsStore.getState().status !== "ready") {
+    await useChatAgentsStore.getState().refresh();
+  }
+  return useChatAgentsStore.getState().agents.find((agent) => agent.id === id) ?? null;
+}
+
 if (typeof window !== "undefined") {
   window.addEventListener(AUTH_SESSION_CLEARED_EVENT, () => {
     refreshGeneration += 1;

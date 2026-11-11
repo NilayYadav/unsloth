@@ -96,6 +96,7 @@ import {
   VideoGenerationToolUI,
 } from "@/components/assistant-ui/tool-ui-image-generation";
 import { KnowledgeBaseToolUI } from "@/components/assistant-ui/tool-ui-knowledge-base";
+import { AskAgentToolUI } from "@/components/assistant-ui/tool-ui-ask-agent";
 import { ReadSkillToolUI } from "@/components/assistant-ui/tool-ui-read-skill";
 import { SkillMentionPopover } from "@/components/assistant-ui/skill-mentions";
 import { isRewindCommand, useRewindDialogStore } from "@/features/chat";
@@ -8393,6 +8394,7 @@ const RenderHtmlToolUIConfirmable = withToolConfirmation(RenderHtmlToolUI);
 const ReadSkillToolUIConfirmable = withToolConfirmation((props) => (
   <ReadSkillToolUI {...props} />
 ));
+const AskAgentToolUIConfirmable = withToolConfirmation(AskAgentToolUI);
 const ToolFallbackConfirmable = withToolConfirmation(ToolFallback);
 
 /**
@@ -8418,6 +8420,7 @@ const ASSISTANT_PART_COMPONENTS = {
       generate_image: ImageGenerationToolUIConfirmable,
       generate_video: VideoGenerationToolUIConfirmable,
       render_html: RenderHtmlToolUIConfirmable,
+      ask_agent: AskAgentToolUIConfirmable,
     },
     Fallback: ToolFallbackConfirmable,
   },

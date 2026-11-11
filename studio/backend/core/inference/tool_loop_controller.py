@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Collection, Literal, Mapping, Sequence
 from urllib.parse import urlparse
 
+from core.inference.ask_agent_tool import ASK_AGENT_TOOL_NAME
 from core.inference.browser_agent import BROWSER_TOOL_NAMES
 from core.inference.llama_tool_schema import unrelaxed
 from core.inference.mcp_images import is_image_tool, split_images as split_mcp_images
@@ -827,6 +828,8 @@ def status_for_tool(tool_name: str, arguments: Mapping[str, Any]) -> str:
         return f"Editing: {name}" if name else "Editing file..."
     if tool_name in BROWSER_TOOL_NAMES:
         return _browser_status(tool_name, arguments)
+    if tool_name == ASK_AGENT_TOOL_NAME:
+        return "Asking " + (str(arguments.get("agent") or "").strip()[:60] or "an agent") + "..."
     mcp = mcp_display_parts(tool_name)
     if mcp:
         return f"Calling: {mcp[0]} · {mcp[1]}"

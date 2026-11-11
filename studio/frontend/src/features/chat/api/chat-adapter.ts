@@ -25,6 +25,9 @@ import {
 } from "../lib/server-tuning-fields";
 import { authFetch, getAuthToken } from "@/features/auth";
 import { withSandboxAttachmentPaths } from "../sandbox-attachments";
+import { canAskNames } from "../agents/agent-file";
+import { savedAgent, useChatAgentsStore } from "../agents/agents-store";
+import { withFilesKeptForAskedAgents } from "../agents/ask-agent-files";
 import { prepareHfTokenForUse } from "@/features/hf-auth";
 import { DOWNLOAD_KIND } from "@/features/hub/download-manager/constants";
 import {
@@ -5065,6 +5068,12 @@ export function createOpenAIStreamAdapter(
       const toolConfirmationScopeId = resolvedThreadId
         ? `${sandboxSessionId || "_default"}:${resolvedThreadId}`
         : sandboxSessionId || "_default";
+      const threadAgent = await savedAgent(
+        (await readThreadRecord?.().catch(() => undefined))?.agentId,
+      );
+      const canAskAgents =
+        threadAgent !== null &&
+        canAskNames(threadAgent, useChatAgentsStore.getState().agents).length > 0;
       const {
         supportsTools,
         toolsEnabled,
@@ -5243,11 +5252,25 @@ export function createOpenAIStreamAdapter(
         externalSelection?.modelId,
       );
       const survivingMessages = pruneOutboundHistory(messages, replayReasoning);
+      const keptFiles = threadAgent?.filesForAskedOnly
+        ? withFilesKeptForAskedAgents(survivingMessages)
+        : null;
+      const askAgentFields = {
+        ...(canAskAgents ? { agent_id: threadAgent.id } : {}),
+        ...(keptFiles && keptFiles.askAgentFiles.length > 0
+          ? { ask_agent_files: keptFiles.askAgentFiles }
+          : {}),
+      };
+      // A sandbox copy would let this chat's own python tool read a file kept for asked agents.
       const { messages: renderedMessages, sandboxAttachments } =
+        !keptFiles &&
         supportsStudioToolsForThisTurn &&
         studioLocalCodeTools.includes("python")
           ? withSandboxAttachmentPaths(survivingMessages)
-          : { messages: survivingMessages, sandboxAttachments: [] };
+          : {
+              messages: keptFiles?.messages ?? survivingMessages,
+              sandboxAttachments: [],
+            };
       // The backend Gemini translator rebuilds functionCall/functionResponse parts from these.
       let outboundMessages = renderedMessages
         .flatMap((message) => {
@@ -6775,9 +6798,11 @@ export function createOpenAIStreamAdapter(
                 localMediaTools.length > 0 ||
                 // Armed research needs Studio's loop: deep_research is appended past every tool filter, but
                 // only for a request that asked for the loop at all.
-                deepResearchArmed)
+                deepResearchArmed ||
+                canAskAgents)
                 ? {
                     enable_tools: true,
+                    ...askAgentFields,
                     enabled_tools: [
                       ...(ragEnabled || projectRagEnabled
                         ? ["search_knowledge_base"]
@@ -7006,9 +7031,11 @@ export function createOpenAIStreamAdapter(
                 skillTools.length > 0 ||
                 browserTools.length > 0 ||
                 localMediaTools.length > 0 ||
-                deepResearchArmed)
+                deepResearchArmed ||
+                canAskAgents)
               ? {
                   enable_tools: true,
+                  ...askAgentFields,
                   enabled_tools: [
                     // First so retrieval is the primary tool when Docs is on.
                     ...(ragEnabled || projectRagEnabled

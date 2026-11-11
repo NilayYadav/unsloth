@@ -49,6 +49,7 @@ from contextvars import ContextVar
 # What a truncated result costs besides its body, charged where the cut is decided rather than held back in advance.
 from .context_window import _RESULT_NOTICE_RESERVE, compaction_receipt_field
 from .browser_agent import BROWSER_TOOL_NAMES, execute_browser_tool, is_browser_tool
+from .ask_agent_tool import ASK_AGENT_TOOL_NAME
 from .media_chat_tools import MEDIA_CHAT_TOOLS
 from . import file_history
 
@@ -6371,6 +6372,8 @@ _ALWAYS_SAFE_TOOLS = frozenset(
         *BROWSER_TOOL_NAMES,
         # Render on the resident image/video model; never load/unload a model or reach the network.
         *MEDIA_CHAT_TOOLS,
+        # The asked agent's own tool calls go through the gate; the ask itself runs nothing.
+        ASK_AGENT_TOOL_NAME,
     }
 )
 
@@ -14146,6 +14149,12 @@ def execute_tool(
                 ),
                 name,
             )
+    if name == ASK_AGENT_TOOL_NAME:
+        from .ask_agent_tool import run_ask_agent
+        return _fit_result_to_room(
+            run_ask_agent(arguments, cancel_event = cancel_event, timeout = effective_timeout),
+            name,
+        )
     return f"Unknown tool: {name}"
 
 

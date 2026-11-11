@@ -59,6 +59,8 @@ import {
   agentCopyName,
   agentFileName,
   agentFileText,
+  canAskIds,
+  canAskNames,
   parseAgentFile,
   uniqueAgentName,
 } from "./agent-file";
@@ -134,10 +136,12 @@ function PickList({
 
 function AgentDialog({
   agent,
+  others,
   servers,
   onClose,
 }: {
   agent: AgentRecord | null;
+  others: readonly AgentRecord[];
   servers: readonly McpServerConfig[] | null;
   onClose: () => void;
 }) {
@@ -155,7 +159,10 @@ function AgentDialog({
   );
   const [mcpServerIds, setMcpServerIds] = useState(agent?.mcpServerIds ?? []);
   const [skillNames, setSkillNames] = useState(agent?.skills ?? []);
+  const [canAsk, setCanAsk] = useState(agent?.canAsk ?? []);
+  const [filesForAskedOnly, setFilesForAskedOnly] = useState(agent?.filesForAskedOnly ?? false);
   const [busy, setBusy] = useState(false);
+  const asked = canAsk.filter((id) => others.some((other) => other.id === id));
   const models = useModelChoices(modelId);
   const modelsListed = useModelsListed();
 
@@ -184,6 +191,8 @@ function AgentDialog({
           catalog.initialized && !catalog.error
             ? skillNames.filter((skill) => skills.some((entry) => entry.name === skill))
             : skillNames,
+        canAsk: asked,
+        filesForAskedOnly: asked.length > 0 && filesForAskedOnly,
         createdAt: agent?.createdAt,
       });
       onClose();
@@ -336,6 +345,29 @@ function AgentDialog({
             disabled={busy}
             onChange={setSkillNames}
           />
+          <PickList
+            label={t("agentsPage.form.canAsk")}
+            empty={t("agentsPage.form.canAskEmpty")}
+            options={others.map((other) => ({ value: other.id, label: other.name }))}
+            selected={canAsk}
+            disabled={busy}
+            onChange={setCanAsk}
+          />
+          {asked.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <label className="flex cursor-pointer items-center gap-2.5 text-ui-14">
+                <Switch
+                  checked={filesForAskedOnly}
+                  disabled={busy}
+                  onCheckedChange={setFilesForAskedOnly}
+                />
+                {t("agentsPage.form.filesForAskedOnly")}
+              </label>
+              <p className="text-ui-13 text-muted-foreground">
+                {t("agentsPage.form.filesForAskedOnlyHint")}
+              </p>
+            </div>
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
               {t("common.cancel")}
@@ -352,6 +384,7 @@ function AgentDialog({
 
 function AgentRow({
   agent,
+  agents,
   servers,
   skills,
   modelMissing,
@@ -362,6 +395,7 @@ function AgentRow({
   onDelete,
 }: {
   agent: AgentRecord;
+  agents: readonly AgentRecord[];
   servers: readonly McpServerConfig[] | null;
   skills: readonly string[] | null;
   modelMissing: boolean;
@@ -379,6 +413,7 @@ function AgentRow({
   const missingSkills = skills
     ? agent.skills.filter((name) => !skills.includes(name)).length
     : 0;
+  const asked = canAskNames(agent, agents);
   const tools = TOOLS.filter(([key]) => agent.tools[key]).map(([, label]) => t(label));
   const summary = [
     agent.modelId ? modelLabel(agent.modelId) : t("agentsPage.anyModel"),
@@ -389,6 +424,7 @@ function AgentRow({
     agent.skills.length > missingSkills
       ? t("agentsPage.skillCount", { count: agent.skills.length - missingSkills })
       : null,
+    asked.length > 0 ? t("agentsPage.canAsk", { names: asked.join(", ") }) : null,
   ].filter(Boolean);
   const warnings = [
     modelMissing && agent.modelId
@@ -396,6 +432,9 @@ function AgentRow({
       : null,
     missingServers > 0 ? t("agentsPage.mcpUnavailable", { count: missingServers }) : null,
     missingSkills > 0 ? t("agentsPage.skillUnavailable", { count: missingSkills }) : null,
+    agent.canAsk.length > asked.length
+      ? t("agentsPage.canAskUnavailable", { count: agent.canAsk.length - asked.length })
+      : null,
   ].filter(Boolean);
 
   async function start() {
@@ -504,7 +543,7 @@ export function AgentsPage() {
   }
 
   function exportAgent(agent: AgentRecord) {
-    downloadFile(agentFileText(agent), agentFileName(agent), "application/json").catch(
+    downloadFile(agentFileText(agent, agents), agentFileName(agent), "application/json").catch(
       (exportError) => {
         if (!isDownloadCancelled(exportError)) {
           toast.error(t("agentsPage.exportFailed"), { description: errorText(exportError) });
@@ -524,8 +563,15 @@ export function AgentsPage() {
       });
       return;
     }
-    const names = useChatAgentsStore.getState().agents.map((agent) => agent.name);
-    await addCopy({ ...setup, name: uniqueAgentName(setup.name, names) });
+    const saved = useChatAgentsStore.getState().agents;
+    await addCopy({
+      ...setup,
+      name: uniqueAgentName(
+        setup.name,
+        saved.map((agent) => agent.name),
+      ),
+      canAsk: canAskIds(setup.canAsk, saved),
+    });
   }
 
   async function confirmDelete() {
@@ -606,6 +652,7 @@ export function AgentsPage() {
             <AgentRow
               key={agent.id}
               agent={agent}
+              agents={agents}
               servers={servers}
               skills={skills}
               modelMissing={modelMissing(agent.modelId)}
@@ -644,6 +691,7 @@ export function AgentsPage() {
         <AgentDialog
           key={editing?.id ?? "new"}
           agent={editing}
+          others={agents.filter((entry) => entry.id !== editing?.id)}
           servers={servers}
           onClose={() => setEditing(undefined)}
         />

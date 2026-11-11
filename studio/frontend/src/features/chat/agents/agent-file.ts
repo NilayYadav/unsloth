@@ -13,15 +13,28 @@ function text(value: unknown, max: number): string {
   return typeof value === "string" ? value.slice(0, max) : "";
 }
 
-function idList(value: unknown, max: number): string[] {
+function idList(value: unknown, max: number, maxLength = 128): string[] {
   if (!Array.isArray(value)) return [];
   const ids = value.filter(
-    (entry): entry is string => typeof entry === "string" && entry.length > 0 && entry.length <= 128,
+    (entry): entry is string =>
+      typeof entry === "string" && entry.length > 0 && entry.length <= maxLength,
   );
   return [...new Set(ids)].slice(0, max);
 }
 
-export function agentFileText(agent: AgentRecord): string {
+// A file names the agents it can ask: ids differ between computers.
+export function canAskNames(agent: AgentRecord, agents: readonly AgentRecord[]): string[] {
+  return agent.canAsk.flatMap((id) => agents.find((entry) => entry.id === id)?.name ?? []);
+}
+
+// A name with no agent here is kept as written, so the row can say it is missing.
+export function canAskIds(names: readonly string[], agents: readonly AgentRecord[]): string[] {
+  return names.map(
+    (name) => agents.find((entry) => entry.name.toLowerCase() === name.toLowerCase())?.id ?? name,
+  );
+}
+
+export function agentFileText(agent: AgentRecord, agents: readonly AgentRecord[]): string {
   const setup: AgentSetup = {
     name: agent.name,
     description: agent.description,
@@ -31,6 +44,8 @@ export function agentFileText(agent: AgentRecord): string {
     tools: agent.tools,
     mcpServerIds: agent.mcpServerIds,
     skills: agent.skills,
+    canAsk: canAskNames(agent, agents),
+    filesForAskedOnly: agent.filesForAskedOnly,
   };
   return `${JSON.stringify({ kind: AGENT_FILE_KIND, version: 1, agent: setup }, null, 2)}\n`;
 }
@@ -73,6 +88,8 @@ export function parseAgentFile(content: string): AgentSetup | null {
     },
     mcpServerIds: idList(raw.mcpServerIds, 100),
     skills: idList(raw.skills, 200),
+    canAsk: idList(raw.canAsk, 50, NAME_MAX),
+    filesForAskedOnly: raw.filesForAskedOnly === true,
   };
 }
 

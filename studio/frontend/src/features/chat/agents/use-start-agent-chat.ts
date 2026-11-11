@@ -120,6 +120,7 @@ export function useStartAgentChat(): {
         modelGgufVariant: ggufVariant,
         archived: false,
         createdAt: Date.now(),
+        agentId: agent.id,
         settings: plan.settings,
       });
       const loaded = useChatRuntimeStore.getState();

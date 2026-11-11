@@ -202,6 +202,7 @@ class ChatThread(BaseModel):
     forkTitleBase: Optional[str] = None
     # Server-set: the scheduled task whose run made this chat.
     scheduledTaskId: Optional[str] = None
+    agentId: Optional[str] = Field(default = None, max_length = 128)
     # Server-set on rename, move or (un)archive.
     modifiedAt: Optional[int] = None
     settings: Optional[ChatThreadSettings] = None
@@ -395,8 +396,17 @@ class ChatAgent(BaseModel):
     skills: list[Annotated[str, Field(max_length = 128)]] = Field(
         default_factory = list, max_length = 200
     )
+    canAsk: list[Annotated[str, Field(max_length = 200)]] = Field(default_factory = list, max_length = 50)
+    filesForAskedOnly: bool = False
     createdAt: SqliteInt
     updatedAt: SqliteInt
+
+    @model_validator(mode = "after")
+    def _cannot_ask_itself(self):
+        if self.id in self.canAsk:
+            raise ValueError("An agent cannot ask itself.")
+        self.canAsk = list(dict.fromkeys(self.canAsk))
+        return self
 
 
 class ChatAgentListResponse(BaseModel):

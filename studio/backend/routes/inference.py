@@ -4650,6 +4650,10 @@ def _selects_only_provider_hosted_tools(
     # Armed research needs Studio's local deep_research tool, so it is never purely hosted.
     if getattr(payload, "deep_research_armed", False):
         return False
+    from core.inference import ask_agent_tool
+
+    if ask_agent_tool.bound():
+        return False
     enabled = getattr(payload, "enabled_tools", None)
     # None means every local tool; an empty list selects none. Neither is a hosted-tool request.
     if not enabled or not isinstance(enabled, list):
@@ -6242,6 +6246,11 @@ async def _select_request_tools(
         from state.tool_policy import get_tool_policy
         if get_tool_policy() is not False:
             tools = tools + [DEEP_RESEARCH_TOOL]
+    from core.inference.ask_agent_tool import offered_tool
+
+    ask_agent = offered_tool()
+    if ask_agent is not None:
+        tools = tools + [ask_agent]
     delegated = _delegated_tool_names.get()
     if delegated is not None:
         tools = [tool for tool in tools if tool["function"]["name"] in delegated]
@@ -31372,9 +31381,10 @@ async def produce_openai_chat_completions(
     # Before routing splits, or unsupported parts are silently dropped.
     _reject_unsupported_content_parts(payload)
     await _materialize_sandbox_attachments(payload)
-    from core.inference import file_history
+    from core.inference import ask_agent_tool, file_history
 
     file_history.set_turn(payload.thread_id, payload.user_message_id)
+    await ask_agent_tool.bind_request(payload, request, current_subject)
 
     # ── External provider routing ────────────────────────────────
     # encrypted_api_key is optional: local providers may run without auth.
@@ -32985,6 +32995,8 @@ async def produce_openai_chat_completions(
                     # Set by the frame that ends a park: other tabs clear their prompt on it, so it
                     # is forwarded first and the slot is retaken before the generator does more.
                     resume_before_next = False
+                    # The asked agent may run on this same llama-server, whose slot this turn holds.
+                    asking_agent = False
                     while True:
                         if cancel_event.is_set():
                             mark_current_response_failed()
@@ -33020,9 +33032,20 @@ async def produce_openai_chat_completions(
                             _tool_decode_finished = True
                             break
 
+                        if event.get("tool_name") == ask_agent_tool.ASK_AGENT_TOOL_NAME:
+                            if event["type"] == "tool_start":
+                                # A provisional card is the call still being written.
+                                asking_agent = not (event.get("provenance") or {}).get(
+                                    "provisional"
+                                )
+                            elif event["type"] == "tool_end":
+                                asking_agent = False
                         # Anything after the gated tool_start is the answer, except the context meter sent before the wait.
                         if not (
-                            (event["type"] == "tool_start" and event.get("awaiting_confirmation"))
+                            asking_agent
+                            or (
+                                event["type"] == "tool_start" and event.get("awaiting_confirmation")
+                            )
                             or event["type"] == "context_usage"
                             or (
                                 event["type"] == "skill_load"
@@ -33089,7 +33112,9 @@ async def produce_openai_chat_completions(
                                 prev_text = ""
                                 reasoning_extractor = _new_chat_reasoning_extractor()
                                 # Yielded just before the loop blocks on the user.
-                                await _park_admission(bool(event.get("awaiting_confirmation")))
+                                await _park_admission(
+                                    bool(event.get("awaiting_confirmation")) or asking_agent
+                                )
                                 approval_flush_pending = bool(event.get("awaiting_confirmation"))
                             if _ui_events:
                                 yield f"data: {json.dumps(event)}\n\n"

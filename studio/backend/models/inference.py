@@ -2875,6 +2875,11 @@ class SandboxAttachment(BaseModel):
     name: str = Field(..., max_length = 1024)
 
 
+class AskAgentFile(BaseModel):
+    name: str = Field(..., max_length = 1024)
+    text: str
+
+
 class ChatCompletionRequest(BaseModel):
     """OpenAI-compatible chat completion request.
 
@@ -3249,6 +3254,22 @@ class ChatCompletionRequest(BaseModel):
         description = (
             "[x-unsloth] Chat attachment originals (hashes from POST /api/chat/attachment-originals) "
             "to copy into the session sandbox before the tool loop, when the python tool is enabled."
+        ),
+    )
+    agent_id: Optional[str] = Field(
+        None,
+        max_length = 128,
+        description = (
+            "[x-unsloth] The saved agent this chat was started from. When that agent can ask other "
+            "agents, a streaming tool-loop request is offered the ask_agent tool."
+        ),
+    )
+    ask_agent_files: Optional[list[AskAgentFile]] = Field(
+        None,
+        max_length = 64,
+        description = (
+            "[x-unsloth] Attached files kept out of the messages. Their text never reaches this "
+            "request's model; ask_agent hands a file to the agent it asks when the call names it."
         ),
     )
     thread_id: Optional[str] = Field(

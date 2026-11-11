@@ -462,11 +462,20 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             tools_json TEXT NOT NULL DEFAULT '{}',
             mcp_server_ids_json TEXT NOT NULL DEFAULT '[]',
             skills_json TEXT NOT NULL DEFAULT '[]',
+            can_ask_json TEXT NOT NULL DEFAULT '[]',
+            files_for_asked_only INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         )
         """
     )
+    chat_agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(chat_agents)").fetchall()}
+    if "can_ask_json" not in chat_agent_cols:
+        conn.execute("ALTER TABLE chat_agents ADD COLUMN can_ask_json TEXT NOT NULL DEFAULT '[]'")
+    if "files_for_asked_only" not in chat_agent_cols:
+        conn.execute(
+            "ALTER TABLE chat_agents ADD COLUMN files_for_asked_only INTEGER NOT NULL DEFAULT 0"
+        )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS chat_threads (
@@ -489,6 +498,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             settings_json TEXT,
             modified_at INTEGER,
             scheduled_task_id TEXT,
+            agent_id TEXT,
             FOREIGN KEY(project_id) REFERENCES chat_projects(id) ON DELETE CASCADE
         )
         """
@@ -522,6 +532,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     # The task whose run made this chat; kept after the task is deleted.
     if "scheduled_task_id" not in chat_thread_cols:
         conn.execute("ALTER TABLE chat_threads ADD COLUMN scheduled_task_id TEXT")
+    if "agent_id" not in chat_thread_cols:
+        conn.execute("ALTER TABLE chat_threads ADD COLUMN agent_id TEXT")
     # Last rename, move or (un)archive. Null until then.
     if "modified_at" not in chat_thread_cols:
         conn.execute("ALTER TABLE chat_threads ADD COLUMN modified_at INTEGER")
@@ -2205,6 +2217,7 @@ def _chat_thread_from_row(row: sqlite3.Row, include_settings: bool = True) -> di
         "forkTitleBase": data.get("fork_title_base"),
         "modifiedAt": data.get("modified_at"),
         "scheduledTaskId": data.get("scheduled_task_id") or None,
+        "agentId": data.get("agent_id") or None,
     }
     if include_settings:
         thread["settings"] = _json_loads(data.get("settings_json"), None)
@@ -2239,6 +2252,8 @@ def _chat_agent_from_row(row: sqlite3.Row) -> dict:
         "tools": json.loads(row["tools_json"]),
         "mcpServerIds": json.loads(row["mcp_server_ids_json"]),
         "skills": json.loads(row["skills_json"]),
+        "canAsk": json.loads(row["can_ask_json"]),
+        "filesForAskedOnly": bool(row["files_for_asked_only"]),
         "createdAt": row["created_at"],
         "updatedAt": row["updated_at"],
     }
@@ -2292,8 +2307,8 @@ def upsert_chat_thread(
         conn.execute(
             """
             INSERT INTO chat_threads
-                (id, title, model_type, model_id, model_gguf_variant, pair_id, project_id, archived, created_at, updated_at, openai_code_exec_container_id, anthropic_code_exec_container_id, forked_from_thread_id, forked_from_message_id, fork_boundary_message_id, fork_title_base, settings_json, scheduled_task_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, title, model_type, model_id, model_gguf_variant, pair_id, project_id, archived, created_at, updated_at, openai_code_exec_container_id, anthropic_code_exec_container_id, forked_from_thread_id, forked_from_message_id, fork_boundary_message_id, fork_title_base, settings_json, scheduled_task_id, agent_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 model_type = excluded.model_type,
@@ -2328,7 +2343,8 @@ def upsert_chat_thread(
                 -- an absent snapshot keeps the stored one: most writers rebuild the record without it.
                 settings_json = COALESCE(excluded.settings_json, chat_threads.settings_json),
                 -- Set by the scheduler when it makes the chat; no later writer changes it.
-                scheduled_task_id = COALESCE(chat_threads.scheduled_task_id, excluded.scheduled_task_id)
+                scheduled_task_id = COALESCE(chat_threads.scheduled_task_id, excluded.scheduled_task_id),
+                agent_id = COALESCE(chat_threads.agent_id, excluded.agent_id)
             """,
             (
                 thread["id"],
@@ -2349,6 +2365,7 @@ def upsert_chat_thread(
                 thread.get("forkTitleBase"),
                 json.dumps(thread["settings"]) if thread.get("settings") is not None else None,
                 thread.get("scheduledTaskId"),
+                thread.get("agentId"),
             ),
         )
         conn.commit()
@@ -3519,8 +3536,9 @@ def upsert_chat_agent(agent: dict) -> dict:
             """
             INSERT INTO chat_agents
                 (id, name, description, model_id, model_gguf_variant, system_prompt,
-                 tools_json, mcp_server_ids_json, skills_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 tools_json, mcp_server_ids_json, skills_json, can_ask_json, files_for_asked_only,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -3530,6 +3548,8 @@ def upsert_chat_agent(agent: dict) -> dict:
                 tools_json = excluded.tools_json,
                 mcp_server_ids_json = excluded.mcp_server_ids_json,
                 skills_json = excluded.skills_json,
+                can_ask_json = excluded.can_ask_json,
+                files_for_asked_only = excluded.files_for_asked_only,
                 updated_at = excluded.updated_at
             """,
             (
@@ -3542,6 +3562,8 @@ def upsert_chat_agent(agent: dict) -> dict:
                 json.dumps(agent.get("tools") or {}),
                 json.dumps(agent.get("mcpServerIds") or []),
                 json.dumps(agent.get("skills") or []),
+                json.dumps(agent.get("canAsk") or []),
+                1 if agent.get("filesForAskedOnly") else 0,
                 int(agent["createdAt"]),
                 int(agent["updatedAt"]),
             ),
@@ -4954,8 +4976,8 @@ def fork_chat_thread(
                 (id, title, model_type, model_id, model_gguf_variant, pair_id, project_id, archived, created_at,
                  openai_code_exec_container_id, anthropic_code_exec_container_id,
                  forked_from_thread_id, forked_from_message_id, fork_boundary_message_id,
-                 fork_title_base, settings_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, NULL, ?, ?, ?, ?, ?)
+                 fork_title_base, settings_json, agent_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)
             """,
             (
                 new_thread_id,
@@ -4971,6 +4993,7 @@ def fork_chat_thread(
                 boundary_message_id,
                 base,
                 src_dict.get("settings_json"),
+                src_dict.get("agent_id"),
             ),
         )
         fork_messages = []
