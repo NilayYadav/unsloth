@@ -2,11 +2,12 @@
 # Copyright 2026-Present the Unsloth team. See /studio/LICENSE.AGPL-3.0
 
 """The published tag list must stay short: :core, :latest, :studio, the release tags,
-and one dated nightly pin per image. Per-run handles are removed by cleanup."""
+and one floating nightly plus one dated nightly pin per image. Per-run handles are removed by cleanup."""
 
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -36,10 +37,72 @@ def _tag_rules(doc: dict, job: str) -> list[str]:
 def test_no_per_commit_tags_are_published(doc: dict):
     text = WORKFLOW.read_text(encoding = "utf-8")
     assert "type=sha" not in text, "sha-<commit> tags are back on every push"
+    for job, alias in (("merge", "core-nightly"), ("merge-studio", "nightly")):
+        undated = [r for r in _tag_rules(doc, job) if "nightly" in r and "pin_date" not in r]
+        assert len(undated) == 1 and undated[0].startswith(
+            f"type=raw,value={alias},enable="
+        ), f"{job} must write one floating nightly tag, got {undated}"
+
+
+_DEFAULT_INPUTS = {
+    "unsloth_ref": "",
+    "unsloth_zoo_ref": "main",
+    "notebooks_ref": "main",
+    "llama_prebuilt_tag": "",
+}
+_MAIN = "refs/heads/main"
+_RELEASE = "refs/tags/v0.1.916-beta"
+
+
+def _holds(expr: str, *, event: str, ref: str, inputs: dict | None) -> bool:
+    expr = expr.strip().removeprefix("${{").removesuffix("}}")
+    names = {
+        "github.ref": ref,
+        "github.event_name": event,
+        "github.event.repository.default_branch": "main",
+        **{f"github.event.inputs.{k}": v for k, v in (inputs or {}).items()},
+    }
+    py = re.sub(r"\bgithub(?:\.\w+)+", lambda m: repr(names.get(m.group(0), "")), expr)
+    py = py.replace("&&", " and ").replace("||", " or ")
+    funcs = {
+        "always": lambda: True,
+        "format": lambda f, *a: f.format(*a),
+        "startsWith": lambda s, prefix: s.startswith(prefix),
+    }
+    return bool(eval(py, funcs))
+
+
+def _floating_tags_moved(doc: dict, **run) -> set[str]:
+    moved = set()
     for job in ("merge", "merge-studio"):
-        assert not any(
-            "nightly" in r and "pin_date" not in r for r in _tag_rules(doc, job)
-        ), f"{job} still writes a mutable nightly tag"
+        for rule in _tag_rules(doc, job):
+            m = re.fullmatch(r"type=raw,value=([a-z-]+),enable=(\$\{\{.*\}\})", rule)
+            if m and _holds(m.group(2), **run):
+                moved.add(m.group(1))
+    return moved
+
+
+@pytest.mark.parametrize(
+    ("event", "ref", "inputs", "moved"),
+    [
+        ("schedule", _MAIN, None, {"nightly", "core-nightly"}),
+        ("workflow_dispatch", _MAIN, _DEFAULT_INPUTS, {"nightly", "core-nightly"}),
+        ("push", _RELEASE, None, {"latest", "studio", "core"}),
+        ("workflow_dispatch", _RELEASE, _DEFAULT_INPUTS, {"latest", "studio", "core"}),
+        ("workflow_dispatch", "refs/heads/some-branch", _DEFAULT_INPUTS, set()),
+        *[
+            ("workflow_dispatch", ref, {**_DEFAULT_INPUTS, name: "other"}, set())
+            for ref in (_MAIN, _RELEASE)
+            for name in _DEFAULT_INPUTS
+        ],
+    ],
+)
+def test_latest_follows_releases_and_nightly_follows_main(
+    doc: dict, event: str, ref: str, inputs: dict | None, moved: set[str]
+):
+    run = {"event": event, "ref": ref, "inputs": inputs}
+    assert _floating_tags_moved(doc, **run) == moved
+    assert _holds(doc["jobs"]["hub-readme"]["if"], **run) == ("latest" in moved)
 
 
 @pytest.mark.parametrize(
@@ -129,6 +192,8 @@ def test_the_digest_export_resolves_the_handle(doc: dict):
 def test_the_hub_readme_lists_the_pins_not_the_handles():
     text = HUB_README.read_text(encoding = "utf-8")
     assert "core-nightly-<YYYY.MM.DD>" in text
+    assert "`nightly`, `core-nightly`" in text
+    assert "`latest` and `core` are rebuilt daily" not in text
     for stale in ("sha-<commit>", "core-sha-", "build-<run_id>"):
         assert stale not in text
 
@@ -144,8 +209,21 @@ def test_cleanup_runs_after_everything_except_an_overridden_dispatch(cleanup_job
     assert set(cleanup_job["needs"]) == {"merge", "merge-studio", "hub-readme", "smoke-test"}
     cond = cleanup_job["if"]
     assert cond.startswith("${{ always() && (github.event_name != 'workflow_dispatch' || (")
-    gate = doc["jobs"]["hub-readme"]["if"].strip().removeprefix("${{").removesuffix("}}").strip()
-    assert gate in cond, "the dispatch exception must be the stable-tag gate itself"
+    runs = [
+        ("schedule", _MAIN, None),
+        ("push", _RELEASE, None),
+        ("workflow_dispatch", _MAIN, _DEFAULT_INPUTS),
+        ("workflow_dispatch", _RELEASE, _DEFAULT_INPUTS),
+        ("workflow_dispatch", "refs/heads/some-branch", _DEFAULT_INPUTS),
+        ("workflow_dispatch", _MAIN, {**_DEFAULT_INPUTS, "unsloth_ref": "other"}),
+        ("workflow_dispatch", _RELEASE, {**_DEFAULT_INPUTS, "llama_prebuilt_tag": "other"}),
+    ]
+    for event, ref, inputs in runs:
+        run = {"event": event, "ref": ref, "inputs": inputs}
+        keeps_handles = event == "workflow_dispatch" and not _floating_tags_moved(doc, **run)
+        assert (
+            _holds(cond, **run) != keeps_handles
+        ), f"{event} on {ref} with {inputs}: the dispatch exception must be the stable-tag gates"
 
 
 def _manifest_step(doc: dict, job: str) -> str:
@@ -243,6 +321,20 @@ def test_a_new_dated_pin_is_created(doc: dict, job: str, tmp_path: Path):
     for t in ("latest", "nightly-2026.09.06", "build-777"):
         assert f"-t docker.io/unsloth/unsloth:{t} " in log
     assert len(_probes(tmp_path)) == 1, "only the dated pin is probed, once"
+
+
+@pytest.mark.parametrize("job", ["merge", "merge-studio"])
+def test_the_floating_nightly_is_not_treated_as_a_dated_pin(doc: dict, job: str, tmp_path: Path):
+    res, log = _run_manifest(
+        _manifest_step(doc, job),
+        tmp_path,
+        existing = ["nightly", "core-nightly"],
+        tags = ["nightly", "core-nightly", "build-777"],
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    for t in ("nightly", "core-nightly", "build-777"):
+        assert f"-t docker.io/unsloth/unsloth:{t} " in log
+    assert _probes(tmp_path) == [], "a floating tag moves every day and is never probed"
 
 
 @pytest.mark.parametrize("job", ["merge", "merge-studio"])

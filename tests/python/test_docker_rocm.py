@@ -1029,6 +1029,50 @@ class TestRocmEntrypoint:
             assert s_ln.split(",enable=", 1)[1:] == b_ln.split(",enable=", 1)[1:], (s_ln, b_ln)
         assert "tag-studio" in wf["jobs"]["hub-readme"]["needs"]
 
+    @staticmethod
+    def _holds(expr, ref, stable):
+        names = {
+            "github.ref": ref,
+            "github.event.repository.default_branch": "main",
+            "needs.prepare.outputs.stable": stable,
+        }
+        expr = expr.strip().removeprefix("${{").removesuffix("}}")
+        py = re.sub(r"\b(?:github|needs)(?:\.\w+)+", lambda m: repr(names[m.group(0)]), expr)
+        py = py.replace("&&", " and ").replace("||", " or ")
+        funcs = {
+            "format": lambda f, *a: f.format(*a),
+            "startsWith": lambda s, prefix: s.startswith(prefix),
+        }
+        return bool(eval(py, funcs))
+
+    @pytest.mark.parametrize(
+        ("ref", "inputs", "moved"),
+        [
+            ("refs/heads/main", {}, {"nightly", "nightly-studio"}),
+            ("refs/tags/v0.1.916-beta", {}, {"latest", "studio"}),
+            ("refs/heads/main", {"IN_UNSLOTH": "some-branch"}, set()),
+            ("refs/tags/v0.1.916-beta", {"IN_UNSLOTH": "some-branch"}, set()),
+            ("refs/heads/some-branch", {}, set()),
+        ],
+    )
+    def test_latest_follows_releases_and_nightly_follows_main(self, tmp_path, ref, inputs, moved):
+        import yaml
+
+        wf = yaml.safe_load(open(_WORKFLOW, encoding = "utf-8"))
+        rc, got, out = self._build_args(tmp_path, **inputs)
+        assert rc == 0, out
+        aliases = set()
+        for job in ("tag", "tag-studio"):
+            meta = next(s for s in wf["jobs"][job]["steps"] if s.get("id") == "meta")
+            assert meta["with"].get("flavor") == "latest=false", job
+            for ln in meta["with"]["tags"].splitlines():
+                m = re.fullmatch(r"\s*type=raw,value=([a-z-]+),enable=(\$\{\{.*\}\})\s*", ln)
+                if m and self._holds(m.group(2), ref, got["stable"]):
+                    aliases.add(m.group(1))
+        assert aliases == moved
+        synced = self._holds(wf["jobs"]["hub-readme"]["if"], ref, got["stable"])
+        assert synced == ("latest" in moved), "the Hub page is synced exactly when :latest moves"
+
     def test_a_notebooks_override_gets_sha_tags_only(self, tmp_path):
         """A dispatch that bakes another notebooks ref is an experiment like any
         other override: :studio and :latest name the default build only."""

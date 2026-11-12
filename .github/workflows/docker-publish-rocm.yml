@@ -1,4 +1,5 @@
 # AMD ROCm images: training base (Dockerfile.rocm, :latest) and Studio (Dockerfile.studio-rocm, :studio).
+# :latest and :studio follow v* releases; :nightly and :nightly-studio follow main.
 # No GPU runner needed; amd64 only (no arm64 ROCm wheels). HAS_AMD_GPU_RUNNER gates the smoke test.
 
 name: Publish ROCm Docker image
@@ -281,11 +282,13 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # latest=auto would tag :latest on a v* push here and again in tag-studio
+          flavor: latest=false
           # Override builds' sha tags carry the run id so two experiments at one commit do not collide.
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && needs.prepare.outputs.stable == 'true' }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && needs.prepare.outputs.stable == 'true' }}
             type=ref,event=tag,enable=${{ needs.prepare.outputs.stable == 'true' }}
-            type=schedule,pattern=nightly,enable=${{ needs.prepare.outputs.stable == 'true' }}
+            type=raw,value=nightly,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && needs.prepare.outputs.stable == 'true' }}
             type=raw,value=${{ needs.prepare.outputs.rocm_gfx }},enable=${{ needs.prepare.outputs.gfx_tag == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
             type=sha,prefix=sha-,format=short,suffix=${{ needs.prepare.outputs.rocm_gfx != '' && format('-{0}', needs.prepare.outputs.rocm_gfx) || '' }}${{ needs.prepare.outputs.stable != 'true' && format('-r{0}', github.run_id) || '' }}
 
@@ -388,12 +391,13 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: latest=false
           # format(), not a bare ${{ }}-studio: tests/python/test_docker_rocm.py matches the raw gfx line
           # by name and it must stay unique to the base.
           tags: |
-            type=raw,value=studio,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && needs.prepare.outputs.stable == 'true' }}
+            type=raw,value=studio,enable=${{ startsWith(github.ref, 'refs/tags/v') && needs.prepare.outputs.stable == 'true' }}
             type=ref,event=tag,suffix=-studio,enable=${{ needs.prepare.outputs.stable == 'true' }}
-            type=schedule,pattern=nightly-studio,enable=${{ needs.prepare.outputs.stable == 'true' }}
+            type=raw,value=nightly-studio,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && needs.prepare.outputs.stable == 'true' }}
             type=raw,value=${{ format('{0}-studio', needs.prepare.outputs.rocm_gfx) }},enable=${{ needs.prepare.outputs.gfx_tag == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
             type=sha,prefix=sha-,format=short,suffix=${{ needs.prepare.outputs.rocm_gfx != '' && format('-{0}', needs.prepare.outputs.rocm_gfx) || '' }}${{ needs.prepare.outputs.stable != 'true' && format('-r{0}', github.run_id) || '' }}-studio
 
@@ -412,12 +416,12 @@ jobs:
               docker buildx imagetools inspect "$tag"
           done
 
-  # Syncs docker/DOCKERHUB-ROCM.md to Hub (no push writes it), read back, failing on a token that
-  # cannot edit. Must use the namespace-scoped route: the legacy one 403s org tokens.
+  # Syncs docker/DOCKERHUB-ROCM.md to Hub (no push writes it) when :latest moved, read back, failing
+  # on a token that cannot edit. Must use the namespace-scoped route: the legacy one 403s org tokens.
   hub-readme:
     # prepare is listed because the `if` reads its outputs; an unlisted job is absent from the context.
     needs: [prepare, tag, tag-studio]
-    if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && needs.prepare.outputs.stable == 'true' }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && needs.prepare.outputs.stable == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
