@@ -5,8 +5,7 @@ name: Publish Blackwell Docker image
 
 on:
   push:
-    # Not on main merges (too costly); the daily cron publishes main as :nightly and :core-nightly.
-    # Tags publish immediately and move :latest, :studio and :core.
+    # Not on main merges (too costly); the daily cron publishes main. Tags publish immediately.
     tags: ['v*']
   schedule:
     # Off the hour: on-the-hour cron runs queue behind the global peak and can be dropped.
@@ -291,10 +290,9 @@ jobs:
           # latest=auto would tag :latest on a v* push, colliding with the Studio image
           flavor: latest=false
           tags: |
-            # :core follows v* releases and :core-nightly follows main, both only with no baked
-            # input overridden on dispatch, else a feature ref overwrites them
-            type=raw,value=core,enable=${{ startsWith(github.ref, 'refs/tags/v') && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '' }}
-            type=raw,value=core-nightly,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '' }}
+            # only on the default branch AND with no baked input overridden on
+            # dispatch, else a feature ref overwrites :core with non-main bits
+            type=raw,value=core,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '' }}
             type=ref,event=tag,prefix=core-
             type=schedule,pattern=core-nightly-${{ needs.prepare.outputs.pin_date }}
             type=raw,value=core-build-${{ github.run_id }}
@@ -485,9 +483,8 @@ jobs:
           # Disables implicit latest=auto, which would tag :latest on a v* push and bypass the gate below.
           flavor: latest=false
           tags: |
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '' }}
-            type=raw,value=studio,enable=${{ startsWith(github.ref, 'refs/tags/v') && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '' }}
-            type=raw,value=nightly,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '' }}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '' }}
+            type=raw,value=studio,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '' }}
             type=ref,event=tag
             type=schedule,pattern=nightly-${{ needs.prepare.outputs.pin_date }}
             type=raw,value=build-${{ github.run_id }}
@@ -556,7 +553,7 @@ jobs:
   # failing on a token that cannot edit. Namespace-scoped route: the legacy one 403s org tokens.
   hub-readme:
     needs: merge-studio
-    if: ${{ startsWith(github.ref, 'refs/tags/v') && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '' }}
+    if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -637,7 +634,7 @@ jobs:
   # Namespace-scoped route: the legacy one rejects org tokens. Overridden dispatches keep their handles.
   cleanup:
     needs: [merge, merge-studio, hub-readme, smoke-test]
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || ((github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v')) && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '')) }}
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.inputs.unsloth_ref == '' && (github.event.inputs.unsloth_zoo_ref == '' || github.event.inputs.unsloth_zoo_ref == 'main') && (github.event.inputs.notebooks_ref == '' || github.event.inputs.notebooks_ref == 'main') && github.event.inputs.llama_prebuilt_tag == '')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

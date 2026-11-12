@@ -103,11 +103,9 @@ docker run --rm -e UNSLOTH_ALLOW_CPU=1 unsloth/unsloth:core python -c "import un
 |---|---|---|
 | `latest`, `studio` | Unsloth Studio web UI + JupyterLab + notebooks + key-only SSH | Most users. Train and chat in the browser. |
 | `core` | Training stack + JupyterLab + notebooks, no Unsloth Studio | Notebooks, scripts, CI, slimmer pulls. |
-| `v<version>`, `core-v<version>` | The same two images at one release, for example `v0.1.916-beta` | Staying on a known release. |
-| `nightly`, `core-nightly` | The same two images built from `main` every day | Trying changes before they are released. |
-| `nightly-<YYYY.MM.DD>`, `core-nightly-<YYYY.MM.DD>` | One immutable pin per daily build, kept 60 days | Reproducible runs. |
+| `nightly-<YYYY.MM.DD>`, `core-nightly-<YYYY.MM.DD>` | The same two images, one immutable pin per daily rebuild, kept 60 days | Reproducible runs. |
 
-`latest`, `studio` and `core` move only when a release is published. `nightly` and `core-nightly` are rebuilt daily, not on every merge to `main`. All are multi-arch: `linux/amd64` and `linux/arm64` (GH200, DGX Spark).
+`latest` and `core` are rebuilt daily, not on every merge to `main`. Both are multi-arch: `linux/amd64` and `linux/arm64` (GH200, DGX Spark).
 
 ## Supported GPUs
 
