@@ -6116,6 +6116,7 @@ export const cs = {
       inSharedMemory: "{amount} ve sdílené paměti",
       inVram: "{amount} ve VRAM",
       inRam: "{amount} v RAM",
+      metalCpuWeights: "Váhy {types} na CPU (Metal je neumí spustit)",
     },
   },
 } satisfies DeepPartialMessageTree<typeof en>;

@@ -6102,6 +6102,7 @@ export const id = {
       inSharedMemory: "{amount} di memori bersama",
       inVram: "{amount} di VRAM",
       inRam: "{amount} di RAM",
+      metalCpuWeights: "Bobot {types} di CPU (Metal tidak dapat menjalankannya)",
     },
   },
 } satisfies DeepPartialMessageTree<typeof en>;

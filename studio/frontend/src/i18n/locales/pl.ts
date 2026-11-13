@@ -6153,6 +6153,7 @@ export const pl = {
       inSharedMemory: "{amount} w pamięci współdzielonej",
       inVram: "{amount} w VRAM",
       inRam: "{amount} w RAM",
+      metalCpuWeights: "Wagi {types} na CPU (Metal nie może ich uruchomić)",
     },
   },
 } satisfies DeepPartialMessageTree<typeof en>;

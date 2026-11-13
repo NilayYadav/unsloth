@@ -1240,6 +1240,69 @@ def llama_saw_gpu_device(lines: "list[str]") -> Optional[bool]:
     return saw_gpu_device
 
 
+_LOADER_TENSOR_TYPE_RE = re.compile(r"llama_model_loader:\s+-\s+type\s+(\w+):\s+\d+\s+tensors")
+# ggml-metal's supports_op rejects these for MUL_MAT / MUL_MAT_ID / GET_ROWS, so llama.cpp keeps
+# them in CPU buffers yet logs every layer as offloaded (#15409). nvfp4: only before
+# unslothai/llama.cpp#330.
+_METAL_HOST_ONLY_WEIGHT_TYPES = ("nvfp4", "tq1_0", "f8_e4m3")
+_USING_METAL_RE = re.compile(r"using device (?:MTL|Metal)", re.IGNORECASE)
+
+
+def _main_load_offloads_every_layer(lines: "list[str]") -> bool:
+    """The count heading the first block that allocated weights (as parse_weight_placement picks it):
+    a no-alloc sizing pass can log N/N before the real load settles on a split."""
+    counts = None
+    for line in lines:
+        match = _OFFLOADED_LAYERS_RE.search(line)
+        if match is not None:
+            counts = match
+            continue
+        buffer = _MODEL_BUFFER_RE.search(line)
+        if buffer is not None and float(buffer.group(2)) > 0:
+            return counts is not None and counts.group(1) == counts.group(2)
+    return False
+
+
+def metal_unsupported_weight_types(
+    lines: "list[str]", placement: "Optional[dict]"
+) -> "Optional[list[str]]":
+    """The main model's Metal-rejected weight types when most weight is in host buffers, else None.
+    The placement gate drops a type a newer build runs on Metal; pass None when experts were put on
+    the CPU on purpose (-ncmoe, -ot), which fills host buffers too."""
+    if not placement or not 0 < placement["gpu_mib"] < placement["host_mib"]:
+        return None
+    if placement.get("overflow_layers") or placement.get("all_experts_in_ram"):
+        return None
+    if not _main_load_offloads_every_layer(lines):
+        return None
+    on_metal = False
+    after_header = False
+    for line in lines:
+        if "device_info:" in line:
+            after_header = True
+            continue
+        match = _DEVICE_ROW_RE.search(line) if after_header else None
+        if (match and match.group(1).lower() in ("metal", "mtl")) or _USING_METAL_RE.search(line):
+            on_metal = True
+            break
+    if not on_metal:
+        return None
+    # The main model's table comes first; a drafter loaded after it prints its own.
+    types: list[str] = []
+    in_table = False
+    for line in lines:
+        match = _LOADER_TENSOR_TYPE_RE.search(line)
+        if match is None:
+            if in_table:
+                break
+            continue
+        in_table = True
+        name = match.group(1).lower()
+        if name in _METAL_HOST_ONLY_WEIGHT_TYPES and name not in types:
+            types.append(name)
+    return types or None
+
+
 def classify_gpu_offload_lines(lines: "list[str]") -> Optional[bool]:
     """True if the model landed on a GPU, False if it stayed on CPU despite GPU
     intent, None when the log has no usable signal."""
@@ -8570,6 +8633,7 @@ class LlamaCppBackend:
         self._gpu_offload_layers: Optional[tuple[int, int]] = None
         # parse_weight_placement's result for this load.
         self._weight_placement: Optional[dict] = None
+        self._metal_unsupported_weight_types: Optional[list[str]] = None
         # Whether the user's own extras pinned the layer split for this load.
         self._offload_overridden: bool = False
         # Studio saw a GPU for this load but llama.cpp's device table did not.
@@ -9083,6 +9147,10 @@ class LlamaCppBackend:
     @property
     def expert_cache_mib(self) -> Optional[float]:
         return self._placement_value("expert_cache_mib")
+
+    @property
+    def metal_unsupported_weight_types(self) -> Optional[list[str]]:
+        return getattr(self, "_metal_unsupported_weight_types", None)
 
     @property
     def gpu_backend_unavailable(self) -> bool:
@@ -33902,6 +33970,20 @@ class LlamaCppBackend:
                     if self._gguf_path
                     else None,
                 )
+                self._metal_unsupported_weight_types = metal_unsupported_weight_types(
+                    self._stdout_lines,
+                    None
+                    if self._n_cpu_moe
+                    or _args_place_tensors_on_cpu(extra_args)
+                    or _env_places_tensors_on_cpu(env)
+                    else self._weight_placement,
+                )
+                if self._metal_unsupported_weight_types:
+                    logger.warning(
+                        "Metal cannot run this model's %s weights, so llama.cpp runs them on the "
+                        "CPU although every layer counts as offloaded.",
+                        ", ".join(t.upper() for t in self._metal_unsupported_weight_types),
+                    )
                 self._gpu_backend_unavailable = bool(_detected_gpus or _metal_capable_host()) and (
                     llama_saw_gpu_device(self._stdout_lines) is False
                 )
@@ -35221,6 +35303,7 @@ class LlamaCppBackend:
             self._gpu_offload_active = None
             self._gpu_offload_layers = None
             self._weight_placement = None
+            self._metal_unsupported_weight_types = None
             self._offload_overridden = False
             self._gpu_backend_unavailable = False
             # Candidates are (pid, resolved binary, kill callable); shared handling below keeps paths agreeing.

@@ -5643,6 +5643,7 @@ export const ja = {
       inSharedMemory: "共有メモリに {amount}",
       inVram: "VRAM に {amount}",
       inRam: "RAM に {amount}",
+      metalCpuWeights: "{types} の重みは CPU 上 (Metal では実行できません)",
     },
   },
 } satisfies DeepPartialMessageTree<typeof en>;

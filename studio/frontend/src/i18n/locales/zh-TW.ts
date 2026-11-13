@@ -5773,6 +5773,7 @@ export const zhTW = {
       inSharedMemory: "{amount} 位於共用記憶體",
       inVram: "{amount} 位於 VRAM",
       inRam: "{amount} 位於 RAM",
+      metalCpuWeights: "{types} 權重位於 CPU（Metal 無法執行）",
     },
   },
 } satisfies DeepPartialMessageTree<typeof en>;

@@ -5822,6 +5822,7 @@ export const th = {
       inSharedMemory: "{amount} ในหน่วยความจำที่ใช้ร่วมกัน",
       inVram: "{amount} ใน VRAM",
       inRam: "{amount} ใน RAM",
+      metalCpuWeights: "น้ำหนัก {types} อยู่บน CPU (Metal รันไม่ได้)",
     },
   },
 } satisfies DeepPartialMessageTree<typeof en>;

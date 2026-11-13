@@ -6145,6 +6145,7 @@ export const uk = {
       inSharedMemory: "{amount} у спільній пам’яті",
       inVram: "{amount} у VRAM",
       inRam: "{amount} у RAM",
+      metalCpuWeights: "Ваги {types} на CPU (Metal не може їх виконувати)",
     },
   },
 } satisfies DeepPartialMessageTree<typeof en>;

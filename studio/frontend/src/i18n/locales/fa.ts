@@ -6068,6 +6068,7 @@ export const fa = {
       inSharedMemory: "{amount} در حافظهٔ مشترک",
       inVram: "{amount} در VRAM",
       inRam: "{amount} در RAM",
+      metalCpuWeights: "وزن‌های {types} روی CPU (Metal نمی‌تواند آن‌ها را اجرا کند)",
     },
   },
 } satisfies DeepPartialMessageTree<typeof en>;
