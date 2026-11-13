@@ -220,6 +220,9 @@ def test_a_backticked_tag_mention_is_prose(tag):
     text = f"Use `{tag}` tags. More prose."
     assert strip_tool_markup(text, final = True) == text
     assert _calls(text) == []
+    # A real call after the mention still runs and is still stripped.
+    assert _calls(text + "\n" + XML_CALL) == [("web_search", {"query": "unsloth"})]
+    assert strip_tool_markup(text + "\n" + XML_CALL, final = True) == text
 
 
 def test_strip_buffers_open_block_until_final():
@@ -312,11 +315,8 @@ def test_rendered_prompt_picks_the_reasoning_channel(tokenizer, effort, opener, 
     )
 
 
-def test_without_a_prompt_markers_default_to_high_and_accept_any_closer(tokenizer):
-    markers = cth.detect_reasoning_channel_markers(tokenizer)
-    assert markers[0] == "<ifm|think>"
-    normalizer = cth.make_reasoning_normalizer(markers, in_reasoning = True)
-    assert normalizer.feed("x</ifm|think_fast>y") + normalizer.finish() == "<think>x</think>y"
+def test_without_a_prompt_markers_default_to_high(tokenizer):
+    assert cth.detect_reasoning_channel_markers(tokenizer) == ("<ifm|think>", "</ifm|think>")
 
 
 def test_turn_end_token_stops_generation(tokenizer):

@@ -1650,17 +1650,15 @@ def _selected_chat_template_strings(tokenizer, tools = None) -> tuple[str, ...]:
 def _detect_reasoning_channel_markers_from_templates(
     templates: tuple[str, ...], prompt: Optional[str] = None
 ) -> Optional[tuple[str, ...]]:
-    """Return native reasoning markers only when a template emits them. ``(opener, closer, *other closers)``:
-    an IFM template holds every effort's opener, so the rendered ``prompt`` tail picks the pair (else high)."""
+    """Return native reasoning markers only when a template emits them. An IFM template holds every effort's
+    opener, so the rendered ``prompt`` tail picks the pair (else high)."""
     if any(opener in template for template in templates for opener in _GEMMA_TEMPLATE_OPENERS):
         return _GEMMA_THOUGHT_OPEN, _GEMMA_THOUGHT_CLOSE
     if any(_ATEM_TEMPLATE_OPENER in template for template in templates):
         return _ATEM_REASONING_RECIPIENT, _ATEM_REPLY_RECIPIENT
     ifm = [pair for pair in _IFM_THINK_PAIRS if any(pair[0] in t for t in templates)]
     if ifm:
-        opener, closer = next((p for p in ifm if prompt_opens_reasoning_channel(prompt, p)), ifm[0])
-        # Each closer is one dedicated token, so any of them ends the channel.
-        return (opener, closer, *(c for _, c in ifm if c != closer))
+        return next((p for p in ifm if prompt_opens_reasoning_channel(prompt, p)), ifm[0])
     return None
 
 
@@ -1881,11 +1879,12 @@ class ReasoningChannelNormalizer:
     def __init__(
         self,
         opening_marker: str,
-        *closing_markers: str,
+        closing_marker: str,
+        *,
         in_reasoning: bool = False,
     ):
         self._opening_marker = opening_marker
-        self._closing_markers = closing_markers
+        self._closing_marker = closing_marker
         self._buffer = ""
         self._in_reasoning = in_reasoning
         self._reasoning_done = False
@@ -1914,23 +1913,12 @@ class ReasoningChannelNormalizer:
                 if not self._buffer:
                     break
 
-            if self._in_reasoning and len(self._closing_markers) > 1:
-                found = [(self._buffer.find(m), m) for m in self._closing_markers]
-                index, marker = min(((i, m) for i, m in found if i >= 0), default = (-1, ""))
-                if index < 0:
-                    stable, self._buffer = min(
-                        (_split_partial_marker(self._buffer, m) for m in self._closing_markers),
-                        key = lambda split: len(split[0]),
-                    )
-                    output.append(stable)
-                    break
-            else:
-                marker = self._closing_markers[0] if self._in_reasoning else self._opening_marker
-                index = self._buffer.find(marker)
-                if index < 0:
-                    stable, self._buffer = _split_partial_marker(self._buffer, marker)
-                    output.append(stable)
-                    break
+            marker = self._closing_marker if self._in_reasoning else self._opening_marker
+            index = self._buffer.find(marker)
+            if index < 0:
+                stable, self._buffer = _split_partial_marker(self._buffer, marker)
+                output.append(stable)
+                break
 
             output.append(self._buffer[:index])
             self._buffer = self._buffer[index + len(marker) :]

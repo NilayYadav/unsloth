@@ -4578,6 +4578,11 @@ def _ifm_blocks(text: str, relaxed: bool = True):
     while (start := text.find(_IFM_BLOCK_OPEN, pos)) >= 0:
         calls = []
         pos = start + len(_IFM_BLOCK_OPEN)
+        while pos < n and text[pos].isspace():
+            pos += 1
+        if not text.startswith(_IFM_CALL_OPEN, pos) and text.find(_IFM_BLOCK_OPEN, pos) >= 0:
+            # A bare mention of the opener (no call follows): the real block starts later.
+            continue
         while True:
             while pos < n and text[pos].isspace():
                 pos += 1
