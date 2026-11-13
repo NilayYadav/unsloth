@@ -336,6 +336,205 @@ class _HostPackagesFinder:
         )
 
 
+_PIP_LOCATION_FLAGS = frozenset(("-t", "--target", "--prefix", "--root", "--home", "--user"))
+
+
+_chat_prefix = None
+
+
+def _route_pip():
+    try:
+        prefix = os.environ.get("_UNSLOTH_PIP_PREFIX")
+        owner = os.environ.get("_UNSLOTH_PIP_PREFIX_FOR")
+        if not prefix or not owner:
+            return
+
+        def key(path):
+            return os.path.normcase(os.path.realpath(path))
+
+        if key(sys.prefix) == key(owner):
+            global _chat_prefix
+            _chat_prefix = prefix
+            # Only a pip process gets PIP_PREFIX: anything else it spawns (venv --upgrade-deps) must not inherit it.
+            argv = list(getattr(sys, "orig_argv", None) or ())
+            module = argv[argv.index("-m") + 1] if "-m" in argv[:-1] else ""
+            # Python < 3.10 has no orig_argv: any -m launch counts.
+            is_pip = module in ("pip", "pip.__main__") or (
+                not module and os.path.basename(sys.argv[0]).lower().startswith(("pip", "-m"))
+            )
+            # pip --target/--prefix/--user/... already chose a location; PIP_PREFIX would conflict with it.
+            placed = any(
+                a.split("=", 1)[0] in _PIP_LOCATION_FLAGS or (a.startswith("-t") and a != "-t")
+                for a in sys.argv[1:]
+            ) or any(os.environ.get(k) for k in ("PIP_TARGET", "PIP_ROOT", "PIP_HOME"))
+            placed = placed or os.environ.get("PIP_USER", "").strip().lower() in (
+                "y",
+                "yes",
+                "t",
+                "true",
+                "on",
+                "1",
+            )
+            if is_pip and not placed:
+                os.environ["PIP_PREFIX"] = prefix
+                os.environ["PIP_IGNORE_INSTALLED"] = "1"
+            elif os.environ.get("PIP_PREFIX") == prefix:
+                os.environ.pop("PIP_PREFIX", None)
+                os.environ.pop("PIP_IGNORE_INSTALLED", None)
+        else:
+            # Another venv neither installs into nor sees the chat folder: its pip would count those packages as installed.
+            if os.environ.get("PIP_PREFIX") == prefix:
+                os.environ.pop("PIP_PREFIX", None)
+                os.environ.pop("PIP_IGNORE_INSTALLED", None)
+            root = os.path.join(key(prefix), "")
+
+            def chat(entry):
+                return bool(entry) and key(entry).startswith(root)
+
+            sys.path[:] = [e for e in sys.path if not chat(e)]
+            if "PYTHONPATH" in os.environ:
+                os.environ["PYTHONPATH"] = os.pathsep.join(
+                    e for e in os.environ["PYTHONPATH"].split(os.pathsep) if not chat(e)
+                )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_route_pip()
+
+
+def _session_entries():
+    prefix = _chat_prefix or os.environ.get("PIP_PREFIX")
+    if not prefix:
+        return []
+    root = os.path.join(os.path.normcase(os.path.abspath(prefix)), "")
+    return [e for e in sys.path if e and os.path.normcase(os.path.abspath(e)).startswith(root)]
+
+
+def _literal(path, names):
+    import ast
+
+    with open(path, "rb") as f:
+        tree = ast.parse(f.read())
+    found = {}
+    for node in tree.body:
+        targets = node.targets if isinstance(node, ast.Assign) else [getattr(node, "target", None)]
+        for t in targets:
+            if isinstance(t, ast.Name) and t.id in names and node.value is not None:
+                found[t.id] = ast.literal_eval(node.value)
+    return found
+
+
+_finder_template = []
+
+
+def _install_editable_finder(entry, module):
+    # setuptools' editable finder, built from the template of the setuptools in Studio's own site-packages (never
+    # one the chat folder could shadow) with the chat file's literal MAPPING / NAMESPACES: the chat-written module
+    # never runs. Read as text: importing setuptools is slow. Without setuptools there (torch ships it from 3.12)
+    # such installs import only from their project folder, as under OS isolation.
+    if not _finder_template:
+        import sysconfig
+        source = os.path.join(
+            sysconfig.get_paths()["purelib"], "setuptools", "command", "editable_wheel.py"
+        )
+        _finder_template.append(_literal(source, {"_FINDER_TEMPLATE"})["_FINDER_TEMPLATE"])
+    data = _literal(os.path.join(entry, module + ".py"), {"MAPPING", "NAMESPACES"})
+    mapping, namespaces = data.get("MAPPING", {}), data.get("NAMESPACES", {})
+    if not all(isinstance(k, str) and isinstance(v, str) for k, v in mapping.items()):
+        return
+    if not all(isinstance(k, str) and isinstance(v, list) for k, v in namespaces.items()):
+        return
+    code = _finder_template[0].format(
+        name = module, mapping = dict(sorted(mapping.items())), namespaces = namespaces
+    )
+    import types
+
+    finder_module = types.ModuleType(module)
+    exec(compile(code, "<" + module + ">", "exec"), finder_module.__dict__)
+    sys.modules[module] = finder_module
+    finder_module.install()
+    # First, so a chat's editable fork wins over Studio's copy like its other installs.
+    finder = finder_module._EditableFinder
+    if finder in sys.meta_path:
+        sys.meta_path.remove(finder)
+        sys.meta_path.insert(0, finder)
+
+
+# PYTHONPATH skips .pth files: take their path lines and setuptools' editable finders, never run their imports.
+# Paths go right after the session dirs, so a chat's editable fork wins over Studio's copy like its other installs.
+def _read_pth_files(entries):
+    added = []
+    for entry in entries:
+        try:
+            names = sorted(n for n in os.listdir(entry) if n.endswith(".pth"))
+        except OSError:
+            continue
+        for name in names:
+            try:
+                with open(os.path.join(entry, name), encoding = "utf-8") as f:
+                    lines = f.read().splitlines()
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith(("import ", "import\t")):
+                        module = line[len("import ") :].split(";")[0].strip()
+                        if module.startswith("__editable___") and module.endswith("_finder"):
+                            _install_editable_finder(entry, module)
+                        continue
+                    path = os.path.abspath(os.path.join(entry, line))
+                    if (
+                        line
+                        and not line.startswith("#")
+                        and path not in sys.path + added
+                        and os.path.isdir(path)
+                    ):
+                        added.append(path)
+            except Exception:  # noqa: BLE001
+                continue
+    if added:
+        at = max(i for i, e in enumerate(sys.path) if e in entries) + 1
+        sys.path[at:at] = added
+
+
+# First on meta_path: a session dir pip creates mid-process is cached as missing, and a namespace imported
+# before an install lacks the new portion.
+class _SessionPackagesFinder:
+    def __init__(self, entries):
+        self._entries = entries
+
+    def find_spec(
+        self,
+        name,
+        path = None,
+        target = None,
+    ):
+        cache = sys.path_importer_cache
+        for entry in self._entries:
+            if entry in cache and cache[entry] is None and os.path.isdir(entry):
+                del cache[entry]
+        if path is None:
+            return None
+        parent = getattr(sys.modules.get(name.rpartition(".")[0]), "__spec__", None)
+        namespace = parent is not None and (
+            parent.origin in (None, "namespace") or _HostPackagesFinder._extends_path(parent.origin)
+        )
+        if namespace and hasattr(path, "append"):
+            for entry in self._entries:
+                portion = os.path.join(entry, *parent.name.split("."))
+                if portion not in list(path) and os.path.isdir(portion):
+                    path.append(portion)
+        return None
+
+
+_entries = _session_entries()
+if _entries and not any(isinstance(f, _SessionPackagesFinder) for f in sys.meta_path):
+    try:
+        _read_pth_files(_entries)
+        sys.meta_path.insert(0, _SessionPackagesFinder(_entries))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # --ignore-installed never uninstalls, so a reinstall leaves stale dist-info importlib.metadata may pick;
 # RECORD is written last, so the newest RECORD per project is the finished install.
 def _prune_stale_dist_info():

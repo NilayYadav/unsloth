@@ -14,8 +14,10 @@ import shutil
 import socket
 import subprocess
 import sys
+import sysconfig
 import textwrap
 import time
+import zipfile
 
 import pytest
 
@@ -735,6 +737,221 @@ def test_session_package_commands_stay_on_path(monkeypatch, tmp_path, os_name, s
     monkeypatch.setattr(os_sandbox, "_PIP_PREFIX_SCRIPTS_DIR", scripts)
     env = os_sandbox.with_session_packages({"PATH": "/usr/bin"}, str(workdir))
     assert env["PATH"].split(os.pathsep) == ["/usr/bin", str(packages / scripts)]
+
+
+def _wheel(workdir, name, files):
+    info = f"{name}-1.0.dist-info"
+    wheel = workdir / f"{name}-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as whl:
+        for path, text in files.items():
+            whl.writestr(path, text)
+        whl.writestr(f"{info}/METADATA", f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n")
+        whl.writestr(
+            f"{info}/WHEEL", "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+        )
+        whl.writestr(f"{info}/RECORD", "")
+    return wheel.name
+
+
+_PIP = "python -m pip install -q --no-index --no-deps"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["chat", "same_process", "editable", "project_venv", "target", "env_target", "pip_user_off"],
+)
+@pytest.mark.skipif(sys.platform == "win32", reason = "posix shell commands")
+def test_a_pip_install_without_os_isolation_stays_out_of_studio(monkeypatch, tmp_path, case):
+    """Studio's interpreter installs into the chat folder; another venv's pip still installs into that venv."""
+    name = f"unsloth_chat_only_{case}"
+    workdir = tmp_path / "chat"
+    workdir.mkdir()
+    packages = str(workdir / os_sandbox.SESSION_PACKAGES_RELPATH)
+    files = {f"{name}.py": ""}
+    if case == "editable":
+        (workdir / "src").mkdir()
+        (workdir / "src" / f"{name}.py").write_text("")
+        files = {f"__editable__.{name}-1.0.pth": str(workdir / "src") + "\n"}
+    wheel = _wheel(workdir, name, files)
+    show = f"python -c 'import {name}; print({name}.__file__)'"
+    command = {
+        "chat": f"{_PIP} {wheel} && {show}",
+        # An explicit --target keeps its own location.
+        "target": f"{_PIP} --target vendor {wheel} && PYTHONPATH=vendor {show}",
+        "env_target": f"PIP_TARGET=vendor {_PIP} {wheel} && PYTHONPATH=vendor {show}",
+        "pip_user_off": f"PIP_USER=0 {_PIP} {wheel} && {show}",
+        "editable": f"{_PIP} {wheel} && {show}",
+        # Python caches the session dirs as missing at startup, before pip creates them.
+        "same_process": 'python -c "import subprocess, sys; subprocess.check_call(sys.argv[1:]); '
+        f'import {name}; print({name}.__file__)" python -m pip install -q --no-index --no-deps {wheel}',
+        # The chat's copy must not satisfy the venv's pip.
+        "project_venv": f"{_PIP} {wheel} && python -m venv venv && venv/bin/{_PIP} {wheel} && "
+        f"env -u PYTHONPATH venv/bin/{show}",
+    }[case]
+    monkeypatch.setattr(tools, "_get_workdir", lambda session_id = None: str(workdir))
+    try:
+        out = tools._bash_exec(
+            command,
+            None,
+            120,
+            _SESSION,
+            tool_execution_mode = "software",
+        )
+    finally:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "uninstall", "-y", "-q", name], capture_output = True
+        )
+    assert tools._last_tool_execution_record.os_isolation is False
+    expected = {
+        "chat": packages,
+        "target": str(workdir / "vendor"),
+        "env_target": str(workdir / "vendor"),
+        "pip_user_off": packages,
+        "same_process": packages,
+        "editable": str(workdir / "src"),
+        "project_venv": str(workdir / "venv"),
+    }[case]
+    assert f"{expected}{os.sep}" in out, out
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "editable_fork",
+        "editable_finder",
+        "editable_finder_module",
+        "editable_finder_namespace",
+        "editable_finder_virtual",
+        "upgrade",
+        "namespace",
+        "pkgutil_namespace",
+    ],
+)
+@pytest.mark.skipif(sys.platform == "win32", reason = "posix shell commands")
+def test_a_chat_install_wins_over_what_studio_already_has(monkeypatch, tmp_path, case):
+    """Editable forks, an upgrade imported in the installing process, and a new namespace portion all load."""
+    template = os.path.join(
+        sysconfig.get_paths()["purelib"], "setuptools", "command", "editable_wheel.py"
+    )
+    if case.startswith("editable_finder") and not os.path.exists(template):
+        pytest.skip("finder-based editable installs need setuptools in Studio's environment")
+    name = f"unsloth_chat_shadow_{case}"
+    workdir = tmp_path / "chat"
+    workdir.mkdir()
+    packages = str(workdir / os_sandbox.SESSION_PACKAGES_RELPATH)
+    studio_files = {f"{name}.py": ""}
+    show = f"import {name}; print({name}.__file__)"
+    # Imported in the process that installs: the session dirs did not exist when it started.
+    in_process = (
+        'python -c "import subprocess, sys; {pre}subprocess.check_call(sys.argv[1:]); {post}" '
+        + _PIP
+    )
+    if case == "editable_fork":
+        (workdir / "src").mkdir()
+        (workdir / "src" / f"{name}.py").write_text("")
+        wheel = _wheel(workdir, name, {f"__editable__.{name}-1.0.pth": str(workdir / "src") + "\n"})
+        command, expected = f'{_PIP} {wheel} && python -c "{show}"', str(workdir / "src")
+    elif case.startswith("editable_finder"):
+        # setuptools' editable wheel: an import-only .pth and a finder module with literal MAPPING / NAMESPACES.
+        proj = workdir / "proj"
+        proj.mkdir()
+        finder = f"__editable___{name}_1_0_finder"
+        mapping, namespaces = {name: str(proj / "implementation")}, {}
+        if case == "editable_finder":
+            # package_dir remap: the source folder is not named after the package.
+            (proj / "implementation").mkdir()
+            (proj / "implementation" / "__init__.py").write_text("")
+            expected = str(proj / "implementation")
+        elif case == "editable_finder_module":
+            # py_modules: MAPPING holds the module path without its suffix.
+            (proj / "implementation.py").write_text("")
+            expected = str(proj)
+        elif case == "editable_finder_namespace":
+            # A PEP 420 namespace root, with Studio holding another portion of it.
+            (proj / "implementation").mkdir()
+            (proj / "implementation" / "part.py").write_text("")
+            namespaces = {name: [str(proj / "implementation")]}
+            studio_files = {f"{name}/a.py": ""}
+            show = (
+                f"import importlib, {name}.a; importlib.invalidate_caches(); "
+                f"import {name}.part; print({name}.part.__file__)"
+            )
+            expected = str(proj / "implementation")
+        else:
+            # Only name.part is mapped; name is a virtual namespace with no folder of its own.
+            (proj / "part").mkdir()
+            (proj / "part" / "__init__.py").write_text("")
+            mapping, namespaces = {f"{name}.part": str(proj / "part")}, {name: []}
+            studio_files = {f"{name}_unrelated.py": ""}
+            show = f"import {name}.part; print({name}.part.__file__)"
+            expected = str(proj / "part")
+        wheel = _wheel(
+            workdir,
+            name,
+            {
+                f"__editable__.{name}-1.0.pth": f"import {finder}; {finder}.install()\n",
+                f"{finder}.py": f"MAPPING: dict = {mapping!r}\nNAMESPACES: dict = {namespaces!r}\n"
+                "def install():\n    raise SystemExit(9)\n",
+            },
+        )
+        command = f'{_PIP} {wheel} && python -c "{show}"'
+    elif case == "upgrade":
+        wheel = _wheel(workdir, name, {f"{name}.py": ""})
+        command, expected = in_process.format(pre = "", post = show) + f" {wheel}", packages
+    else:
+        init = "from pkgutil import extend_path; __path__ = extend_path(__path__, __name__)\n"
+        studio_files = {f"{name}/a.py": ""}
+        if case == "pkgutil_namespace":
+            studio_files[f"{name}/__init__.py"] = init
+        chat_files = {f"{name}/b.py": ""}
+        if case == "pkgutil_namespace":
+            chat_files[f"{name}/__init__.py"] = init
+        wheel = _wheel(workdir, f"{name}_b", chat_files)
+        post = (
+            f"import pkgutil, {name}.b; print({name}.b.__file__); "
+            f"print(sorted(m.name for m in pkgutil.iter_modules({name}.__path__)))"
+        )
+        command = in_process.format(pre = f"import {name}.a; ", post = post) + f" {wheel}"
+        expected = packages
+    studio_dir = tmp_path / "studio"
+    studio_dir.mkdir()
+    studio_wheel = studio_dir / _wheel(studio_dir, name, studio_files)
+    subprocess.run([sys.executable, *_PIP.split()[1:], str(studio_wheel)], check = True)
+    monkeypatch.setattr(tools, "_get_workdir", lambda session_id = None: str(workdir))
+    try:
+        out = tools._bash_exec(command, None, 120, _SESSION, tool_execution_mode = "software")
+    finally:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "uninstall", "-y", "-q", name, f"{name}_b"],
+            capture_output = True,
+        )
+    assert f"{expected}{os.sep}" in out, out
+    if case in ("namespace", "pkgutil_namespace"):
+        assert "['a', 'b']" in out, out
+
+
+def test_only_studios_pip_gets_the_chat_pip_prefix(tmp_path):
+    """Every OS: Studio's pip installs into the chat folder; nothing else it starts, nor another venv, inherits that."""
+    packages = str(tmp_path / os_sandbox.SESSION_PACKAGES_RELPATH)
+    env = {
+        **os.environ,
+        "PYTHONPATH": tools._SANDBOX_SITE_DIR,
+        **os_sandbox.studio_pip_prefix(packages),
+        "PIP_PREFIX": packages,
+    }
+    probe = ["-c", "import os; print(os.environ.get('PIP_PREFIX'))"]
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(tmp_path / "venv")], check = True
+    )
+    venv_python = tmp_path / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    def run(*argv):
+        result = subprocess.run(argv, env = env, capture_output = True, text = True)
+        return result.stdout + result.stderr
+
+    assert f"PIP_PREFIX={packages!r}" in run(sys.executable, "-m", "pip", "config", "debug")
+    assert run(sys.executable, *probe).strip() == "None"
+    assert run(str(venv_python), *probe).strip() == "None"
 
 
 def test_a_seatbelt_launch_failure_also_drops_the_cached_verdict(monkeypatch):
