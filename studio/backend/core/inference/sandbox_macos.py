@@ -16,6 +16,7 @@ import sysconfig
 import tempfile
 import threading
 
+from . import sandbox_egress
 from .os_sandbox import (
     PROFILE_VERSION,
     SESSION_PACKAGES_RELPATH,
@@ -528,6 +529,7 @@ def build_profile(
     private_tmp: str,
     runtime_paths: tuple[str, ...],
     developer_paths: tuple[str, ...] = (),
+    proxy_port: int | None = None,
 ) -> str:
     """Writes and spawns nothing, so a test can assert on the text anywhere."""
     readable_paths = (
@@ -573,6 +575,7 @@ def build_profile(
         *(f"(sysctl-name {_sbpl_string(name)})" for name in _SYSCTL_NAMES),
         *(f"(sysctl-name-prefix {_sbpl_string(name)})" for name in _SYSCTL_PREFIXES),
     ]
+    remote = f"localhost:{proxy_port}" if proxy_port else "*:*"
     lines = [
         "(version 1)",
         "(deny default)",
@@ -619,7 +622,7 @@ def build_profile(
         '(allow network-bind (local ip "*:*"))',
         "(allow network-inbound)",
         # Filtered to ip: an unfiltered outbound covers AF_UNIX, e.g. /var/run/docker.sock.
-        '(allow network-outbound (remote ip "*:*"))',
+        f'(allow network-outbound (remote ip "{remote}"))',
         # One path filter per endpoint; combining paths breaks multiprocessing on macOS 15.
         *(f"(allow network-bind (local unix-socket {path}))" for path in tmp_subpaths),
         *(f"(allow network-outbound (remote unix-socket {path}))" for path in tmp_subpaths),
@@ -713,16 +716,21 @@ def prepare(plan: ToolLaunchPlan) -> PreparedSandboxLaunch:
         runtime_paths = tuple(
             path for path in runtime_read_paths(workdir) if not _within(path, workdir)
         )
+        proxy_port = sandbox_egress.tcp_port() if sandbox_egress.enabled() else None
         profile = build_profile(
             workdir = workdir,
             private_tmp = private_tmp,
             runtime_paths = runtime_paths,
             developer_paths = _developer_paths(),
+            proxy_port = proxy_port,
         )
+        env = _sandbox_environment(plan.env, workdir, private_tmp)
+        if proxy_port:
+            env.update(sandbox_egress.proxy_env(proxy_port))
         return PreparedSandboxLaunch(
             argv = (SANDBOX_EXEC, "-p", profile, "--", *plan.argv),
             workdir = workdir,
-            env = _sandbox_environment(plan.env, workdir, private_tmp),
+            env = env,
             # Preserved: it is the os.setsid() tools.py's killpg teardown signals.
             preexec_fn = plan.preexec_fn,
             backend = BACKEND_NAME,

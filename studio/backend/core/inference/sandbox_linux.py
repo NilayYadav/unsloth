@@ -22,7 +22,7 @@ from functools import lru_cache
 
 from loggers import get_logger
 
-from . import sandbox_landlock, sandbox_seccomp
+from . import sandbox_egress, sandbox_landlock, sandbox_seccomp
 from .os_sandbox import (
     CACHE_SCAN_SECONDS,
     PROFILE_VERSION,
@@ -248,6 +248,7 @@ _NETWORK_FILES = (
 _MODEL_CACHE_RELPATH = os.path.join(".cache", "huggingface")
 # Excludes $HF_HOME/token and executable modules; the writable hub is a deliberate tradeoff (#5603).
 _MODEL_CACHE_SUBDIRS = ("hub", "datasets", "xet", "assets")
+_EGRESS_SOCKET = "/run/unsloth-egress.sock"
 # NixOS keeps glibc here, so a store interpreter cannot link without it.
 _NIX_STORE = "/nix/store"
 # The NixOS system PATH (and nix-ld's loader) resolve through this link into the store.
@@ -964,6 +965,7 @@ def prepare(plan: ToolLaunchPlan) -> PreparedSandboxLaunch:
     # there the seccomp filter refuses nested user namespaces instead, as on bwrap 0.6.1.
     # One read per launch: a reset between two reads could mix --disable-userns with an empty /proc.
     empty_proc = empty_proc_layout(bwrap)
+    egress = sandbox_egress.unix_socket_path() if sandbox_egress.enabled() else None
     disable_userns = not empty_proc and _bwrap_supports(bwrap, "--disable-userns")
     try:
         seccomp = sandbox_seccomp.filter_file(block_userns = not disable_userns)
@@ -985,6 +987,7 @@ def prepare(plan: ToolLaunchPlan) -> PreparedSandboxLaunch:
             "--unshare-ipc",
             "--unshare-uts",
             "--unshare-cgroup",
+            *(("--unshare-net",) if egress else ()),
             # bwrap 0.6.1 lacks this; the seccomp filter refuses nested user namespaces there.
             *(("--disable-userns",) if disable_userns else ()),
             "--cap-drop",
@@ -1015,6 +1018,10 @@ def prepare(plan: ToolLaunchPlan) -> PreparedSandboxLaunch:
         for path in (*_ETC_FILES, *_etc_java_binds(), *trusted, *_NETWORK_FILES):
             argv += ["--ro-bind-try", path, path]
         argv += ["--ro-bind", passwd, "/etc/passwd", "--ro-bind", group, "/etc/group"]
+        if egress:
+            argv += ["--ro-bind", egress, _EGRESS_SOCKET]
+            for name, value in sandbox_egress.proxy_env(sandbox_egress.BRIDGE_PORT).items():
+                argv += ["--setenv", name, value]
         for path in runtime_paths:
             if path not in tmp_runtime_paths:
                 argv += ["--ro-bind", path, path]
@@ -1066,6 +1073,9 @@ def prepare(plan: ToolLaunchPlan) -> PreparedSandboxLaunch:
             _path(plan, packages),
             "--",
         ]
+        if egress:
+            argv += [sys.executable, "-I", "-S", "-c", sandbox_egress.BRIDGE_CODE, _EGRESS_SOCKET]
+            argv.append(str(sandbox_egress.BRIDGE_PORT))
         argv += list(plan.argv)
 
         return PreparedSandboxLaunch(

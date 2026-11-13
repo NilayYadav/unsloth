@@ -121,7 +121,7 @@ from core.inference.tool_confinement import ToolConfinementUnavailable, account_
 from pathlib import Path
 from utils.paths.storage_roots import RetiredAccountError, ensure_dir
 
-from . import os_sandbox
+from . import os_sandbox, sandbox_egress
 
 from loggers import get_logger
 
@@ -23388,6 +23388,7 @@ def _bash_exec(
             return _CMD_MULTILINE_REFUSED
 
     # Block dangerous commands (skipped when the sandbox is disabled)
+    proxied_refusal = None
     if not disable_sandbox:
         if profile in _CMD_PROFILES:
             # The cmd lexer misses separators glued to a word (a&powershell), cmd drops ^ escapes and
@@ -23402,6 +23403,11 @@ def _bash_exec(
             )
         else:
             blocked = _find_blocked_commands(command)
+            proxied = blocked & {"curl", "wget"} if sandbox_egress.enabled() else set()
+            if proxied:
+                # Only behind the egress proxy; a launch that ends up without it keeps the block.
+                proxied_refusal = f"Blocked command(s) for safety: {', '.join(sorted(proxied))}"
+                blocked -= proxied
         if host_access_approved and blocked == {"rm"}:
             # The allowlist reads words the POSIX way; cmd quotes differently and deletes with `del`, not rm.
             if profile in _CMD_PROFILES or not _is_approvable_rm(command):
@@ -23498,11 +23504,17 @@ def _bash_exec(
                 host_access_approved = host_reach_approved,
                 user_folder = chosen_folder,
             )
+            if proxied_refusal and not (
+                prepared.execution_record and prepared.execution_record.os_isolation
+            ):
+                return proxied_refusal
             proc = os_sandbox.spawn_prepared_launch(
                 prepared, **_apply_prepared_launch(prepared, popen_kwargs)
             )
             _note_tool_execution(prepared.execution_record)
         else:
+            if proxied_refusal:
+                return proxied_refusal
             popen_kwargs.update(cwd = workdir, env = safe_env)
             if sys.platform != "win32":
                 popen_kwargs["preexec_fn"] = base_preexec
