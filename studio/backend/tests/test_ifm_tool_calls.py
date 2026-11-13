@@ -70,22 +70,45 @@ XML_CALL = (
 )
 
 
+class _IfmTokenizer:
+    """Renders IFM_TEMPLATE with jinja2 alone, so the runner needs neither tokenizers nor transformers."""
+
+    chat_template = IFM_TEMPLATE
+    eos_token = "<|ifm|endoftext|>"
+    eos_token_id = 1
+    unk_token_id = 0
+    _ids = {"<|ifm|endoftext|>": 1, "<|ifm|im_start|>": 2, "<|ifm|im_end|>": 3}
+    all_special_tokens = list(_ids)
+
+    def convert_tokens_to_ids(self, token):
+        return self._ids.get(token, self.unk_token_id)
+
+    def get_vocab(self):
+        return dict(self._ids)
+
+    def apply_chat_template(
+        self,
+        messages,
+        tools = None,
+        add_generation_prompt = False,
+        tokenize = False,
+        **kwargs,
+    ):
+        from jinja2.sandbox import ImmutableSandboxedEnvironment
+
+        def raise_exception(message):
+            raise ValueError(message)
+
+        env = ImmutableSandboxedEnvironment(trim_blocks = True, lstrip_blocks = True)
+        env.globals["raise_exception"] = raise_exception
+        return env.from_string(self.chat_template).render(
+            messages = messages, tools = tools, add_generation_prompt = add_generation_prompt, **kwargs
+        )
+
+
 @pytest.fixture(scope = "module")
 def tokenizer():
-    from tokenizers import Tokenizer, models
-    from transformers import PreTrainedTokenizerFast
-
-    tok = PreTrainedTokenizerFast(
-        tokenizer_object = Tokenizer(models.WordLevel({"[UNK]": 0}, "[UNK]"))
-    )
-    tok.add_special_tokens(
-        {
-            "eos_token": "<|ifm|endoftext|>",
-            "additional_special_tokens": ["<|ifm|im_start|>", "<|ifm|im_end|>"],
-        }
-    )
-    tok.chat_template = IFM_TEMPLATE
-    return tok
+    return _IfmTokenizer()
 
 
 def _calls(text, **kwargs):
