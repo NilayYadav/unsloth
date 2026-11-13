@@ -4024,6 +4024,8 @@ export const uk = {
       llamaCppVersion: "Версія llama.cpp",
       audioCppVersion: "Версія audio.cpp",
       mlxVersion: "Версія MLX",
+      fastflowlmVersion: "Версія FastFlowLM",
+      lemonadeVersion: "Версія Lemonade",
       whisperCppVersion: "Версія whisper.cpp",
       engines: {
         title: "Рушії",
