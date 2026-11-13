@@ -2251,7 +2251,12 @@ _IFM_THINK_FIELDS = ("think", "think_fast", "think_faster", "reasoning_content",
 _LEADING_THINK_RE = re.compile(r"\A\s*<think>(.*?)</think>\s*", re.DOTALL)
 
 
-def _fill_ifm_thinking_fields(messages: list, tokenizer, tools) -> list:
+def _fill_ifm_thinking_fields(
+    messages: list,
+    tokenizer,
+    tools,
+    markup = None,
+) -> list:
     """IFM templates raise on an assistant turn with no string thinking field, while Studio omits an empty one and
     keeps tool-loop reasoning as leading ``<think>`` content: move that thought into ``reasoning_content``."""
     if not any("<ifm|think" in t for t in _selected_chat_template_strings(tokenizer, tools)):
@@ -2267,7 +2272,10 @@ def _fill_ifm_thinking_fields(messages: list, tokenizer, tools) -> list:
             msg = {k: v for k, v in msg.items() if k not in _IFM_THINK_FIELDS}
             content = msg.get("content")
             match = _LEADING_THINK_RE.match(content) if isinstance(content, str) else None
-            msg["reasoning_content"] = match.group(1).strip() if match else ""
+            # Sanitized as assistant content, which keeps markup; a reasoning field gets the full rewrite.
+            msg["reasoning_content"] = (
+                neutralize_control_markup(match.group(1).strip(), markup) if match else ""
+            )
             if match:
                 msg["content"] = content[match.end() :]
             changed = True
@@ -3003,7 +3011,7 @@ def apply_chat_template_for_generation(
         split = _split_parallel_tool_calls(normalized)
         if split is not normalized:
             candidates.append(split)
-        ifm = _fill_ifm_thinking_fields(split, tokenizer, tools)
+        ifm = _fill_ifm_thinking_fields(split, tokenizer, tools, _markup)
         if ifm is not split:
             candidates.append(ifm)
         for candidate in candidates:

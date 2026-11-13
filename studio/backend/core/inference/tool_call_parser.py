@@ -1360,10 +1360,12 @@ def strip_segment(
     enabled_tool_names: Optional[set] = None,
 ) -> str:
     """Strips markup from one non-think segment; seg_final enables end-of-turn arms. routes/inference.py differs, pinned by tests/test_route_strip_drift.py."""
-    # IFM first: its blocks are bounded structurally, while the Mistral scan can misread JSON escaped in an argument.
-    seg = _strip_ifm_calls(segment, final = seg_final)
+    # Closed IFM blocks first: bounded structurally, while the Mistral scan can misread JSON escaped in an argument.
+    # A trailing unclosed one waits, as an opener quoted in another call's arguments is that call's data.
+    seg = _strip_ifm_calls(segment, final = False)
     seg = _strip_mistral_closed_calls(seg)
     seg = _strip_minimax_calls(seg, final = seg_final)
+    seg = _strip_ifm_calls(seg, final = seg_final)
     # Name-gated: an inactive ``foo[ARGS]{..}`` is prose and is kept.
     seg = _tool_healing._strip_bracket_tag_calls(seg, enabled_tool_names = enabled_tool_names)
     if seg_final:

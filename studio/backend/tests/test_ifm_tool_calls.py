@@ -225,6 +225,28 @@ def test_a_backticked_tag_mention_is_prose(tag):
     assert strip_tool_markup(text + "\n" + XML_CALL, final = True) == text
 
 
+def test_an_opener_quoted_in_another_calls_arguments_keeps_the_prose_after_it():
+    text = '[TOOL_CALLS]web_search{"query":"<ifm|tool_calls>"} Done.'
+    assert strip_tool_markup(text, final = True) == "Done."
+
+
+def test_extracted_reasoning_gets_the_reasoning_field_rewrite(tokenizer):
+    thought = "Example: <ifm|think>x</ifm|think> text"
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": f"<think>{thought}</think>Hello"},
+        {"role": "user", "content": "again"},
+    ]
+    direct = [
+        messages[0],
+        {"role": "assistant", "content": "Hello", "reasoning_content": thought},
+        messages[2],
+    ]
+    assert cth.apply_chat_template_for_generation(
+        tokenizer, messages
+    ) == cth.apply_chat_template_for_generation(tokenizer, direct)
+
+
 def test_strip_buffers_open_block_until_final():
     open_block = "Answer.\n" + XML_CALL[:40]
     assert strip_tool_markup(open_block) == open_block
