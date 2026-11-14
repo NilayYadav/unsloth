@@ -247,6 +247,26 @@ def test_extracted_reasoning_gets_the_reasoning_field_rewrite(tokenizer):
     ) == cth.apply_chat_template_for_generation(tokenizer, direct)
 
 
+def test_bare_opener_mentions_claim_nothing():
+    rehearsal = (
+        '<think><tool_call>{"name": "web_search", "arguments": {}}</tool_call></think>Answer.'
+    )
+    assert _calls("I may use <ifm|tool_calls> later.\n" + rehearsal) == []
+    hermes = '<tool_call>{"name": "web_search", "arguments": {"query": "<ifm|tool_calls>example"}}</tool_call> Done.'
+    assert strip_tool_markup(hermes, final = True) == "Done."
+    assert _calls(hermes) == [("web_search", {"query": "<ifm|tool_calls>example"})]
+
+
+def test_an_unfinished_key_does_not_backtrack():
+    import time
+
+    text = "<ifm|tool_calls>\n<ifm|tool_call>web_search\n<ifm|arg_key>" + " " * 20000 + "x"
+    started = time.perf_counter()
+    assert _calls(text) == []
+    strip_tool_markup(text, final = True)
+    assert time.perf_counter() - started < 2.0
+
+
 def test_strip_buffers_open_block_until_final():
     open_block = "Answer.\n" + XML_CALL[:40]
     assert strip_tool_markup(open_block) == open_block

@@ -387,8 +387,8 @@ _IFM_CALL_OPEN = "<ifm|tool_call>"
 _IFM_CALL_CLOSE = "</ifm|tool_call>"
 _IFM_NAME_RE = re.compile(r"\s*([\w.\-]+)\s*")
 _IFM_ARG_RE = re.compile(
-    r"\s*<ifm\|arg_key>\s*([^<>]+?)\s*</ifm\|arg_key>\s*"
-    r"(?:<ifm\|arg_type>\s*([^<>]*?)\s*</ifm\|arg_type>\s*)?"
+    r"\s*<ifm\|arg_key>([^<>]*)</ifm\|arg_key>\s*"
+    r"(?:<ifm\|arg_type>([^<>]*)</ifm\|arg_type>\s*)?"
     r"<ifm\|arg_value>(.*?)</ifm\|arg_value>",
     re.DOTALL,
 )
@@ -1365,7 +1365,6 @@ def strip_segment(
     seg = _strip_ifm_calls(segment, final = False)
     seg = _strip_mistral_closed_calls(seg)
     seg = _strip_minimax_calls(seg, final = seg_final)
-    seg = _strip_ifm_calls(seg, final = seg_final)
     # Name-gated: an inactive ``foo[ARGS]{..}`` is prose and is kept.
     seg = _tool_healing._strip_bracket_tag_calls(seg, enabled_tool_names = enabled_tool_names)
     if seg_final:
@@ -1410,6 +1409,8 @@ def strip_segment(
         else:
             seg = pat.sub("", seg)
     if seg_final:
+        # After every enclosing format, so an opener quoted in another call's arguments left with that call.
+        seg = _strip_ifm_calls(seg, final = True)
         # Trailing partial rehearsal the balanced scan cannot close; gated so prose ``foo[ARGS] ...`` survives.
         seg = _tool_healing.apply_tool_strip_patterns(
             seg,
@@ -4561,7 +4562,10 @@ def _ifm_blocks(text: str, relaxed: bool = True):
             pos = m.end()
             while (am := _IFM_ARG_RE.match(text, pos)) is not None:
                 key, arg_type, value = am.groups()
-                if arg_type and arg_type.lower() in _IFM_JSON_TYPES:
+                key = key.strip()
+                if not key:
+                    return None, pos, False
+                if arg_type and arg_type.strip().lower() in _IFM_JSON_TYPES:
                     try:
                         value = json.loads(value)
                     except (json.JSONDecodeError, ValueError):
@@ -4582,8 +4586,12 @@ def _ifm_blocks(text: str, relaxed: bool = True):
         pos = start + len(_IFM_BLOCK_OPEN)
         while pos < n and text[pos].isspace():
             pos += 1
-        if not text.startswith(_IFM_CALL_OPEN, pos) and text.find(_IFM_BLOCK_OPEN, pos) >= 0:
-            # A bare mention of the opener (no call follows): the real block starts later.
+        # Only an opener a call follows (or that ends the text, mid-stream) is a block; a bare mention is prose.
+        if (
+            pos < n
+            and not text.startswith(_IFM_CALL_OPEN, pos)
+            and not _IFM_CALL_OPEN.startswith(text[pos:])
+        ):
             continue
         while True:
             while pos < n and text[pos].isspace():
