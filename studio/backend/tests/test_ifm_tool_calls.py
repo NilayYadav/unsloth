@@ -278,6 +278,13 @@ def test_a_typed_json_value_may_hold_the_value_closer_in_a_string():
     assert _calls(text, allow_incomplete = False) == [("web_search", {"query": value})]
 
 
+def test_a_string_value_may_spell_the_value_closer():
+    code = 'print("</ifm|arg_value>")'
+    text = XML_CALL.replace("unsloth", code)
+    assert _calls(text) == [("web_search", {"query": code})]
+    assert _calls(text, allow_incomplete = False) == [("web_search", {"query": code})]
+
+
 def test_an_unfinished_key_does_not_backtrack():
     import time
 

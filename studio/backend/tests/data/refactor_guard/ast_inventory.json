@@ -1122,7 +1122,7 @@
       "_GEMMA_TC_RE": "'<\\\\|tool_call>\\\\s*call\\\\s*:\\\\s*([\\\\w\\\\.\\\\-]+)\\\\s*\\\\{' flags=32",
       "_GLM_JSON_NUMERIC_RE": "'-?\\\\d+(?:\\\\.\\\\d+)?(?:[eE][+-]?\\\\d+)?' flags=32",
       "_GLM_TC_OPEN_RE": "'<tool_call>\\\\s*([\\\\w.\\\\-]+)\\\\s*(?=\\\\n|<arg_key>|</tool_call>)' flags=32",
-      "_IFM_ARG_RE": "'\\\\s*<ifm\\\\|arg_key>([^<>]*)</ifm\\\\|arg_key>\\\\s*(?:<ifm\\\\|arg_type>([^<>]*)</ifm\\\\|arg_type>\\\\s*)?<ifm\\\\|arg_value>(.*?)</ifm\\\\|arg_value>' flags=48",
+      "_IFM_ARG_RE": "'\\\\s*<ifm\\\\|arg_key>([^<>]*)</ifm\\\\|arg_key>\\\\s*(?:<ifm\\\\|arg_type>([^<>]*)</ifm\\\\|arg_type>\\\\s*)?<ifm\\\\|arg_value>(.*?)</ifm\\\\|arg_value>(?=\\\\s*(?:<ifm\\\\|arg_key>|</ifm\\\\|tool_call>|\\\\Z))' flags=48",
       "_IFM_BLOCK_OPEN_RE": "'<ifm\\\\|tool_calls>(?=\\\\s*<ifm\\\\|tool_call>)' flags=32",
       "_IFM_NAME_RE": "'\\\\s*([\\\\w.\\\\-]+)\\\\s*' flags=32",
       "_KIMI_ID_RE": "'^(?:functions\\\\.)?([\\\\w\\\\.\\\\-]+)(?::(\\\\d+))?$' flags=32",
@@ -1225,7 +1225,7 @@
       "re.compile('\\\\s*([\\\\w\\\\.\\\\-]+)\\\\s*\\\\.\\\\s*call\\\\s*\\\\(')": 1,
       "re.compile('\\\\s*;\\\\s*([\\\\w\\\\.\\\\-]+)\\\\s*\\\\.\\\\s*call\\\\s*\\\\(')": 1,
       "re.compile('\\\\s*</(?:parameter|param)>\\\\s*$')": 1,
-      "re.compile('\\\\s*<ifm\\\\|arg_key>([^<>]*)</ifm\\\\|arg_key>\\\\s*(?:<ifm\\\\|arg_type>([^<>]*)</ifm\\\\|arg_type>\\\\s*)?<ifm\\\\|arg_value>(.*?)</ifm\\\\|arg_value>', re.DOTALL)": 1,
+      "re.compile('\\\\s*<ifm\\\\|arg_key>([^<>]*)</ifm\\\\|arg_key>\\\\s*(?:<ifm\\\\|arg_type>([^<>]*)</ifm\\\\|arg_type>\\\\s*)?<ifm\\\\|arg_value>(.*?)</ifm\\\\|arg_value>(?=\\\\s*(?:<ifm\\\\|arg_key>|</ifm\\\\|tool_call>|\\\\Z))', re.DOTALL)": 1,
       "re.compile('\\\\w+')": 1,
       "re.compile('\\ue000+')": 1,
       "re.compile('^(?:functions\\\\.)?([\\\\w\\\\.\\\\-]+)(?::(\\\\d+))?$')": 1,
@@ -1480,9 +1480,6 @@
         "kind": "assign"
       },
       "_IFM_ARG_RE": {
-        "kind": "assign"
-      },
-      "_IFM_ARG_VALUE_CLOSE": {
         "kind": "assign"
       },
       "_IFM_BLOCK_CLOSE": {
