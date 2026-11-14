@@ -3733,6 +3733,7 @@ from core.inference.tool_call_parser import (
     _strip_function_xml_calls,
     _strip_gemma_wrapperless_calls,
     _strip_glm_calls,
+    _strip_ifm_calls,
     _strip_minimax_calls,
     _strip_mistral_closed_calls,
 )
@@ -6751,6 +6752,7 @@ def _strip_tool_xml_for_display(
 
     def _strip_segment(seg: str, is_last: bool) -> str:
         # Strips close at each call's real terminator, so a quoted </function> cannot truncate them.
+        seg = _strip_ifm_calls(seg, final = False)
         seg = _strip_mistral_closed_calls(seg)
         # llama-server leaves MiniMax blocks in content when tool_choice is "none".
         seg = _strip_minimax_calls(seg, final = is_last)
@@ -6760,7 +6762,7 @@ def _strip_tool_xml_for_display(
         seg = _strip_glm_calls(seg, final = is_last)
         seg = _strip_function_xml_calls(seg, final = is_last)
         if is_last:
-            return _TOOL_XML_RE.sub(_keep_inactive_rehearsal, seg)
+            return _strip_ifm_calls(_TOOL_XML_RE.sub(_keep_inactive_rehearsal, seg), final = True)
         return _TOOL_XML_CLOSED_RE.sub("", seg)
 
     # Mask blocked-call bodies and lone backticked tags (prose) so these passes do not edit them.
@@ -6778,6 +6780,7 @@ def _strip_tool_xml_for_display(
 # none and is caught by ``_DISPLAY_GEMMA_CALL_RE``, a superset of ``_GEMMA_BARE_TC_RE``.
 _DISPLAY_STRIP_SENTINELS = (
     "<minimax:tool_call>",
+    "<ifm|tool_calls>",
     "<tool_call",
     "</tool_call",
     "<|tool_call",
