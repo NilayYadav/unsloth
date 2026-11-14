@@ -257,6 +257,27 @@ def test_bare_opener_mentions_claim_nothing():
     assert _calls(hermes) == [("web_search", {"query": "<ifm|tool_calls>example"})]
 
 
+def test_a_bare_mention_does_not_promote_an_example_inside_a_hermes_call():
+    example = XML_CALL.replace("web_search", "terminal")
+    hermes = (
+        "<tool_call>"
+        + json.dumps({"name": "web_search", "arguments": {"query": example}})
+        + "</tool_call>"
+    )
+    for prefix in ("", "I may use <ifm|tool_calls> later.\n"):
+        assert _calls(prefix + hermes) == [("web_search", {"query": example})]
+
+
+def test_a_typed_json_value_may_hold_the_value_closer_in_a_string():
+    value = {"source": "</ifm|arg_value>"}
+    text = XML_CALL.replace(
+        "<ifm|arg_value>unsloth</ifm|arg_value>",
+        f"<ifm|arg_type>object</ifm|arg_type>\n<ifm|arg_value>{json.dumps(value)}</ifm|arg_value>",
+    )
+    assert _calls(text) == [("web_search", {"query": value})]
+    assert _calls(text, allow_incomplete = False) == [("web_search", {"query": value})]
+
+
 def test_an_unfinished_key_does_not_backtrack():
     import time
 

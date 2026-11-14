@@ -385,6 +385,9 @@ _IFM_BLOCK_OPEN = "<ifm|tool_calls>"
 _IFM_BLOCK_CLOSE = "</ifm|tool_calls>"
 _IFM_CALL_OPEN = "<ifm|tool_call>"
 _IFM_CALL_CLOSE = "</ifm|tool_call>"
+_IFM_ARG_VALUE_CLOSE = "</ifm|arg_value>"
+# Only an opener with a call after it is a block; a bare mention is prose.
+_IFM_BLOCK_OPEN_RE = re.compile(r"<ifm\|tool_calls>(?=\s*<ifm\|tool_call>)")
 _IFM_NAME_RE = re.compile(r"\s*([\w.\-]+)\s*")
 _IFM_ARG_RE = re.compile(
     r"\s*<ifm\|arg_key>([^<>]*)</ifm\|arg_key>\s*"
@@ -1955,7 +1958,7 @@ _EMBEDDED_MARKER_RE = re.compile(
     + "|"
     + re.escape(_MINIMAX_BLOCK_OPEN)
     + "|"
-    + re.escape(_IFM_BLOCK_OPEN)
+    + _IFM_BLOCK_OPEN_RE.pattern
 )
 # The lookahead mirrors the ``_TOOL_ALL_PATS`` python_tag arm so a prose mention is not one.
 _OUTER_ENVELOPE_OPEN_RE = re.compile(
@@ -2345,7 +2348,8 @@ def parse_tool_calls_from_text(
         _km_bare = content.find(_KIMI_CALL_BEGIN)
         _km_pos = min(p for p in (_km_section, _km_bare, len(content)) if p >= 0)
         _mm_pos = content.find(_MINIMAX_BLOCK_OPEN)
-        _ifm_pos = content.find(_IFM_BLOCK_OPEN)
+        _ifm = _IFM_BLOCK_OPEN_RE.search(content)
+        _ifm_pos = _ifm.start() if _ifm else -1
         pre_pass = [
             (_ds_pos, _parse_deepseek_tool_calls),
             (_km_pos, _parse_kimi_tool_calls),
@@ -4565,13 +4569,25 @@ def _ifm_blocks(text: str, relaxed: bool = True):
                 key = key.strip()
                 if not key:
                     return None, pos, False
+                end = am.end()
                 if arg_type and arg_type.strip().lower() in _IFM_JSON_TYPES:
+                    # A JSON literal's own strings may spell the closer: end at the one after the literal.
+                    vs = am.start(3)
+                    while vs < end and text[vs].isspace():
+                        vs += 1
+                    if text.startswith(("{", "["), vs):
+                        close = (_balanced_brace_end if text[vs] == "{" else _balanced_bracket_end)(
+                            text, vs
+                        )
+                        if close is not None and text.startswith(_IFM_ARG_VALUE_CLOSE, close + 1):
+                            value = text[vs : close + 1]
+                            end = close + 1 + len(_IFM_ARG_VALUE_CLOSE)
                     try:
                         value = json.loads(value)
                     except (json.JSONDecodeError, ValueError):
                         pass
                 args[key] = value
-                pos = am.end()
+                pos = end
             call = (m.group(1), args)
         while pos < n and text[pos].isspace():
             pos += 1
