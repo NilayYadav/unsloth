@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { useIsAccountOwner } from "@/features/auth";
 import {
   FullAccessConfirmDialog,
@@ -34,6 +35,7 @@ import { toast } from "sonner";
 import {
   type HostPrepJob,
   type SandboxMemoryStatus,
+  type SandboxNetworkStatus,
   type SandboxSettingsUpdate,
   type SandboxStatus,
   type SandboxToolStatus,
@@ -210,6 +212,101 @@ function MemoryLimitRow({
         )}
       </div>
     </SettingsRow>
+  );
+}
+
+function NetworkRows({
+  network,
+  saving,
+  error,
+  onSave,
+}: {
+  network: SandboxNetworkStatus;
+  saving: boolean;
+  error: string | null;
+  onSave: (update: {
+    networkAllowlist?: boolean;
+    networkExtraHosts?: string[];
+  }) => void;
+}) {
+  const t = useT();
+  const activePermission = useActivePermissionMode();
+  const sandboxLevel = useChatRuntimeStore((s) => s.sandboxLevel);
+  const capability = useSandboxCapability(sandboxLevel === "high");
+  const sandboxOn = sandboxSwitchState(
+    sandboxLevel,
+    activePermission.value,
+    capability,
+  );
+  const inactive = network.enabled && (!sandboxOn.checked || sandboxOn.disabled);
+  const [draft, setDraft] = useState(network.extraHosts.join("\n"));
+  const hosts = draft
+    .split(/[\s,]+/)
+    .map((host) => host.trim())
+    .filter(Boolean);
+  const changed = hosts.join("\n") !== network.extraHosts.join("\n");
+  return (
+    <>
+      <SettingsRow
+        label={t("settings.sandbox.networkLabel")}
+        description={t("settings.sandbox.networkDescription")}
+        below={
+          error && !network.enabled ? (
+            <span className={cn(NOTE_CLASS, "text-destructive")}>{error}</span>
+          ) : inactive ? (
+            <span className={cn(NOTE_CLASS, "text-muted-foreground")}>
+              {t("settings.sandbox.networkInactive")}
+            </span>
+          ) : null
+        }
+      >
+        <Switch
+          checked={network.enabled}
+          disabled={saving}
+          aria-label={t("settings.sandbox.networkLabel")}
+          onCheckedChange={(checked) => onSave({ networkAllowlist: checked })}
+        />
+      </SettingsRow>
+      {network.enabled ? (
+        <SettingsRow
+          label={t("settings.sandbox.hostsLabel")}
+          description={t("settings.sandbox.hostsDescription")}
+          hint={t("settings.sandbox.hostsHint", {
+            hosts: network.defaultHosts.join(", "),
+          })}
+          below={
+            error ? (
+              <span className={cn(NOTE_CLASS, "text-destructive")}>
+                {error}
+              </span>
+            ) : null
+          }
+        >
+          <div className="flex flex-col items-end gap-2">
+            <Textarea
+              value={draft}
+              rows={3}
+              fieldSizing="fixed"
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              placeholder={t("settings.sandbox.hostsPlaceholder")}
+              aria-label={t("settings.sandbox.hostsLabel")}
+              onChange={(event) => setDraft(event.target.value)}
+              className="min-h-0 w-56 resize-y px-2.5 py-1.5 font-mono text-xs md:text-xs"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={saving || !changed}
+              onClick={() => onSave({ networkExtraHosts: hosts })}
+            >
+              {saving ? t("common.saving") : t("common.save")}
+            </Button>
+          </div>
+        </SettingsRow>
+      ) : null}
+    </>
   );
 }
 
@@ -403,6 +500,8 @@ function OsSandboxSections() {
   const [job, setJob] = useState<HostPrepJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // The row whose save failed, so one row's error is not shown under another.
+  const [errorRow, setErrorRow] = useState<"memory" | "network" | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [restored, setRestored] = useState<number | null>(null);
@@ -550,6 +649,14 @@ function OsSandboxSections() {
       if (next.restored) setRestored(next.restored);
     } catch (saveError) {
       if (!mounted.current) return;
+      setErrorRow(
+        update.memoryLimitGb !== undefined
+          ? "memory"
+          : update.networkAllowlist !== undefined ||
+              update.networkExtraHosts !== undefined
+            ? "network"
+            : null,
+      );
       setActionError(
         saveError instanceof Error
           ? saveError.message
@@ -781,8 +888,18 @@ function OsSandboxSections() {
                     key={`${status.memory.savedGb}:${status.memory.limitGb}`}
                     memory={status.memory}
                     saving={saving}
-                    error={actionError}
+                    error={errorRow === "memory" ? actionError : null}
                     onSave={(memoryLimitGb) => void save({ memoryLimitGb })}
+                  />
+                ) : null}
+                {status.network ? (
+                  <NetworkRows
+                    // A saved or reloaded list resets the draft.
+                    key={status.network.extraHosts.join("\n")}
+                    network={status.network}
+                    saving={saving}
+                    error={errorRow === "network" ? actionError : null}
+                    onSave={(update) => void save(update)}
                   />
                 ) : null}
               </>

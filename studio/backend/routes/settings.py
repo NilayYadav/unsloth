@@ -111,7 +111,13 @@ from utils.helper_precache_settings import (
     helper_model_disabled_by_env,
     set_helper_precache_enabled,
 )
-from utils import first_token_timeout, sandbox_memory_limit, systemone_settings, tool_result_limit
+from utils import (
+    first_token_timeout,
+    sandbox_memory_limit,
+    sandbox_network,
+    systemone_settings,
+    tool_result_limit,
+)
 from utils import video_cpu_settings
 from utils.download_speed_limit import (
     get_download_speed_limit_mbps,
@@ -5676,6 +5682,12 @@ class SandboxMemoryStatus(BaseModel):
     locked_by_environment: bool
 
 
+class SandboxNetworkStatus(BaseModel):
+    enabled: bool
+    extra_hosts: list[str]
+    default_hosts: list[str]
+
+
 class SandboxStatusResponse(BaseModel):
     platform: str
     python: SandboxToolStatus
@@ -5684,6 +5696,8 @@ class SandboxStatusResponse(BaseModel):
     windows: Optional[SandboxWindowsStatus] = None
     # None off Linux, where the rlimit never applied.
     memory: Optional[SandboxMemoryStatus] = None
+    # None on Windows, where the allowlist proxy does not run.
+    network: Optional[SandboxNetworkStatus] = None
     setup: Optional[SandboxSetupStatus] = None
     checked_at: float
     grants_restored: Optional[int] = None
@@ -5698,6 +5712,10 @@ class SandboxSettingsPayload(BaseModel):
         default = None,
         ge = sandbox_memory_limit.MIN_MEMORY_LIMIT_GB,
         le = sandbox_memory_limit.MAX_MEMORY_LIMIT_GB,
+    )
+    network_allowlist: Optional[StrictBool] = None
+    network_extra_hosts: Optional[list[StrictStr]] = Field(
+        default = None, max_length = sandbox_network.MAX_EXTRA_HOSTS
     )
 
 
@@ -5908,13 +5926,29 @@ def _sandbox_memory_status() -> Optional[SandboxMemoryStatus]:
     )
 
 
+def _sandbox_network_status() -> Optional[SandboxNetworkStatus]:
+    import sys
+
+    from core.inference import sandbox_egress
+
+    if sys.platform not in ("linux", "darwin"):
+        return None
+    return SandboxNetworkStatus(
+        enabled = sandbox_network.allowlist_enabled(),
+        extra_hosts = list(sandbox_network.extra_hosts()),
+        default_hosts = list(sandbox_egress.ALLOWED_HOSTS),
+    )
+
+
 def _for_request(status: SandboxStatusResponse, request: Request) -> SandboxStatusResponse:
     """Blocking. The setup button: a direct local request, or a Linux install that prompts nobody here."""
     from core.inference import sandbox_setup_plan
     from utils.client_ip import is_direct_local_request
 
     # Read per request, not from the probe cache: a save must show at once.
-    status = status.model_copy(update = {"memory": _sandbox_memory_status()})
+    status = status.model_copy(
+        update = {"memory": _sandbox_memory_status(), "network": _sandbox_network_status()}
+    )
     setup = status.setup
     if setup is None:
         return status
@@ -5954,9 +5988,13 @@ def _sandbox_apply(payload: SandboxSettingsPayload) -> Optional[int]:
     from core.inference import mxc_policy, mxc_read_grants
     from utils import mxc_isolation_settings as saved
 
+    network = payload.network_allowlist is not None or payload.network_extra_hosts is not None
+    if network:
+        sandbox_network.save(payload.network_allowlist, payload.network_extra_hosts)
     if payload.memory_limit_gb is not None:
         sandbox_memory_limit.set_memory_limit_gb(payload.memory_limit_gb)
-        # The route refuses it beside the Windows switches, so the MXC state below is untouched.
+    if network or payload.memory_limit_gb is not None:
+        # The route refuses these beside the Windows switches, so the MXC state below is untouched.
         return None
     if payload.allow_dacl_fallback is not None:
         saved.set_dacl_fallback_setting(payload.allow_dacl_fallback)
@@ -6003,8 +6041,8 @@ async def update_sandbox_settings(
     # Host policy: changed at the console, never by an API key the owner happens to hold.
     _ui_session: None = Depends(_require_ui_session),
 ) -> SandboxStatusResponse:
-    """Save the Windows MXC opt-in, the persistent read grant choice, or the Linux memory limit. Applies to the next
-    launch."""
+    """Save the Windows MXC opt-in, the persistent read grant choice, the Linux memory limit, or the network
+    allowlist. Applies to the next launch."""
     import sys
 
     from core.inference import mxc_policy, mxc_read_grants
@@ -6013,6 +6051,20 @@ async def update_sandbox_settings(
     windows_fields = (
         payload.allow_dacl_fallback is not None or payload.persistent_read_grants is not None
     )
+    network_fields = (
+        payload.network_allowlist is not None or payload.network_extra_hosts is not None
+    )
+    if network_fields:
+        if sys.platform not in ("linux", "darwin"):
+            raise HTTPException(
+                status_code = 409,
+                detail = "The network allowlist applies on Linux and macOS.",
+            )
+        if payload.network_extra_hosts is not None:
+            try:
+                sandbox_network.clean_hosts(payload.network_extra_hosts)
+            except ValueError as exc:
+                raise HTTPException(status_code = 422, detail = str(exc)) from exc
     if payload.memory_limit_gb is not None:
         if sys.platform != "linux":
             raise HTTPException(
@@ -6023,7 +6075,9 @@ async def update_sandbox_settings(
                 status_code = 409,
                 detail = f"{sandbox_memory_limit.MEMORY_LIMIT_ENV} is set in the environment Unsloth runs in, which decides this.",
             )
-    if sys.platform != "win32" and (windows_fields or payload.memory_limit_gb is None):
+    if sys.platform != "win32" and (
+        windows_fields or (payload.memory_limit_gb is None and not network_fields)
+    ):
         raise HTTPException(status_code = 409, detail = "These settings only apply on Windows.")
     locks = (
         (payload.allow_dacl_fallback, mxc_policy.DACL_FALLBACK_ENV),
@@ -6047,11 +6101,13 @@ async def update_sandbox_settings(
             log = logger,
         ) from exc
     logger.info(
-        "settings.sandbox_updated subject=%s dacl=%s grants=%s memory_gb=%s",
+        "settings.sandbox_updated subject=%s dacl=%s grants=%s memory_gb=%s network=%s hosts=%s",
         current_subject,
         payload.allow_dacl_fallback,
         payload.persistent_read_grants,
         payload.memory_limit_gb,
+        payload.network_allowlist,
+        None if payload.network_extra_hosts is None else len(payload.network_extra_hosts),
     )
     status = await asyncio.to_thread(_for_request, status, request)
     return status.model_copy(update = {"grants_restored": restored})

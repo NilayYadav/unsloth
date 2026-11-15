@@ -61,6 +61,13 @@ export type SandboxMemoryStatus = {
   lockedByEnvironment: boolean;
 };
 
+// null on Windows, where the allowlist does not run.
+export type SandboxNetworkStatus = {
+  enabled: boolean;
+  extraHosts: string[];
+  defaultHosts: string[];
+};
+
 export type SandboxStatus = {
   platform: string;
   python: SandboxToolStatus;
@@ -68,6 +75,7 @@ export type SandboxStatus = {
   terminalShell: TerminalShell | null;
   windows: WindowsSandboxStatus | null;
   memory: SandboxMemoryStatus | null;
+  network: SandboxNetworkStatus | null;
   setup: SandboxSetupPlan | null;
   checkedAt: number;
   restored?: number;
@@ -77,6 +85,8 @@ export type SandboxSettingsUpdate = {
   allowDaclFallback?: boolean;
   persistentReadGrants?: boolean;
   memoryLimitGb?: number;
+  networkAllowlist?: boolean;
+  networkExtraHosts?: string[];
 };
 
 export type HostPrepState =
@@ -160,6 +170,14 @@ type ApiMemoryStatus = {
   locked_by_environment?: boolean;
 };
 
+type ApiNetworkStatus = {
+  enabled?: boolean;
+  // biome-ignore lint/style/useNamingConvention: API schema
+  extra_hosts?: string[];
+  // biome-ignore lint/style/useNamingConvention: API schema
+  default_hosts?: string[];
+};
+
 type ApiSandboxStatus = {
   platform?: string;
   python?: ApiToolStatus;
@@ -168,6 +186,7 @@ type ApiSandboxStatus = {
   terminal_shell?: TerminalShell | null;
   windows?: ApiWindowsStatus | null;
   memory?: ApiMemoryStatus | null;
+  network?: ApiNetworkStatus | null;
   setup?: ApiSetupPlan | null;
   // biome-ignore lint/style/useNamingConvention: API schema
   checked_at?: number;
@@ -257,6 +276,17 @@ function memoryFromApi(
   };
 }
 
+function networkFromApi(
+  network: ApiNetworkStatus | null | undefined,
+): SandboxNetworkStatus | null {
+  if (!network || typeof network.enabled !== "boolean") return null;
+  return {
+    enabled: network.enabled,
+    extraHosts: network.extra_hosts ?? [],
+    defaultHosts: network.default_hosts ?? [],
+  };
+}
+
 export function statusFromApi(status: ApiSandboxStatus): SandboxStatus {
   const out: SandboxStatus = {
     platform: status.platform ?? "",
@@ -265,6 +295,7 @@ export function statusFromApi(status: ApiSandboxStatus): SandboxStatus {
     terminalShell: status.terminal_shell ?? null,
     windows: windowsFromApi(status.windows),
     memory: memoryFromApi(status.memory),
+    network: networkFromApi(status.network),
     setup: setupFromApi(status.setup),
     checkedAt: status.checked_at ?? 0,
   };
@@ -312,7 +343,7 @@ export async function updateSandboxSettings(
   update: SandboxSettingsUpdate,
   fallbackMessage: string,
 ): Promise<SandboxStatus> {
-  const body: Record<string, boolean | number> = {};
+  const body: Record<string, boolean | number | string[]> = {};
   if (update.allowDaclFallback !== undefined) {
     body.allow_dacl_fallback = update.allowDaclFallback;
   }
@@ -321,6 +352,12 @@ export async function updateSandboxSettings(
   }
   if (update.memoryLimitGb !== undefined) {
     body.memory_limit_gb = update.memoryLimitGb;
+  }
+  if (update.networkAllowlist !== undefined) {
+    body.network_allowlist = update.networkAllowlist;
+  }
+  if (update.networkExtraHosts !== undefined) {
+    body.network_extra_hosts = update.networkExtraHosts;
   }
   const res = await authFetch(ROUTE, {
     method: "PUT",

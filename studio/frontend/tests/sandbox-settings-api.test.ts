@@ -12,7 +12,7 @@ type Api = {
     fallback: string,
   ) => Promise<Record<string, unknown>>;
   updateSandboxSettings: (
-    update: Record<string, boolean | number>,
+    update: Record<string, boolean | number | string[]>,
     fallback: string,
   ) => Promise<Record<string, unknown>>;
   startHostPreparation: (fallback: string) => Promise<Record<string, unknown>>;
@@ -129,6 +129,7 @@ test("the status maps to camelCase and keeps the saved and effective values apar
       builtinContainerBuild: null,
     },
     memory: null,
+    network: null,
     setup: null,
     checkedAt: 12,
   });
@@ -270,6 +271,49 @@ test("the memory limit maps to camelCase, and an older backend without it maps t
     (await older.api.loadSandboxStatus(false, "fallback")).memory,
     null,
   );
+});
+
+test("the network allowlist reaches the tab, and an older server has none", async () => {
+  const status = {
+    platform: "linux",
+    windows: null,
+    checked_at: 1,
+  };
+  const { api } = loadApi(() =>
+    json({
+      ...status,
+      network: {
+        enabled: true,
+        extra_hosts: ["example.com"],
+        default_hosts: ["pypi.org"],
+      },
+    }),
+  );
+  assert.deepEqual((await api.loadSandboxStatus(false, "fallback")).network, {
+    enabled: true,
+    extraHosts: ["example.com"],
+    defaultHosts: ["pypi.org"],
+  });
+  const older = loadApi(() => json(status));
+  assert.equal(
+    (await older.api.loadSandboxStatus(false, "fallback")).network,
+    null,
+  );
+});
+
+test("a network save sends only the network fields", async () => {
+  const { api, calls } = loadApi(() => json(WINDOWS_STATUS));
+  await api.updateSandboxSettings({ networkAllowlist: true }, "fallback");
+  await api.updateSandboxSettings(
+    { networkExtraHosts: ["example.com", "*.corp.internal"] },
+    "fallback",
+  );
+  assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
+    network_allowlist: true,
+  });
+  assert.deepEqual(JSON.parse(String(calls[1].init?.body)), {
+    network_extra_hosts: ["example.com", "*.corp.internal"],
+  });
 });
 
 test("a memory limit save sends only memory_limit_gb", async () => {

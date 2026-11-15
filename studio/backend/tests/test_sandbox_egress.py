@@ -14,13 +14,22 @@ import pytest
 
 from core.inference import os_sandbox, sandbox_egress, tools
 from core.inference.os_sandbox import ToolLaunchPlan
+from utils import sandbox_network
 
 _SESSION = "__LOCALID_sandbox_egress"
 
 
 @pytest.fixture
-def proxy_enabled(monkeypatch):
-    monkeypatch.setenv(sandbox_egress.FLAG_ENV, "1")
+def saved(monkeypatch):
+    store = {"enabled": False, "hosts": ()}
+    monkeypatch.setattr(sandbox_network, "allowlist_enabled", lambda: store["enabled"])
+    monkeypatch.setattr(sandbox_network, "extra_hosts", lambda: store["hosts"])
+    return store
+
+
+@pytest.fixture
+def proxy_enabled(saved):
+    saved["enabled"] = True
     if not sandbox_egress.enabled():
         pytest.skip("the egress proxy is Linux and macOS only")
 
@@ -66,7 +75,7 @@ def test_a_plain_http_request_to_an_unlisted_host_gets_a_readable_refusal():
             reply += chunk
     assert reply.startswith(b"HTTP/1.1 403 ")
     assert b"Unsloth sandbox: example.com is not in the sandbox network allowlist" in reply
-    assert sandbox_egress.EXTRA_HOSTS_ENV.encode() in reply
+    assert b"Settings > Security > Allowed hosts" in reply
 
 
 def test_socks5_refuses_an_unlisted_host():
@@ -144,23 +153,64 @@ def test_the_allowlist_matches_whole_labels(host, allowed):
 
 
 @pytest.mark.parametrize(
-    "value,host,allowed",
+    "hosts,host,allowed",
     [
-        ("example.com", "example.com", True),
-        (" Example.COM. , *.corp.internal", "pkgs.corp.internal", True),
-        ("example.com", "evil-example.com", False),
-        ("*", "anything.example", True),
-        ("http://example.com,example.com:443,user@example.com", "example.com", False),
-        ("", "example.com", False),
+        (("example.com",), "example.com", True),
+        (("*.corp.internal",), "pkgs.corp.internal", True),
+        (("example.com",), "evil-example.com", False),
+        (("*",), "anything.example", True),
+        ((), "example.com", False),
     ],
 )
-def test_extra_hosts_come_from_the_environment(monkeypatch, value, host, allowed):
-    monkeypatch.setenv(sandbox_egress.EXTRA_HOSTS_ENV, value)
+def test_saved_extra_hosts_extend_the_allowlist(saved, hosts, host, allowed):
+    saved["hosts"] = hosts
     assert sandbox_egress.host_allowed(host) is allowed
 
 
-def test_a_wildcard_allowlist_still_refuses_ip_addresses_and_private_names(monkeypatch):
-    monkeypatch.setenv(sandbox_egress.EXTRA_HOSTS_ENV, "*")
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (" Example.COM. ", "example.com"),
+        ("*.Corp.Internal", "*.corp.internal"),
+        ("*", "*"),
+        ("http://example.com", None),
+        ("example.com:443", None),
+        ("user@example.com", None),
+        ("10.0.0.1", None),
+        ("*.10.0.0.1", None),
+        ("::1", None),
+        ("localhost", None),
+        ("exa mple.com", None),
+        ("-bad.com", None),
+        ("", None),
+        (5, None),
+    ],
+)
+def test_hosts_are_normalized_or_refused(value, expected):
+    assert sandbox_network.normalize_host(value) == expected
+
+
+def test_saving_refuses_a_bad_host_and_dedupes(monkeypatch):
+    with pytest.raises(ValueError, match = "not a host name"):
+        sandbox_network.clean_hosts(["example.com", "http://x"])
+    assert sandbox_network.clean_hosts(["A.com", "a.com.", "b.org"]) == ["a.com", "b.org"]
+    with pytest.raises(ValueError, match = "at most"):
+        sandbox_network.clean_hosts(
+            [f"h{i}.com" for i in range(sandbox_network.MAX_EXTRA_HOSTS + 1)]
+        )
+
+
+def test_a_corrupt_stored_value_is_ignored(monkeypatch):
+    monkeypatch.setattr(sandbox_network, "_read", lambda key, default: "example.com")
+    assert sandbox_network.extra_hosts() == ()
+    monkeypatch.setattr(sandbox_network, "_read", lambda key, default: ["ok.com", "http://bad", 3])
+    assert sandbox_network.extra_hosts() == ("ok.com",)
+    monkeypatch.setattr(sandbox_network, "_read", lambda key, default: "yes")
+    assert sandbox_network.allowlist_enabled() is False
+
+
+def test_a_wildcard_allowlist_still_refuses_ip_addresses_and_private_names(saved):
+    saved["hosts"] = ("*",)
     assert "is an IP address" in _connect("10.0.0.1:443")
     assert "resolves to a non-public address" in _connect("localhost:443")
 
@@ -201,8 +251,8 @@ def test_a_connection_flood_does_not_grow_studio_threads_without_bound(monkeypat
             sock.close()
 
 
-def test_the_flag_is_off_by_default(monkeypatch):
-    monkeypatch.delenv(sandbox_egress.FLAG_ENV, raising = False)
+def test_the_allowlist_is_off_by_default(monkeypatch):
+    monkeypatch.setattr(sandbox_network, "_read", lambda key, default: default)
     assert not sandbox_egress.enabled()
 
 
@@ -211,8 +261,7 @@ def test_curl_stays_blocked_when_the_call_would_run_without_os_isolation(proxy_e
     assert out == "Blocked command(s) for safety: curl"
 
 
-def test_curl_stays_blocked_when_the_flag_is_off(monkeypatch):
-    monkeypatch.delenv(sandbox_egress.FLAG_ENV, raising = False)
+def test_curl_stays_blocked_when_the_allowlist_is_off(saved):
     assert tools._bash_exec("curl --version", None, 60, _SESSION).startswith(
         "Blocked command(s) for safety: curl"
     )
@@ -305,8 +354,7 @@ def test_the_execution_record_names_the_allowlist(tmp_path, proxy_enabled):
 
 
 @_needs_isolation
-def test_the_execution_record_stays_unrestricted_when_the_flag_is_off(tmp_path, monkeypatch):
-    monkeypatch.delenv(sandbox_egress.FLAG_ENV, raising = False)
+def test_the_execution_record_stays_unrestricted_when_the_allowlist_is_off(tmp_path, saved):
     prepared = os_sandbox.prepare_tool_launch(
         ToolLaunchPlan(
             argv = ("/bin/true",), workdir = str(tmp_path), env = {}, requested_mode = "required"
@@ -328,12 +376,11 @@ def test_curl_runs_in_the_terminal_behind_the_proxy(proxy_enabled):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason = "the bubblewrap backend is Linux only")
-def test_bwrap_keeps_the_host_network_when_the_flag_is_off(tmp_path, monkeypatch):
+def test_bwrap_keeps_the_host_network_when_the_allowlist_is_off(tmp_path, saved):
     if shutil.which("bwrap") is None:
         pytest.skip("bubblewrap is not installed")
     from core.inference import sandbox_linux
 
-    monkeypatch.delenv(sandbox_egress.FLAG_ENV, raising = False)
     prepared = sandbox_linux.prepare(
         ToolLaunchPlan(argv = ("/bin/true",), workdir = str(tmp_path), env = {})
     )

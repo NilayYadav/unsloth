@@ -589,6 +589,7 @@ const status = (overrides: Partial<SandboxStatus> = {}): SandboxStatus => ({
   terminalShell: "bash",
   windows: null,
   memory: null,
+  network: null,
   setup: {
     action: "linux-install",
     elevation: "sudo",

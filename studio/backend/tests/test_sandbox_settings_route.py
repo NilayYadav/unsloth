@@ -502,3 +502,86 @@ def test_windows_status_names_the_update_that_adds_the_builtin_container(
     monkeypatch.setattr(sandbox_setup_plan, "windows_builtin_container_update", lambda: update)
     block = settings._sandbox_windows_status()
     assert (block.windows_build, block.builtin_container_build) == (update or (None, None))
+
+
+@pytest.fixture
+def network(monkeypatch):
+    from utils import sandbox_network
+
+    stored = {}
+    monkeypatch.setattr(sandbox_network, "_read", lambda key, default: stored.get(key, default))
+    monkeypatch.setattr(
+        sandbox_network,
+        "save",
+        lambda enabled = None, hosts = None: stored.update(
+            {
+                **({sandbox_network.ENABLED_SETTING_KEY: enabled} if enabled is not None else {}),
+                **(
+                    {sandbox_network.EXTRA_HOSTS_SETTING_KEY: sandbox_network.clean_hosts(hosts)}
+                    if hosts is not None
+                    else {}
+                ),
+            }
+        ),
+    )
+    return stored
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_posix_status_carries_the_network_allowlist_off_by_default(
+    host, memory, network, monkeypatch, platform
+):
+    monkeypatch.setattr(sys, "platform", platform)
+    with _client(OWNER) as client:
+        body = client.get("/sandbox").json()["network"]
+    assert body["enabled"] is False and body["extra_hosts"] == []
+    assert "pypi.org" in body["default_hosts"] and "huggingface.co" in body["default_hosts"]
+
+
+def test_turning_the_allowlist_on_and_adding_hosts_shows_at_once(host, posix, memory, network):
+    calls, _saved = host
+    with _client(OWNER) as client:
+        response = client.put("/sandbox", json = {"network_allowlist": True})
+        assert response.status_code == 200, response.text
+        assert response.json()["network"]["enabled"] is True
+        response = client.put(
+            "/sandbox",
+            json = {"network_extra_hosts": [" Example.com ", "*.corp.internal", "example.com"]},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["network"]["extra_hosts"] == ["example.com", "*.corp.internal"]
+        assert client.get("/sandbox").json()["network"]["enabled"] is True
+    # Network-only saves never touch the Windows MXC state or the memory limit.
+    assert calls["invalidate"] == 0 and calls["revoke"] == 0 and memory == {}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"network_extra_hosts": ["http://example.com"]},
+        {"network_extra_hosts": ["10.0.0.1"]},
+        {"network_extra_hosts": "example.com"},
+        {"network_extra_hosts": [5]},
+        {"network_allowlist": "yes"},
+        {"network_extra_hosts": [f"h{i}.com" for i in range(101)]},
+    ],
+)
+def test_bad_network_settings_are_refused(host, posix, memory, network, body):
+    with _client(OWNER) as client:
+        assert client.put("/sandbox", json = body).status_code == 422
+    assert network == {}
+
+
+def test_the_network_allowlist_is_owner_and_ui_session_only(host, posix, memory, network):
+    with _client(ALICE) as client:
+        assert client.put("/sandbox", json = {"network_allowlist": True}).status_code == 403
+    with _client(OWNER, via_api_key = True) as client:
+        assert client.put("/sandbox", json = {"network_allowlist": True}).status_code == 403
+    assert network == {}
+
+
+def test_windows_has_no_network_allowlist(host, windows, memory, network):
+    with _client(OWNER) as client:
+        assert client.get("/sandbox").json()["network"] is None
+        assert client.put("/sandbox", json = {"network_allowlist": True}).status_code == 409
+    assert network == {}

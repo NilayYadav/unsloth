@@ -18,11 +18,10 @@ import time
 from urllib.parse import urlsplit
 
 from loggers import get_logger
+from utils import sandbox_network
 
 logger = get_logger(__name__)
 
-FLAG_ENV = "UNSLOTH_STUDIO_SANDBOX_NETWORK_PROXY"
-EXTRA_HOSTS_ENV = "UNSLOTH_STUDIO_SANDBOX_NETWORK_ALLOW"
 ALLOWED_HOSTS = (
     "pypi.org",
     "files.pythonhosted.org",
@@ -89,12 +88,7 @@ os.execvp(argv[0], argv)
 
 
 def enabled() -> bool:
-    return sys.platform in ("linux", "darwin") and os.environ.get(FLAG_ENV, "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    return sys.platform in ("linux", "darwin") and sandbox_network.allowlist_enabled()
 
 
 def proxy_env(port: int) -> dict[str, str]:
@@ -110,19 +104,12 @@ def proxy_env(port: int) -> dict[str, str]:
     return env
 
 
-def extra_hosts() -> tuple[str, ...]:
-    entries = (
-        e.strip().lower().rstrip(".") for e in os.environ.get(EXTRA_HOSTS_ENV, "").split(",")
-    )
-    return tuple(e for e in entries if e and not any(c in e for c in "/:@ "))
-
-
 def host_allowed(host: str) -> bool:
     host = host.lower().rstrip(".")
     return any(
         pattern == "*"
         or (host.endswith(pattern[1:]) if pattern.startswith("*.") else host == pattern)
-        for pattern in (*ALLOWED_HOSTS, *extra_hosts())
+        for pattern in (*ALLOWED_HOSTS, *sandbox_network.extra_hosts())
     )
 
 
@@ -149,7 +136,7 @@ def _open_upstream(host: str, port: int) -> socket.socket:
         raise _Refused(f"{host}:{port} is blocked: only ports 80 and 443 are reachable")
     if not host_allowed(host):
         raise _Refused(
-            f"{host} is not in the sandbox network allowlist (add it with {EXTRA_HOSTS_ENV})"
+            f"{host} is not in the sandbox network allowlist (add it in Settings > Security > Allowed hosts)"
         )
     try:
         infos = socket.getaddrinfo(host, port, type = socket.SOCK_STREAM)
