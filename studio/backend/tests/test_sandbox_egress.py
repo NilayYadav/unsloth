@@ -65,7 +65,8 @@ def test_a_plain_http_request_to_an_unlisted_host_gets_a_readable_refusal():
         while chunk := sock.recv(4096):
             reply += chunk
     assert reply.startswith(b"HTTP/1.1 403 ")
-    assert reply.endswith(b"Unsloth sandbox: example.com is not in the sandbox network allowlist\n")
+    assert b"Unsloth sandbox: example.com is not in the sandbox network allowlist" in reply
+    assert sandbox_egress.EXTRA_HOSTS_ENV.encode() in reply
 
 
 def test_socks5_refuses_an_unlisted_host():
@@ -140,6 +141,64 @@ def test_public_addresses_are_dialled(address):
 )
 def test_the_allowlist_matches_whole_labels(host, allowed):
     assert sandbox_egress.host_allowed(host) is allowed
+
+
+@pytest.mark.parametrize(
+    "value,host,allowed",
+    [
+        ("example.com", "example.com", True),
+        (" Example.COM. , *.corp.internal", "pkgs.corp.internal", True),
+        ("example.com", "evil-example.com", False),
+        ("*", "anything.example", True),
+        ("http://example.com,example.com:443,user@example.com", "example.com", False),
+        ("", "example.com", False),
+    ],
+)
+def test_extra_hosts_come_from_the_environment(monkeypatch, value, host, allowed):
+    monkeypatch.setenv(sandbox_egress.EXTRA_HOSTS_ENV, value)
+    assert sandbox_egress.host_allowed(host) is allowed
+
+
+def test_a_wildcard_allowlist_still_refuses_ip_addresses_and_private_names(monkeypatch):
+    monkeypatch.setenv(sandbox_egress.EXTRA_HOSTS_ENV, "*")
+    assert "is an IP address" in _connect("10.0.0.1:443")
+    assert "resolves to a non-public address" in _connect("localhost:443")
+
+
+def test_open_connections_are_capped_and_slots_come_back(monkeypatch):
+    monkeypatch.setattr(sandbox_egress, "_slots", threading.BoundedSemaphore(3))
+    held = [_proxy() for _ in range(3)]
+    try:
+        for sock in held:
+            sock.sendall(b"\x05")
+        with _proxy() as extra:
+            assert extra.recv(4096).startswith(
+                b"HTTP/1.1 503 Unsloth sandbox: too many open connections"
+            )
+    finally:
+        for sock in held:
+            sock.close()
+    for _ in range(50):
+        if sandbox_egress._slots._value == 3:
+            break
+        threading.Event().wait(0.1)
+    assert _connect("example.com:443").startswith("HTTP/1.1 403 ")
+
+
+def test_a_connection_flood_does_not_grow_studio_threads_without_bound(monkeypatch):
+    monkeypatch.setattr(sandbox_egress, "_slots", threading.BoundedSemaphore(16))
+    before = threading.active_count()
+    held = []
+    try:
+        for _ in range(200):
+            sock = _proxy()
+            sock.sendall(b"\x05")
+            held.append(sock)
+        threading.Event().wait(0.5)
+        assert threading.active_count() - before <= 16 * 2 + 2
+    finally:
+        for sock in held:
+            sock.close()
 
 
 def test_the_flag_is_off_by_default(monkeypatch):
@@ -229,6 +288,33 @@ def test_the_proxy_is_the_way_out_and_names_a_refused_host(tmp_path, proxy_enabl
     assert "403 Unsloth sandbox: example.com is not in the sandbox network allowlist" in (
         result.stdout
     ), result.stderr
+
+
+@_needs_isolation
+def test_the_execution_record_names_the_allowlist(tmp_path, proxy_enabled):
+    prepared = os_sandbox.prepare_tool_launch(
+        ToolLaunchPlan(
+            argv = ("/bin/true",), workdir = str(tmp_path), env = {}, requested_mode = "required"
+        )
+    )
+    prepared.cleanup()
+    record = prepared.execution_record
+    assert record.network_policy == "allowlist"
+    assert "allowlist_network" in record.limitations
+    assert "unrestricted_network" not in record.limitations
+
+
+@_needs_isolation
+def test_the_execution_record_stays_unrestricted_when_the_flag_is_off(tmp_path, monkeypatch):
+    monkeypatch.delenv(sandbox_egress.FLAG_ENV, raising = False)
+    prepared = os_sandbox.prepare_tool_launch(
+        ToolLaunchPlan(
+            argv = ("/bin/true",), workdir = str(tmp_path), env = {}, requested_mode = "required"
+        )
+    )
+    prepared.cleanup()
+    assert prepared.execution_record.network_policy == "unrestricted"
+    assert "unrestricted_network" in prepared.execution_record.limitations
 
 
 @_needs_isolation

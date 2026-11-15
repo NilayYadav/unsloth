@@ -219,6 +219,7 @@ class PreparedSandboxLaunch:
     cleanup_diagnostics: list[str] = field(default_factory = list)
     spawn_callback: Callable | None = None
     launch_limitations: tuple[str, ...] = ()
+    network_policy: str = "unrestricted"
 
     def cleanup(self) -> None:
         while self.cleanup_callbacks:
@@ -1452,6 +1453,16 @@ def prepare_tool_launch(plan: ToolLaunchPlan) -> PreparedSandboxLaunch:
         safeguards = _OS_ISOLATION_SAFEGUARDS,
         limitations = capability.limitations + prepared.launch_limitations,
     )
+    if prepared.network_policy != "unrestricted":
+        record = prepared.execution_record
+        prepared.execution_record = replace(
+            record,
+            network_policy = prepared.network_policy,
+            limitations = tuple(
+                f"{prepared.network_policy}_network" if item == "unrestricted_network" else item
+                for item in record.limitations
+            ),
+        )
     return prepared
 
 

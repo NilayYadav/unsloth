@@ -23504,9 +23504,7 @@ def _bash_exec(
                 host_access_approved = host_reach_approved,
                 user_folder = chosen_folder,
             )
-            if proxied_refusal and not (
-                prepared.execution_record and prepared.execution_record.os_isolation
-            ):
+            if proxied_refusal and prepared.network_policy != "allowlist":
                 return proxied_refusal
             proc = os_sandbox.spawn_prepared_launch(
                 prepared, **_apply_prepared_launch(prepared, popen_kwargs)

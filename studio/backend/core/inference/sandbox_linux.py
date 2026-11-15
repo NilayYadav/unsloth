@@ -1087,6 +1087,7 @@ def prepare(plan: ToolLaunchPlan) -> PreparedSandboxLaunch:
             backend = BACKEND_NAME,
             pass_fds = (seccomp.fileno(),),
             owned_files = [seccomp],
+            network_policy = "allowlist" if egress else "unrestricted",
             cleanup_paths = [identity_dir],
             timeout_seconds = plan.timeout_seconds,
             close_fds = plan.close_fds,

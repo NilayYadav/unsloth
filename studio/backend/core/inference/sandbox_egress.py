@@ -5,13 +5,16 @@
 
 from __future__ import annotations
 
+import atexit
 import ipaddress
 import os
+import shutil
 import socket
 import socketserver
 import sys
 import tempfile
 import threading
+import time
 from urllib.parse import urlsplit
 
 from loggers import get_logger
@@ -19,15 +22,21 @@ from loggers import get_logger
 logger = get_logger(__name__)
 
 FLAG_ENV = "UNSLOTH_STUDIO_SANDBOX_NETWORK_PROXY"
+EXTRA_HOSTS_ENV = "UNSLOTH_STUDIO_SANDBOX_NETWORK_ALLOW"
 ALLOWED_HOSTS = (
     "pypi.org",
     "files.pythonhosted.org",
+    "download.pytorch.org",
     "registry.npmjs.org",
     "proxy.golang.org",
     "sum.golang.org",
+    "crates.io",
     "index.crates.io",
     "static.crates.io",
+    "conda.anaconda.org",
+    "repo.anaconda.com",
     "github.com",
+    "api.github.com",
     "codeload.github.com",
     "*.githubusercontent.com",
     "huggingface.co",
@@ -37,6 +46,7 @@ ALLOWED_HOSTS = (
 )
 ALLOWED_PORTS = (80, 443)
 BRIDGE_PORT = 3128
+MAX_CONNECTIONS = 256
 _HEADER_LIMIT = 64 * 1024
 _IDLE_SECONDS = 300
 
@@ -100,11 +110,19 @@ def proxy_env(port: int) -> dict[str, str]:
     return env
 
 
+def extra_hosts() -> tuple[str, ...]:
+    entries = (
+        e.strip().lower().rstrip(".") for e in os.environ.get(EXTRA_HOSTS_ENV, "").split(",")
+    )
+    return tuple(e for e in entries if e and not any(c in e for c in "/:@ "))
+
+
 def host_allowed(host: str) -> bool:
     host = host.lower().rstrip(".")
     return any(
-        host.endswith(pattern[1:]) if pattern.startswith("*.") else host == pattern
-        for pattern in ALLOWED_HOSTS
+        pattern == "*"
+        or (host.endswith(pattern[1:]) if pattern.startswith("*.") else host == pattern)
+        for pattern in (*ALLOWED_HOSTS, *extra_hosts())
     )
 
 
@@ -130,7 +148,9 @@ def _open_upstream(host: str, port: int) -> socket.socket:
     if port not in ALLOWED_PORTS:
         raise _Refused(f"{host}:{port} is blocked: only ports 80 and 443 are reachable")
     if not host_allowed(host):
-        raise _Refused(f"{host} is not in the sandbox network allowlist")
+        raise _Refused(
+            f"{host} is not in the sandbox network allowlist (add it with {EXTRA_HOSTS_ENV})"
+        )
     try:
         infos = socket.getaddrinfo(host, port, type = socket.SOCK_STREAM)
     except OSError:
@@ -276,12 +296,53 @@ class _Handler(socketserver.BaseRequestHandler):
             pass
 
 
-class _UnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-    daemon_threads = True
+_slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+_busy_logged_at = float("-inf")
+_BUSY = (
+    b"HTTP/1.1 503 Unsloth sandbox: too many open connections\r\n"
+    b"Content-Length: 0\r\nConnection: close\r\n\r\n"
+)
 
 
-class _TCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+class _Capped(socketserver.ThreadingMixIn):
+    # Sandboxed code must not be able to make Studio spawn threads without bound.
     daemon_threads = True
+
+    def process_request(self, request, client_address) -> None:
+        if not _slots.acquire(blocking = False):
+            global _busy_logged_at
+            if time.monotonic() - _busy_logged_at > 10:
+                _busy_logged_at = time.monotonic()
+                logger.warning(
+                    "Sandbox network proxy is refusing connections: %d already open",
+                    MAX_CONNECTIONS,
+                )
+            try:
+                request.setblocking(False)
+                request.send(_BUSY)
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            _slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            _slots.release()
+
+
+class _UnixServer(_Capped, socketserver.UnixStreamServer):
+    pass
+
+
+class _TCPServer(_Capped, socketserver.TCPServer):
+    pass
 
 
 _lock = threading.Lock()
@@ -294,6 +355,7 @@ def _start(kind: str) -> socketserver.BaseServer:
         if server is None:
             if kind == "unix":
                 directory = tempfile.mkdtemp(prefix = "unsloth-egress-")
+                atexit.register(shutil.rmtree, directory, True)
                 server = _UnixServer(os.path.join(directory, "proxy.sock"), _Handler)
             else:
                 server = _TCPServer(("127.0.0.1", 0), _Handler)

@@ -731,6 +731,7 @@ def prepare(plan: ToolLaunchPlan) -> PreparedSandboxLaunch:
             argv = (SANDBOX_EXEC, "-p", profile, "--", *plan.argv),
             workdir = workdir,
             env = env,
+            network_policy = "allowlist" if proxy_port else "unrestricted",
             # Preserved: it is the os.setsid() tools.py's killpg teardown signals.
             preexec_fn = plan.preexec_fn,
             backend = BACKEND_NAME,
