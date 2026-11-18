@@ -3005,6 +3005,8 @@ type AutoLoadSource = {
   id: string;
   /** Sent to /api/inference/load as model_path. */
   loadId: string;
+  /** Hub repo id of an hf_cache row: in another cache its id and loadId are the snapshot path. */
+  repoId?: string;
   sizeBytes: number;
   maxSeqLength: number;
   /** null when the target is one file already (a local .gguf) or safetensors. */
@@ -3069,6 +3071,8 @@ function buildAutoLoadSources(
       kind: isGguf ? "gguf" : "model",
       id: row.id,
       loadId: row.load_id || row.id,
+      repoId:
+        row.source === "hf_cache" && row.model_id ? row.model_id : undefined,
       sizeBytes: row.size_bytes ?? 0,
       maxSeqLength: isGguf ? 0 : safetensorsMaxSeqLength,
       listVariants: needsVariant
@@ -3093,7 +3097,8 @@ function isRememberedSource(
   const target = normalizeTarget(remembered.id);
   return (
     normalizeTarget(source.id) === target ||
-    normalizeTarget(source.loadId) === target
+    normalizeTarget(source.loadId) === target ||
+    (source.repoId !== undefined && normalizeTarget(source.repoId) === target)
   );
 }
 
