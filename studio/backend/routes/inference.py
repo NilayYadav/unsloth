@@ -9134,6 +9134,27 @@ def _canonical_model_identity(model_id: Optional[str]) -> str:
     return (hf_cache_repo_id(model_id) or str(model_id)).lower()
 
 
+def _as_ollama_mlx_request(request):
+    """*request* advertised as the Ollama MLX tag whose checkpoint path it names. The build happens
+    under the load's lease, on its own executor: a lease held by a running load must not park a
+    default-executor thread here."""
+    from hub.services.models.ollama import ollama_mlx_ref_for_path
+
+    # A leased request is authorized only once its lease verifies.
+    if getattr(request, "native_path_lease", None):
+        return request
+    ref = isinstance(request.model_path, str) and ollama_mlx_ref_for_path(request.model_path)
+    if not ref or not hasattr(request, "_advertised_id") or request._advertised_id:
+        return request
+    try:
+        public_id = ollama_model_ref_public_id(ref)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code = 400, detail = redact_native_paths(str(exc))) from exc
+    resolved = request.model_copy()
+    resolved._advertised_id = public_id
+    return resolved
+
+
 def _as_ollama_manifest_request(request):
     """*request* with a materialized Ollama ``.gguf`` link rewritten to the tag that produced it."""
     from hub.services.models.ollama import ollama_manifest_ref_for_path, ollama_model_ref_files
@@ -9198,18 +9219,34 @@ def _as_local_scan_folder_request(request, owner_session: bool):
     return request.model_copy(update = {"model_path": load_path, "gguf_variant": variant})
 
 
+def _acquire_ollama_lease(model_path: str, native_path_lease):
+    """The GGUF tag's lease, or an MLX tag's whose checkpoint path *model_path* is, else None."""
+    from hub.services.models.ollama import acquire_ollama_mlx_ref, ollama_mlx_ref_for_path
+
+    if is_ollama_manifest_ref(model_path):
+        return acquire_ollama_model_ref(model_path)
+    ref = not native_path_lease and ollama_mlx_ref_for_path(model_path)
+    return acquire_ollama_mlx_ref(ref) if ref else None
+
+
 async def _lease_ollama_model_ref(
     request: LoadRequest | ValidateModelRequest, *, operation: str, stack: ExitStack
 ) -> Optional[str]:
-    if not is_ollama_manifest_ref(request.model_path):
+    path = request.model_path
+    # Only Ollama tags take the lease pool: an unrelated load must not queue behind a held lease.
+    if not isinstance(path, str) or not (
+        is_ollama_manifest_ref(path)
+        or any(part in (".studio_links", "ollama_links") for part in Path(path).parts)
+    ):
         return None
     loop = asyncio.get_running_loop()
     lease_future = loop.run_in_executor(
         _OLLAMA_LEASE_EXECUTOR,
         run_as,
         current_account(),
-        acquire_ollama_model_ref,
+        _acquire_ollama_lease,
         request.model_path,
+        getattr(request, "native_path_lease", None),
     )
     try:
         lease = await asyncio.shield(lease_future)
@@ -9217,20 +9254,24 @@ async def _lease_ollama_model_ref(
 
         def _release_cancelled_lease(done):
             try:
-                done.result().release()
+                if done.result() is not None:
+                    done.result().release()
             except BaseException:
                 pass
 
         lease_future.add_done_callback(_release_cancelled_lease)
         raise
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         logger.warning("inference.ollama_materialize_failed: %s", exc)
         raise HTTPException(
             status_code = 400,
             detail = redact_native_paths(str(exc)),
         ) from exc
+    if lease is None:
+        return None
     stack.callback(lease.release)
-    return lease.path
+    # An MLX tag loads by its checkpoint path, which the request already names.
+    return lease.path if is_ollama_manifest_ref(request.model_path) else None
 
 
 def _defers_access_to_native_grant(request) -> bool:
@@ -9611,12 +9652,27 @@ def _target_accepts_request_input(
             need_image,
             gguf_companion_roots,
         )
+    _build_unbuilt_ollama_mlx_tag(load_path)
     if needs_video and not _target_accepts_video_input(load_path):
         return False
     if needs_audio and not _target_accepts_audio_input(load_path):
         return False
     # need_image, not needs_vision: audio sets needs_vision but needs no vision tower.
     return _target_is_vision(load_path) if (needs_vision and need_image) else True
+
+
+def _build_unbuilt_ollama_mlx_tag(load_path: str) -> None:
+    """An unbuilt MLX tag's probes would read a checkpoint that does not exist yet."""
+    from hub.services.models.ollama import materialize_ollama_mlx_ref, ollama_mlx_ref_for_path
+
+    if os.path.exists(load_path):
+        return
+    try:
+        ref = ollama_mlx_ref_for_path(load_path)
+        if ref:
+            materialize_ollama_mlx_ref(ref)
+    except (OSError, ValueError) as exc:
+        logger.warning("inference.ollama_mlx_materialize_failed: %s", exc)
 
 
 def _resolve_target_gguf_file(load_path: str, gguf_variant: Optional[str]) -> Optional[str]:
@@ -19679,6 +19735,7 @@ async def _load_model_impl(
         await asyncio.to_thread(account_access.require_model_access, request.model_path)
     await _require_drafter_access(request)
     request = await asyncio.to_thread(_as_ollama_manifest_request, request)
+    request = await asyncio.to_thread(run_as, current_account(), _as_ollama_mlx_request, request)
     _requested_model_id = request.model_path
     request = await asyncio.to_thread(
         _as_local_scan_folder_request, request, _owner_session(fastapi_request)
@@ -21244,6 +21301,7 @@ async def validate_model(
     if account_access.managed_account() and not native_access_deferred:
         await asyncio.to_thread(account_access.require_model_access, request.model_path)
     request = await asyncio.to_thread(_as_ollama_manifest_request, request)
+    request = await asyncio.to_thread(run_as, current_account(), _as_ollama_mlx_request, request)
     # The chat flow validates before /load; offline the remote probe would refuse the id.
     request = await asyncio.to_thread(
         _as_local_scan_folder_request, request, _owner_session(fastapi_request)
