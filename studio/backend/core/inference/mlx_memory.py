@@ -1775,5 +1775,10 @@ def mlx_offload_plan(
 
 
 def mlx_fit_context(model_dir: str, **kwargs) -> Optional[int]:
-    """Largest context whose footprint fits budget_bytes; None when the ceiling already fits."""
-    return mlx_fit_outcome(model_dir, **kwargs)[1]
+    """Largest context whose footprint fits budget_bytes; None when the ceiling already fits; the
+    floor when not even it fits, rather than the whole native window."""
+    outcome, context = mlx_fit_outcome(model_dir, **kwargs)
+    if outcome != "no_fit":
+        return context
+    floor = max(-(-int(kwargs.get("min_ctx", MLX_FIT_MIN_CONTEXT) or 0) // MLX_KV_BLOCK), 1)
+    return min(floor * MLX_KV_BLOCK, max(int(kwargs.get("max_ctx") or 0), MLX_KV_BLOCK))

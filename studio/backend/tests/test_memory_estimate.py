@@ -5778,12 +5778,17 @@ class TestTheContextSearch:
 
     def test_a_floor_between_blocks_rounds_up_rather_than_under_the_minimum(self, monkeypatch):
         self._linear(monkeypatch)
-        assert mm.mlx_fit_context("x", budget_bytes = 4200, max_ctx = 8192, min_ctx = 4100) is None
+        assert mm.mlx_fit_context("x", budget_bytes = 4200, max_ctx = 8192, min_ctx = 4100) == 4352
         assert mm.mlx_fit_context("x", budget_bytes = 5000, max_ctx = 8192, min_ctx = 4100) == 4864
 
     def test_a_context_that_cannot_be_priced_abandons_the_fit(self, monkeypatch):
         self._linear(monkeypatch, unpriceable = (6144,))
         assert mm.mlx_fit_context("x", budget_bytes = 7000, max_ctx = 8192) is None
+
+    def test_a_load_that_fits_nothing_is_held_to_the_floor_not_the_native_window(self, monkeypatch):
+        self._linear(monkeypatch)
+        assert mm.mlx_fit_context("x", budget_bytes = 1000, max_ctx = 40960) == mm.MLX_FIT_MIN_CONTEXT
+        assert mm.mlx_fit_context("x", budget_bytes = 1000, max_ctx = 2048) == 2048
 
     def test_a_ceiling_that_already_fits_is_left_alone(self, monkeypatch):
         self._linear(monkeypatch)
