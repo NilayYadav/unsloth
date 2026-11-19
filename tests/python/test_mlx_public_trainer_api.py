@@ -737,6 +737,27 @@ def test_mlx_trainer_uses_model_context_length_when_implicit():
     assert config_with_override.args.max_length == 432
 
 
+def test_mlx_sft_appends_eos_like_cuda_when_zoo_skips_special_endings(monkeypatch):
+    """Plain-text rows get an EOS as on CUDA once zoo can leave chat-formatted text alone."""
+    unsloth = _import_mlx_unsloth()
+
+    def append_eos(**kwargs):
+        return unsloth.UnslothTrainer(
+            model = _DummyModel(),
+            tokenizer = None,
+            train_dataset = [],
+            args = unsloth.UnslothTrainingArguments(max_steps = 1, **kwargs),
+        ).args.append_eos
+
+    monkeypatch.setattr(
+        unsloth._mlx_zoo_trainer, "mlx_text_needs_eos", lambda tokenizer, text: True, raising = False
+    )
+    assert append_eos() is True
+    assert append_eos(append_eos = False) is False
+    monkeypatch.delattr(unsloth._mlx_zoo_trainer, "mlx_text_needs_eos")
+    assert append_eos() is False
+
+
 def test_mlx_trainer_processing_class_overrides_explicit_none_tokenizer():
     """TRL passes tokenizer=None while processing_class carries the tokenizer."""
     unsloth = _import_mlx_unsloth()

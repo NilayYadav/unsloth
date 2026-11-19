@@ -1201,7 +1201,8 @@ if _IS_MLX:
         if isinstance(args, UnslothTrainingArguments) and not getattr(
             args, "_unsloth_mlx_append_eos_explicit", False
         ):
-            args.append_eos = False
+            # EOS on plain text as CUDA SFT does; older zoo would also add one after a chat template's end token.
+            args.append_eos = hasattr(_mlx_zoo_trainer, "mlx_text_needs_eos")
 
         _default_mlx_grad_clip(args)
 
