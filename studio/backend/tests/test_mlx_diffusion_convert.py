@@ -637,3 +637,64 @@ def test_a_q4_k_m_mixture_converts_and_mlx_reads_every_layer(tmp_path):
         # error would be off by the weight itself).
         tol = 2.0**-6 * np.max(np.abs(reference))
         np.testing.assert_allclose(np.array(got), reference, atol = tol, rtol = 0)
+
+
+def _converted_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNSLOTH_STUDIO_HOME", str(tmp_path / "studio"))
+    repo = "unsloth/Z-Image-Turbo-GGUF"
+    repo_folder = tmp_path / "hub" / ("models--" + repo.replace("/", "--"))
+    snap = repo_folder / "snapshots" / ("a" * 40)
+    snap.mkdir(parents = True)
+    src = snap / "z-image-turbo-Q4_0.gguf"
+    _write_gguf(src)
+    out = conv.cache_dir_for(repo, "a" * 40, src.name, dense_bits = 0)
+    conv.convert_gguf_to_mflux(src, out)
+    base = tmp_path / "base" / "text_encoder"
+    base.mkdir(parents = True)
+    (base / "model.safetensors").write_bytes(b"keep")
+    (out / "text_encoder").symlink_to(base, target_is_directory = True)
+    return repo, repo_folder, out, base
+
+
+def test_deleting_the_gguf_deletes_its_mlx_conversion(tmp_path, monkeypatch):
+    import asyncio
+    import shutil
+
+    from hub.services.models import deletion
+    from hub.utils import hf_cache_state
+
+    repo, repo_folder, out, base = _converted_snapshot(tmp_path, monkeypatch)
+    monkeypatch.setattr(hf_cache_state, "hf_cache_roots", lambda: [repo_folder.parent])
+    monkeypatch.setattr(deletion.account_access, "require_installation_owner", lambda: None)
+    for guard in (
+        "_llama_cpp_blocks_delete",
+        "_inference_backend_blocks_delete",
+        "_audio_cpp_blocks_delete",
+    ):
+        monkeypatch.setattr(deletion, guard, lambda *a: False)
+    for guard in ("_diffusion_blocks_delete", "_video_blocks_delete"):
+        monkeypatch.setattr(deletion, guard, lambda *a: None)
+    monkeypatch.setattr(deletion, "resolve_cached_repo_id_case", lambda repo_id, repo_type: repo_id)
+    monkeypatch.setattr(deletion.downloads.registry, "begin_delete", lambda *a: True)
+    monkeypatch.setattr(deletion.downloads.registry, "end_delete", lambda *a: None)
+    monkeypatch.setattr(
+        deletion,
+        "_delete_cached_model_blocking",
+        lambda *a, **k: shutil.rmtree(repo_folder) or {"deleted": True},
+    )
+    monkeypatch.setattr(deletion.cache_inventory, "invalidate_hf_cache_scans", lambda: None)
+    assert out.is_dir()
+    asyncio.run(deletion.delete_cached_model_response(repo, cache_path = str(repo_folder)))
+    assert not out.parent.exists()
+    assert (base / "model.safetensors").read_bytes() == b"keep"
+
+
+def test_a_conversion_stays_while_its_gguf_or_an_unmounted_cache_may_hold_it(tmp_path, monkeypatch):
+    import shutil
+
+    _repo, repo_folder, out, _base = _converted_snapshot(tmp_path, monkeypatch)
+    assert conv.prune_orphaned_conversions() == 0
+    assert out.is_dir()
+    shutil.rmtree(repo_folder.parent)
+    assert conv.prune_orphaned_conversions() == 0
+    assert out.is_dir()

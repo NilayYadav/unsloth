@@ -1112,6 +1112,7 @@ class MlxDiffusionBackend:
             if revision is None:
                 st = os.stat(gguf_path)
                 revision = f"local-{st.st_size}-{int(st.st_mtime)}"
+            convert.prune_orphaned_conversions()
             out_dir = convert.cache_dir_for(repo_id, revision, gguf_filename, dense_bits = bits)
             self._set_phase(_load_token, "finalizing", 0.0)
             t1 = time.perf_counter()

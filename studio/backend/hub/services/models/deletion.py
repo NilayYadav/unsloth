@@ -1200,14 +1200,16 @@ async def delete_cached_model_response(
             only_if_orphan = only_if_orphan,
             preferred_path = preferred_path,
         )
-        # prune stale audio.cpp hardlinks that retain deleted blobs; current farms are unchanged.
+        # prune stale audio.cpp hardlinks and MLX image conversions that outlive deleted GGUFs.
         from core.inference.audio_cpp_files import prune_link_farm
+        from core.inference.mlx_diffusion_convert import prune_orphaned_conversions
         from hub.utils.hf_cache_state import hf_cache_roots
 
         # prune every remembered root because the owning cache may not be active.
         def _prune_all() -> None:
             for root in hf_cache_roots():
                 prune_link_farm(root)
+            prune_orphaned_conversions()
 
         await asyncio.to_thread(_prune_all)
         from core.inference.audio_cpp_models import forget

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import struct
 import time
 from pathlib import Path
@@ -625,6 +626,7 @@ def convert_gguf_to_mflux(
     summary = {
         "converter_version": CONVERTER_VERSION,
         "source_gguf": gguf_path.name,
+        "source_path": str(gguf_path.absolute()),
         "source_size": int(stat.st_size),
         "source_mtime": float(stat.st_mtime),
         "counts": counts,
@@ -703,3 +705,46 @@ def conversion_complete(
         if abs(float(marker.get("source_mtime", -1.0)) - float(stat.st_mtime)) > 1e-3:
             return False
     return True
+
+
+def _hub_root(source: str) -> Optional[Path]:
+    parts = Path(source).parts
+    for index, part in enumerate(parts):
+        if part.startswith("models--"):
+            return Path(*parts[:index])
+    return None
+
+
+def prune_orphaned_conversions() -> int:
+    """Remove conversions whose source GGUF left a mounted Hugging Face cache. Never raises."""
+    from utils.paths.storage_roots import cache_root
+
+    removed = 0
+    try:
+        root = cache_root() / "mlx_diffusion"
+        repos = (
+            [d for d in root.iterdir() if d.is_dir() and not d.is_symlink()]
+            if root.is_dir()
+            else []
+        )
+        for repo_dir in repos:
+            for out_dir in list(repo_dir.iterdir()):
+                try:
+                    marker = json.loads(
+                        (out_dir / "transformer" / MARKER_FILENAME).read_text(encoding = "utf-8")
+                    )
+                    source = marker.get("source_path") if isinstance(marker, dict) else None
+                    hub = _hub_root(source) if isinstance(source, str) else None
+                    if hub is None or not hub.is_dir() or os.path.exists(source):
+                        continue
+                    shutil.rmtree(out_dir)
+                    removed += 1
+                except (OSError, ValueError):
+                    continue
+            try:
+                repo_dir.rmdir()
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return removed

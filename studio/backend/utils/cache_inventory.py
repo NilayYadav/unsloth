@@ -1516,7 +1516,10 @@ def purge_cache(key: str) -> dict:
             outcome.errors.extend(root_outcome.errors)
             if definition.key == "hf_hub":
                 from core.inference.audio_cpp_files import prune_link_farm
+                from core.inference.mlx_diffusion_convert import prune_orphaned_conversions
+
                 prune_link_farm(root)
+                prune_orphaned_conversions()
         return _purge_result(definition, outcome)
     finally:
         _release_downloads(reserved)
