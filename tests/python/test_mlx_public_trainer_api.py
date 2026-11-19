@@ -1400,3 +1400,15 @@ def test_mlx_torch_cuda_compatibility_shim():
     batch = BatchEncoding({"input_ids": tensor})
     assert batch.to("cuda") is batch
     assert batch.to(device = "cuda") is batch
+
+
+def test_mlx_for_inference_and_for_training_switch_dropout_mode():
+    unsloth = _import_mlx_unsloth()
+    import mlx.nn as nn
+
+    model = nn.Sequential(nn.Linear(2, 2), nn.Dropout(0.5))
+    model.train()
+    assert unsloth.FastLanguageModel.for_inference(model) is model
+    assert not model.training and not model.layers[1].training
+    assert unsloth.FastVisionModel.for_training(model) is model
+    assert model.training and model.layers[1].training

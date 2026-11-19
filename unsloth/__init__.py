@@ -427,11 +427,17 @@ if _IS_MLX:
 
         @staticmethod
         def for_inference(*args, **kwargs):
-            return args[0] if args else None
+            model = args[0] if args else kwargs.get("model")
+            if callable(getattr(model, "eval", None)):
+                model.eval()
+            return model
 
         @staticmethod
         def for_training(*args, **kwargs):
-            return args[0] if args else None
+            model = args[0] if args else kwargs.get("model")
+            if callable(getattr(model, "train", None)):
+                model.train()
+            return model
 
     class FastVisionModel(FastLanguageModel):
         @staticmethod
