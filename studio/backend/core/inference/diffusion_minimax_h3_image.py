@@ -4405,8 +4405,10 @@ def make_list_streamer(
     reserve_bytes: int = 0,
     max_pin_bytes: Optional[int] = None,
     replaces_counted: bool = False,
+    later_host_bytes: int = 0,
 ) -> Any:
-    """A streamer for ``members[resident:]``: the pinned prefetch one where it fits, else ``ModuleListStreamer``."""
+    """A streamer for ``members[resident:]``: the pinned prefetch one where it fits, else ``ModuleListStreamer``.
+    ``later_host_bytes``: host memory the load still takes after this streamer (a split encoder pin leaves it)."""
     streamer = None
     if pinned and pinned_stream_enabled():
         from .diffusion_offload_prefetch import stream_module_list
@@ -4421,10 +4423,151 @@ def make_list_streamer(
             replaces_counted = replaces_counted,
             release_after_forward = role == "text_encoder",
         )
+    if streamer is None and pinned and role == "text_encoder" and te_partial_pin_enabled():
+        streamer = _split_text_encoder_streamer(
+            owner,
+            members,
+            device,
+            resident,
+            reserve_bytes = reserve_bytes + max(0, int(later_host_bytes)),
+            max_pin_bytes = max_pin_bytes,
+            replaces_counted = replaces_counted,
+        )
     if streamer is None:
         streamer = ModuleListStreamer(members, device, resident)
     streamer._unsloth_role = role
     return streamer
+
+
+TE_PARTIAL_PIN_ENV = "UNSLOTH_H3_IMAGE_TE_PARTIAL_PIN"
+# kept free of the pin budget for the arena's last slab and allocator rounding
+TE_PARTIAL_PIN_SLACK_BYTES = 1 << 30
+
+
+# Host memory a parked stream-tier render takes past the load (arena slabs, host embedding lookups, decode
+# buffers). Colab L4 at 8 GB, 54 GB host: with 2 GiB here the lowest free host memory during renders was 7.3-7.7 GiB
+# against the 7.6 GiB reserve; 3 GiB keeps it above.
+TE_PARTIAL_PIN_RENDER_BYTES = 3 << 30
+
+
+def te_later_host_bytes(plan: "H3ImagePlan") -> int:
+    """Host bytes still taken after the encoder is placed (parked refiner / VAE, render working memory)."""
+    if not plan.parked or plan.placement != PLACE_STREAM:
+        return 0
+    parked = DIT_REFINER_GB + (float(plan.vae_gb) if plan.vae_parked else 0.0)
+    return int(parked * 1e9) + TE_PARTIAL_PIN_RENDER_BYTES
+
+
+def te_partial_pin_enabled() -> bool:
+    return pinned_stream_enabled() and not _env_off(TE_PARTIAL_PIN_ENV)
+
+
+class SplitListStreamer:
+    """Pinned prefetch streamer for the leading layers, pageable ``ModuleListStreamer`` for the rest, seen as one."""
+
+    def __init__(self, pinned: Any, pageable: Any) -> None:
+        self.parts = [pinned, pageable]
+        self.pinned_bytes = int(getattr(pinned, "pinned_bytes", 0) or 0)
+        self.replaced_bytes = int(getattr(pinned, "replaced_bytes", 0) or 0)
+        self.streamed = int(getattr(pageable, "streamed", 0) or 0)
+        self._host = pageable._host
+
+    def stats(self) -> dict:
+        read = getattr(self.parts[0], "stats", None)
+        out = dict(read()) if callable(read) else {}
+        out["pageable"] = self.streamed
+        return out
+
+    def remove(self) -> None:
+        for part in self.parts:
+            part.remove()
+            host = getattr(part, "_host", None)
+            if isinstance(host, dict) and host is not self._host:
+                host.clear()
+
+
+def partial_pin_count(
+    sizes: Sequence[int],
+    budget_bytes: Optional[int],
+    *,
+    reserve_bytes: int = 0,
+    max_pin_bytes: Optional[int] = None,
+    replaced: bool = False,
+    slack_bytes: Optional[int] = None,
+) -> int:
+    """Leading members that fit the pinned streamer's own checks (host pin budget, plan pin room) less ``slack_bytes``."""
+    if budget_bytes is None:
+        return 0
+    if slack_bytes is None:
+        slack_bytes = TE_PARTIAL_PIN_SLACK_BYTES
+    room = int(budget_bytes) - int(reserve_bytes) - int(slack_bytes)
+    if max_pin_bytes is not None and not replaced:
+        room = min(room, int(max_pin_bytes) - int(slack_bytes))
+    count = total = 0
+    for size in sizes:
+        if total + int(size) > room:
+            break
+        total += int(size)
+        count += 1
+    return count
+
+
+def _split_text_encoder_streamer(
+    owner: Any,
+    members: Any,
+    device: Any,
+    resident: int,
+    *,
+    reserve_bytes: int = 0,
+    max_pin_bytes: Optional[int] = None,
+    replaces_counted: bool = False,
+) -> Optional[SplitListStreamer]:
+    """Pin the leading encoder layers the budget holds, stream the rest; None when none or all fit.
+    Pageable layers re-read the checkpoint every prompt (L4 8 GB: 23 GB disk, ~70 s with none pinned)."""
+    from .diffusion_memory import _pin_budget_mib, _storage_nbytes
+    from .diffusion_offload_prefetch import pin_replaces_host_enabled, stream_module_list
+
+    members = list(members)
+    resident = max(0, min(len(members), int(resident)))
+    streamed = members[resident:]
+    sizes = [
+        sum(sum(_storage_nbytes(t)) for t in list(m.parameters()) + list(m.buffers()))
+        for m in streamed
+    ]
+    budget = _pin_budget_mib()
+    count = partial_pin_count(
+        sizes,
+        None if budget is None else int(budget) << 20,
+        reserve_bytes = reserve_bytes,
+        max_pin_bytes = max_pin_bytes,
+        replaced = bool(replaces_counted and pin_replaces_host_enabled()),
+    )
+    if count <= 0 or count >= len(streamed):
+        return None
+    pinned = stream_module_list(
+        owner,
+        members[: resident + count],
+        device,
+        resident,
+        logger = logger,
+        reserve_bytes = reserve_bytes,
+        max_pin_bytes = max_pin_bytes,
+        replaces_counted = replaces_counted,
+        release_after_forward = True,
+    )
+    if pinned is None:
+        return None
+    pageable = ModuleListStreamer(streamed[count:], device, 0)
+    logger.info(
+        "diffusion.minimax_h3_image: text encoder streams %d of %d layers with pinned copies (%.1f GB, the host pin "
+        "budget) and %d pageable (%.1f GB)",
+        count,
+        len(streamed),
+        sum(sizes[:count]) / 1e9,
+        len(streamed) - count,
+        sum(sizes[count:]) / 1e9,
+    )
+    return SplitListStreamer(pinned, pageable)
 
 
 def stream_list(
@@ -4439,6 +4582,7 @@ def stream_list(
     reserve_bytes: int = 0,
     max_pin_bytes: Optional[int] = None,
     replaces_counted: bool = False,
+    later_host_bytes: int = 0,
 ) -> Any:
     """``make_list_streamer``, registered on the pipe by role."""
     streamer = make_list_streamer(
@@ -4451,6 +4595,7 @@ def stream_list(
         reserve_bytes = reserve_bytes,
         max_pin_bytes = max_pin_bytes,
         replaces_counted = replaces_counted,
+        later_host_bytes = later_host_bytes,
     )
     pipe._unsloth_h3_streamers.append(streamer)
     return streamer
@@ -5152,6 +5297,7 @@ def _place_text_encoder(
             reserve_bytes = reserve_bytes,
             max_pin_bytes = pin_room_bytes(plan, pinned_already),
             replaces_counted = pins_replace_counted(plan),
+            later_host_bytes = te_later_host_bytes(plan),
         )
     return encoder
 
