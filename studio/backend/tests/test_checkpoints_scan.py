@@ -397,6 +397,35 @@ def test_scan_checkpoints_reads_training_loss_past_an_eval_entry(tmp_path, monke
     assert models[0][1] == [("checkpoint-50", str(checkpoint_dir), 0.25)]
 
 
+def test_scan_checkpoints_reads_mlx_rank_and_loss(tmp_path, monkeypatch):
+    outputs_dir = _make_outputs_dir(tmp_path, monkeypatch)
+    run_dir = outputs_dir / "run_mlx"
+    checkpoint_dir = run_dir / "checkpoint-2"
+    checkpoint_dir.mkdir(parents = True)
+    adapter_config = json.dumps(
+        {
+            "base_model_name_or_path": "unsloth/X",
+            "peft_type": "LORA",
+            "fine_tune_type": "lora",
+            "lora_parameters": {"rank": 8, "scale": 2.0, "dropout": 0.0},
+            "rank": 8,
+        }
+    )
+    (run_dir / "adapter_config.json").write_text(adapter_config)
+    (checkpoint_dir / "adapter_config.json").write_text(adapter_config)
+    (checkpoint_dir / "trainer_state.json").write_text(
+        json.dumps({"global_step": 2, "train_loss_history": [3.5, 3.25]})
+    )
+
+    models = checkpoints_module.scan_checkpoints(outputs_dir = str(outputs_dir))
+
+    assert models[0][1] == [
+        ("run_mlx", str(run_dir), 3.25),
+        ("checkpoint-2", str(checkpoint_dir), 3.25),
+    ]
+    assert models[0][2]["lora_rank"] == 8
+
+
 def test_scan_checkpoints_reads_history_once_for_many_fallback_runs(tmp_path, monkeypatch):
     # Full fine-tunes save config.json without _name_or_path, so every such run falls back to history.
     outputs_dir = _make_outputs_dir(tmp_path, monkeypatch)

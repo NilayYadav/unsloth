@@ -194,6 +194,8 @@ def _read_checkpoint_loss(checkpoint_path: Path) -> Optional[float]:
                 if isinstance(entry, dict) and "loss" in entry:
                     loss = entry["loss"]
                     break
+            else:
+                loss = (state.get("train_loss_history") or [None])[-1]
             # A write during the read changes the stat, so that read is not cached.
             if _stat_key(os.fstat(f.fileno())) == key:
                 _store_loss(cache_id, key, loss)
@@ -356,7 +358,7 @@ def _scan_checkpoints(
                     cfg = json.loads(adapter_config.read_text(encoding = "utf-8-sig"))
                     metadata["base_model"] = cfg.get("base_model_name_or_path")
                     metadata["peft_type"] = cfg.get("peft_type")
-                    metadata["lora_rank"] = cfg.get("r")
+                    metadata["lora_rank"] = cfg.get("r") or cfg.get("rank")
                     metadata["adapter_features"] = parse_adapter_features(
                         str(meta_dir), probe_weights = False
                     )
