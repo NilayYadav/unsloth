@@ -52125,6 +52125,14 @@ async def generate_diffusion_image(
 ):
     if request.provider_id:
         return await _external_image_generation(request, http_request)
+    # A load or model switch in flight replaces the resident model: a run admitted now renders the old model with the
+    # new pick's settings, or is cancelled by the swap. Refused; the Images page keeps Generate off meanwhile.
+    if await asyncio.to_thread(_image_load_in_flight):
+        raise HTTPException(
+            status_code = 409,
+            detail = IMAGE_LOAD_IN_FLIGHT_MSG,
+            headers = problem_headers("loading", kind = "image"),
+        )
     global _direct_image_runs, _direct_image_last_end
     _direct_image_runs += 1
     headers = http_request.headers if http_request is not None else {}
@@ -52289,6 +52297,7 @@ async def _generate_diffusion_image_run(
         ImageActivationShortfallError,
         unified_memory_refusal_code,
     )
+    from core.inference.diffusion_lora import LoraReloadRequiredError
     from core.inference.mlx_diffusion_routing import FallbackLoadRefusedError
 
     backend = get_active_diffusion_engine()
@@ -52476,6 +52485,13 @@ async def _generate_diffusion_image_run(
                 status_code = 400,
                 detail = str(exc),
                 headers = {IMAGE_REFUSAL_HEADER: IMAGE_REFUSAL_MEMORY_ESTIMATE},
+            )
+        except LoraReloadRequiredError as exc:
+            # Tagged so the Images page offers the reload that bakes the selection, not a bare failure.
+            raise HTTPException(
+                status_code = 400,
+                detail = str(exc),
+                headers = {IMAGE_REFUSAL_HEADER: exc.refusal},
             )
         except ValueError as exc:
             raise HTTPException(status_code = 400, detail = str(exc))
@@ -53586,6 +53602,26 @@ async def diffusion_inference_info(current_subject: str = Depends(get_current_su
     is cheap and safe to fetch before anything is loaded."""
     from core.inference.diffusion_inference_info import family_inference_infos
     return DiffusionInferenceInfoResponse(families = family_inference_infos())
+
+
+IMAGE_LOAD_IN_FLIGHT_MSG = "An image model is loading. Generate again once the load finishes."
+
+
+def _image_load_in_flight() -> bool:
+    """Whether an image model load is running: its POST in preflight or saving the chat context, or the engine
+    downloading / building it."""
+    from core.inference.chat_swap_kv import load_preparing, saving_progress
+    from core.inference.diffusion_engine_router import get_active_diffusion_engine
+
+    try:
+        if load_preparing("image") or saving_progress("image") is not None:
+            return True
+        return get_active_diffusion_engine().load_progress().get("phase") in (
+            "downloading",
+            "finalizing",
+        )
+    except Exception:  # noqa: BLE001 -- no readable load state: the engine's own guards decide
+        return False
 
 
 def _image_load_preparing_progress() -> Optional[DiffusionLoadProgressResponse]:
@@ -54880,7 +54916,12 @@ async def _generate_openai_images(
             if isinstance(exc, LoraSelectionError):
                 raise HTTPException(
                     status_code = 400,
-                    detail = openai_error_body(str(exc), status = 400, param = "loras"),
+                    detail = openai_error_body(
+                        str(exc),
+                        status = 400,
+                        param = "loras",
+                        code = getattr(exc, "openai_code", None),
+                    ),
                 )
             if isinstance(exc, ImageActivationShortfallError):
                 raise HTTPException(
