@@ -852,6 +852,10 @@ def _no_live_metal_wired_ceiling(monkeypatch):
     monkeypatch.setattr(
         LlamaCppBackend, "_apple_metal_memory_budget_bytes", staticmethod(lambda: 0)
     )
+    # Tests that take MLX and torch away must not get the Mac host's own Metal reading back.
+    from utils.hardware import hardware as _hardware
+
+    monkeypatch.setattr(_hardware, "_metal_framework_working_set_bytes", lambda: 0)
 
 
 @pytest.fixture

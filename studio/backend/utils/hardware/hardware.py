@@ -2675,8 +2675,34 @@ def _mlx_device_info(mx: Any) -> Dict[str, Any]:
     return {}
 
 
+def _metal_framework_working_set_bytes() -> int:
+    """recommendedMaxWorkingSetSize straight from Metal, for a venv with neither MLX nor torch (Chat only, Rosetta)."""
+    if not (is_apple_silicon() or _running_under_rosetta()):
+        return 0
+    try:
+        import ctypes
+
+        metal = ctypes.CDLL("/System/Library/Frameworks/Metal.framework/Metal")
+        objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+        metal.MTLCreateSystemDefaultDevice.restype = ctypes.c_void_p
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        send = objc.objc_msgSend
+        send.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        device = metal.MTLCreateSystemDefaultDevice()
+        if not device:
+            return 0
+        send.restype = ctypes.c_uint64
+        size = int(send(device, objc.sel_registerName(b"recommendedMaxWorkingSetSize")))
+        send.restype = None
+        send(device, objc.sel_registerName(b"release"))
+        return max(0, size)
+    except Exception:
+        return 0
+
+
 def _metal_recommended_working_set_bytes() -> int:
-    """Metal's recommendedMaxWorkingSetSize, or 0. MLX first; torch.mps (2.5+) covers macOS 13, which has no MLX wheel."""
+    """Metal's recommendedMaxWorkingSetSize, or 0. MLX first; torch.mps (2.5+) covers macOS 13, which has no MLX wheel; Metal itself covers a venv with neither."""
     try:
         import mlx.core as mx
         if mx.metal.is_available():
@@ -2691,7 +2717,7 @@ def _metal_recommended_working_set_bytes() -> int:
             return max(0, int(torch.mps.recommended_max_memory()))
     except Exception:
         pass
-    return 0
+    return _metal_framework_working_set_bytes()
 
 
 def _apple_unified_free_bytes(available_bytes: int, device_info: Any) -> int:
