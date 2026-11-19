@@ -5866,10 +5866,14 @@ def _write_mlx_stop_checkpoint(trainer, optimizer, output_dir) -> bool:
 
         save_trainable_adapters(trainer.model, str(ckpt_dir))
         save_optimizer_state(optimizer, str(ckpt_dir))
+        # Zoo's own step checkpoints carry the best-model / early-stopping state; a resume without it starts over.
         save_trainer_state(
             {
                 "global_step": step,
                 "train_loss_history": list(getattr(trainer, "_train_loss_history", [])),
+                "best_metric": getattr(trainer, "_best_metric", None),
+                "best_step": getattr(trainer, "_best_step", None),
+                "es_patience_counter": getattr(trainer, "_es_patience_counter", 0),
             },
             str(ckpt_dir),
         )

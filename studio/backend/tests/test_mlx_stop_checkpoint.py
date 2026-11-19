@@ -139,6 +139,39 @@ def test_write_mlx_stop_checkpoint_writes_current_step_when_only_older_checkpoin
     assert (out / "checkpoint-10" / "trainer_state.json").is_file()
 
 
+def test_write_mlx_stop_checkpoint_keeps_early_stopping_state(tmp_path, monkeypatch):
+    out = tmp_path / "outputs" / "run_x"
+    out.mkdir(parents = True)
+    saved = []
+
+    def _save_state(_value, path, name):
+        save_file({"state": np.ones(1, dtype = np.float32)}, Path(path, name))
+
+    def _save_trainer_state(state, ckpt_dir, **_kwargs):
+        Path(ckpt_dir, "trainer_state.json").write_text(json.dumps(state), encoding = "utf-8")
+        saved.append(state)
+
+    fake_utils = types.SimpleNamespace(
+        save_trainable_adapters = lambda model, path: _save_state(
+            model, path, "adapters.safetensors"
+        ),
+        save_optimizer_state = lambda optimizer, path: _save_state(
+            optimizer, path, "optimizer_state.safetensors"
+        ),
+        save_trainer_state = _save_trainer_state,
+    )
+    monkeypatch.setitem(sys.modules, "unsloth_zoo.mlx.utils", fake_utils)
+    trainer = _FakeTrainer(step = 3)
+    trainer._best_metric, trainer._best_step, trainer._es_patience_counter = 1.25, 2, 1
+
+    assert worker._write_mlx_stop_checkpoint(trainer, object(), out) is True
+    assert (saved[0]["best_metric"], saved[0]["best_step"], saved[0]["es_patience_counter"]) == (
+        1.25,
+        2,
+        1,
+    )
+
+
 def test_write_mlx_stop_checkpoint_returns_false_without_optimizer(tmp_path):
     out = tmp_path / "outputs" / "run_x"
     out.mkdir(parents = True)
