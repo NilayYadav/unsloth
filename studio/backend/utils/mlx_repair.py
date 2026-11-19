@@ -231,7 +231,7 @@ def mlx_repair_in_flight() -> bool:
     if not is_apple_silicon():
         return False
     # A --no-torch install declines the self-heal, so the verdict settles now.
-    if _installed_without_torch():
+    if _installed_without_torch() or _mlx_wheels_unavailable():
         return False
     with _attempted_lock:
         attempted, thread, started_at = _attempted, _repair_thread, _repair_started_at
@@ -440,6 +440,16 @@ def _installed_without_torch() -> bool:
         return False
 
 
+def _mlx_wheels_unavailable() -> Optional[str]:
+    if not platform.mac_ver()[0]:
+        return None
+    try:
+        from utils.hardware.hardware import _mlx_wheel_blocker
+        return _mlx_wheel_blocker()
+    except Exception:
+        return None
+
+
 def start_mlx_autorepair_if_needed() -> bool:
     """If this is an Apple Silicon host whose MLX stack is missing or too old, reinstall it on a daemon thread (off the startup critical path) and re-detect on success. True iff a repair thread was started; False off Apple Silicon, when already attempted this process, when the venv was installed --no-torch, or when disabled via UNSLOTH_DISABLE_MLX_AUTOREPAIR=1. An adequate stack starts no repair but still overturns a verdict that contradicts it."""
     global _attempted, _repair_thread, _repair_started_at
@@ -469,6 +479,11 @@ def start_mlx_autorepair_if_needed() -> bool:
                 "MLX stack measures unusable on a --no-torch install; Train/Export stay "
                 "off by request. Reinstall without --no-torch to enable them."
             )
+        return False
+    if blocker := _mlx_wheels_unavailable():
+        logger.warning(
+            "MLX has no wheel for this Mac (needs %s); Train/Export stay disabled.", blocker
+        )
         return False
 
     with _attempted_lock:

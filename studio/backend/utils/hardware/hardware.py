@@ -2108,8 +2108,8 @@ def _no_torch_amd_node_hint() -> Optional[str]:
 
 
 def chat_only_permission_hint(reason: Optional[str], detail: Optional[str]) -> Optional[str]:
-    """Why the fix this verdict points at cannot enable Train: a closed AMD node from the last detection pass, or a --no-torch Mac the MLX wheels skip. The Desktop offers the full install only when this is None."""
-    if reason == "no_torch":
+    """Why the fix this verdict points at cannot enable Train: a closed AMD node from the last detection pass, or a Mac the MLX wheels skip. The Desktop offers the full install only when this is None."""
+    if reason in ("no_torch", "mlx_unavailable"):
         blocker = _no_torch_mac_without_mlx_wheels()
         if blocker:
             return f"Training on this Mac needs MLX, which requires {blocker}."
@@ -2214,9 +2214,12 @@ def export_capability() -> dict:
         )
     elif is_apple_silicon():
         reason = "mlx_unavailable"
+        blocker = _no_torch_mac_without_mlx_wheels()
         message = (
-            "Export on Apple Silicon requires the MLX stack, which is unavailable or too old. Run "
-            "`unsloth studio update` to restore MLX and enable export."
+            f"Export on this Mac needs MLX, which requires {blocker}."
+            if blocker
+            else "Export on Apple Silicon requires the MLX stack, which is unavailable or too old. "
+            "Run `unsloth studio update` to restore MLX and enable export."
         )
     elif platform.system() == "Darwin" and _running_under_rosetta():
         reason = "rosetta"

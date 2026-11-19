@@ -1402,9 +1402,12 @@ export function AppSidebar() {
         // backtrack leaves a stack that is present but unusable. Naming the package
         // that is missing, too old, or refusing to import is what makes this
         // actionable to someone whose `unsloth studio update` has already run.
-        chatOnlyDetail
-        ? `Training needs MLX: ${chatOnlyDetail}. Run \`unsloth studio update\` to enable Train.`
-        : "Training needs MLX. Run `unsloth studio update` to enable Train."
+        // chatOnlyHint: a Mac the MLX wheels skip, which no update can fix.
+        chatOnlyHint
+        ? chatOnlyHint
+        : chatOnlyDetail
+          ? `Training needs MLX: ${chatOnlyDetail}. Run \`unsloth studio update\` to enable Train.`
+          : "Training needs MLX. Run `unsloth studio update` to enable Train."
       : chatOnlyReason === "no_torch"
         ? // `unsloth studio update` keeps no-torch. chatOnlyHint: a Mac the MLX wheels skip.
           chatOnlyHint

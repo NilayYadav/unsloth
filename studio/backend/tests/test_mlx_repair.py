@@ -404,6 +404,19 @@ def test_apple_silicon_missing_mlx_starts_repair_and_redetects(monkeypatch):
     assert redetected["called"] is True
 
 
+@pytest.mark.parametrize("release, started", [("13.6.1", False), ("14.5", True)])
+def test_a_mac_the_mlx_wheels_skip_starts_no_doomed_reinstall(monkeypatch, release, started):
+    import utils.hardware.hardware as hw
+
+    monkeypatch.setattr(mr, "is_apple_silicon", lambda: True)
+    monkeypatch.setattr(hw, "is_apple_silicon", lambda: True)
+    monkeypatch.setattr(mr.platform, "mac_ver", lambda: (release, ("", "", ""), "arm64"))
+    monkeypatch.setattr(mr, "mlx_stack_available", lambda: False)
+    monkeypatch.setattr(mr, "attempt_mlx_repair", lambda **_k: False)
+    assert mr.mlx_repair_in_flight() is started
+    assert mr.start_mlx_autorepair_if_needed() is started
+
+
 def test_attempts_only_once_per_process(monkeypatch):
     monkeypatch.setattr(mr, "is_apple_silicon", lambda: True)
     monkeypatch.setattr(mr, "mlx_stack_available", lambda: False)

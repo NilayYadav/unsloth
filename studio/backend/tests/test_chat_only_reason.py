@@ -218,6 +218,28 @@ def test_a_no_torch_mac_the_mlx_wheels_skip_gets_no_full_install_offer(
         assert message == f"Export on this Mac needs MLX, which requires {blocker}."
 
 
+@pytest.mark.parametrize("release, blocked", [("13.6.1", True), ("14.5", False)])
+def test_a_full_install_mac_the_mlx_wheels_skip_is_not_sent_to_update(
+    monkeypatch, release, blocked
+):
+    # The installer skips MLX below macOS 14, so `unsloth studio update` cannot enable Train there.
+    monkeypatch.setattr(hw, "is_apple_silicon", lambda: True)
+    monkeypatch.setattr(hw, "_has_usable_mlx_stack", lambda: False)
+    monkeypatch.setattr(hw.platform, "mac_ver", lambda: (release, ("", "", ""), "arm64"))
+    monkeypatch.setattr(hw, "get_device", lambda: hw.DeviceType.CPU)
+    monkeypatch.setattr(hw, "current_chat_only_verdict", lambda: ("mlx_unavailable", None))
+    hw.detect_hardware()
+    assert hw.CHAT_ONLY_REASON == "mlx_unavailable"
+    hint = hw.chat_only_permission_hint("mlx_unavailable", None)
+    message = hw.export_capability()["export_unsupported_message"]
+    if blocked:
+        assert hint == "Training on this Mac needs MLX, which requires macOS 14 or later."
+        assert message == "Export on this Mac needs MLX, which requires macOS 14 or later."
+    else:
+        assert hint is None
+        assert "unsloth studio update" in message
+
+
 def test_an_old_macos_hint_is_for_apple_silicon_only(monkeypatch):
     # Off Mac, mac_ver() is empty, which reads as too old.
     monkeypatch.setattr(hw, "is_apple_silicon", lambda: False)
