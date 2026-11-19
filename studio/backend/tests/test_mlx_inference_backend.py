@@ -3652,7 +3652,7 @@ def test_an_image_row_through_mlx_lm_is_refused_when_its_expanded_prompt_fills_t
     assert inserted == []
     backend._served_context = 5
     session.admit(request, 1)
-    assert [kw["max_tokens"] for kw in inserted] == [[limit or 1]]
+    assert [kw["max_tokens"] for kw in inserted] == [[1]]
     session.close()
 
 
@@ -11308,8 +11308,8 @@ def test_mlx_vlm_counts_a_text_only_turn_by_the_vision_marker_rule(monkeypatch):
 
 
 def test_mlx_passes_an_explicit_budget_through_both_paths(monkeypatch):
-    assert _run_text_budget(monkeypatch, 4096) == 4096
-    assert _run_vlm_budget(monkeypatch, _IMAGE_TURN, object(), 4096) == 4096
+    assert _run_text_budget(monkeypatch, 4096, served = 8192) == 4096
+    assert _run_vlm_budget(monkeypatch, _IMAGE_TURN, object(), 4096, served = 8192) == 4096
 
 
 @pytest.mark.parametrize("limit", [None, 16])
@@ -11317,8 +11317,8 @@ def test_mlx_refuses_a_prompt_that_fills_the_served_window(monkeypatch, limit):
     from core.inference.context_refusal import ContextBudgetExceeded
 
     fits = _BUDGET_PROMPT_N + 1
-    assert _run_text_budget(monkeypatch, limit, served = fits) == (limit or 1)
-    assert _run_vlm_budget(monkeypatch, _TEXT_TURN, None, limit, served = fits) == (limit or 1)
+    assert _run_text_budget(monkeypatch, limit, served = fits) == 1
+    assert _run_vlm_budget(monkeypatch, _TEXT_TURN, None, limit, served = fits) == 1
     with pytest.raises(ContextBudgetExceeded) as refused:
         _run_text_budget(monkeypatch, limit, served = _BUDGET_PROMPT_N)
     assert (refused.value.request_tokens, refused.value.context_tokens) == (fits, _BUDGET_PROMPT_N)
@@ -11337,10 +11337,29 @@ def test_mlx_batch_rows_refuse_a_prompt_that_fills_the_served_window(monkeypatch
     monkeypatch.setattr(mlx_inference, "_mlx_sampling_processors", lambda **_kw: None)
     row = mlx_inference._row_kwargs({"prompt_ids": [1, 2, 3], "max_new_tokens": limit})
     backend._served_context = 4
-    assert backend._plan_text_row([], **row).max_tokens == (limit or 1)
+    assert backend._plan_text_row([], **row).max_tokens == 1
     backend._served_context = 3
     with pytest.raises(ContextBudgetExceeded):
         backend._plan_text_row([], **row)
+
+
+def test_mlx_cuts_an_explicit_budget_at_the_room_left_in_the_served_window(monkeypatch):
+    # Decoding past the window rotates the prompt's start out of the KV cache.
+    room = 256 - _BUDGET_PROMPT_N
+    assert _run_text_budget(monkeypatch, 4096, served = 256) == room
+    assert _run_vlm_budget(monkeypatch, _TEXT_TURN, None, 4096, served = 256) == room
+    assert _run_text_budget(monkeypatch, 16, served = 256) == 16
+
+
+def test_mlx_batch_rows_cut_an_explicit_budget_at_the_served_window(monkeypatch):
+    from core.inference import mlx_inference
+
+    backend = _install_fake_text_stack(monkeypatch, {"generated": [7]}, [])
+    monkeypatch.setattr(mlx_inference, "_mlx_sampling_processors", lambda **_kw: None)
+    backend._served_context = 10
+    for limit, expected in ((4096, 7), (5, 5)):
+        row = mlx_inference._row_kwargs({"prompt_ids": [1, 2, 3], "max_new_tokens": limit})
+        assert backend._plan_text_row([], **row).max_tokens == expected
 
 
 def test_mlx_unset_budget_falls_back_when_the_prompt_cannot_be_counted(monkeypatch):
