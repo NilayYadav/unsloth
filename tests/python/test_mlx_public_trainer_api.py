@@ -717,8 +717,8 @@ def test_mlx_trainer_uses_model_context_length_when_implicit():
 
     assert implicit.args.max_seq_length == 321
     assert implicit.args.max_length == 321
-    assert max_length_args.args.max_seq_length == 321
-    assert max_length_args.args.max_length == 321
+    assert max_length_args.args.max_seq_length == 123
+    assert max_length_args.args.max_length == 123
     assert none_args.args.max_seq_length == 321
     assert none_args.args.max_length == 321
     assert explicit_seq.args.max_seq_length == 123
@@ -735,6 +735,32 @@ def test_mlx_trainer_uses_model_context_length_when_implicit():
     assert trainer_override.args.max_length == 654
     assert config_with_override.args.max_seq_length == 432
     assert config_with_override.args.max_length == 432
+
+
+def test_mlx_sft_max_length_caps_model_context_length():
+    """SFTConfig(max_length) below the model's limit caps it, as on CUDA."""
+    unsloth = _import_mlx_unsloth()
+    import trl
+
+    def resolved(model_length, args):
+        model = _DummyModel()
+        model.max_seq_length = model_length
+        trainer = unsloth.UnslothTrainer(
+            model = model,
+            tokenizer = None,
+            train_dataset = [],
+            args = args,
+        )
+        return trainer.args.max_seq_length, trainer.args.max_length
+
+    assert resolved(2048, trl.SFTConfig(max_steps = 1, max_length = 512)) == (512, 512)
+    assert resolved(256, trl.SFTConfig(max_steps = 1, max_length = 512)) == (256, 256)
+    assert resolved(2048, trl.SFTConfig(max_steps = 1, max_length = 1024)) == (2048, 2048)
+    assert resolved(2048, {"max_steps": 1, "max_length": 300}) == (300, 300)
+
+    reused = trl.SFTConfig(max_steps = 1)
+    assert resolved(256, reused) == (256, 256)
+    assert resolved(2048, reused) == (2048, 2048)
 
 
 def test_mlx_trainer_processing_class_overrides_explicit_none_tokenizer():

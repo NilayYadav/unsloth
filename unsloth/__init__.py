@@ -1079,6 +1079,9 @@ if _IS_MLX:
             self._unsloth_mlx_append_eos_explicit = append_eos_explicit
             self._unsloth_mlx_max_seq_length_explicit = max_seq_length_explicit
             self._unsloth_mlx_max_length_value = max_length_value
+            self._unsloth_mlx_requested_max_length = (
+                kwargs.get("max_length", None) if max_length_is_alias else None
+            )
             if max_length_is_alias and "max_length" in kwargs:
                 self.max_length = max_length_value
             self._unsloth_mlx_grad_clip_explicit = grad_clip_explicit
@@ -1118,6 +1121,12 @@ if _IS_MLX:
 
         if args_max_seq_length is None and model_max_seq_length is not None:
             args_max_seq_length = model_max_seq_length
+            # As on CUDA, a smaller max_length caps the model's; 1024 is TRL's default, not a choice.
+            requested = _positive_mlx_context_length(
+                getattr(args, "_unsloth_mlx_requested_max_length", None),
+            )
+            if requested is not None and requested != 1024:
+                args_max_seq_length = min(args_max_seq_length, requested)
         elif (
             args_max_seq_length is not None
             and model_max_seq_length is not None
@@ -1232,6 +1241,7 @@ if _IS_MLX:
         append_eos_explicit = None
         max_seq_length_explicit = None
         max_length_value = None
+        requested_max_length = None
         grad_clip_explicit = None
         if args is None:
             values = {}
@@ -1268,6 +1278,11 @@ if _IS_MLX:
             max_length_value = getattr(
                 args,
                 "_unsloth_mlx_max_length_value",
+                getattr(args, "max_length", None),
+            )
+            requested_max_length = getattr(
+                args,
+                "_unsloth_mlx_requested_max_length",
                 getattr(args, "max_length", None),
             )
             grad_clip_explicit = getattr(
@@ -1335,6 +1350,7 @@ if _IS_MLX:
         if max_length_value is not None and "max_length" not in overrides:
             coerced._unsloth_mlx_max_length_value = max_length_value
             coerced.max_length = max_length_value
+            coerced._unsloth_mlx_requested_max_length = requested_max_length
         if (
             grad_clip_explicit is not None
             and "max_grad_norm" not in overrides
