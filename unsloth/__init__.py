@@ -487,28 +487,38 @@ if _IS_MLX:
 
     is_bf16_supported = is_bfloat16_supported
 
+    def _mlx_fn(name):
+        import mlx.core as mx
+
+        fn = getattr(mx, name, None)
+        if fn is None and hasattr(mx, "metal"):
+            fn = getattr(mx.metal, name, None)
+        return fn if callable(fn) else None
+
+    def _mlx_memory_bytes(name):
+        getter = _mlx_fn(name)
+        return int(getter()) if getter else 0
+
+    def _mlx_peak_memory_bytes():
+        # mx.reset_peak_memory zeroes the peak, where torch resets it to current usage.
+        return max(_mlx_memory_bytes("get_peak_memory"), _mlx_memory_bytes("get_active_memory"))
+
     def get_gpu_memory_stats():
         """Return MLX device stats, peak memory, and total memory in GiB."""
         import mlx.core as mx
 
         info = mx.device_info()
         total = info.get("memory_size") or info.get("max_recommended_working_set_size") or 0
-        get_peak_memory = getattr(mx, "get_peak_memory", None)
-        if get_peak_memory is None and hasattr(mx, "metal"):
-            get_peak_memory = getattr(mx.metal, "get_peak_memory", None)
-        peak = get_peak_memory() if callable(get_peak_memory) else 0
         stats = _UnslothDeviceStats(info.get("device_name", "Apple GPU"), total)
         max_memory = _bytes_to_gb(total) or 1.0
-        return stats, _bytes_to_gb(peak), max_memory
+        return stats, _bytes_to_gb(_mlx_peak_memory_bytes()), max_memory
 
     def clear_gpu_memory():
         """Clear MLX's cached GPU memory for compatibility cleanup helpers."""
         import mlx.core as mx
 
-        clear_cache = getattr(mx, "clear_cache", None)
-        if clear_cache is None and hasattr(mx, "metal"):
-            clear_cache = getattr(mx.metal, "clear_cache", None)
-        if callable(clear_cache):
+        clear_cache = _mlx_fn("clear_cache")
+        if clear_cache:
             # Generation runs on its own streams, which a bare mx.synchronize() does not wait on. Best effort:
             # synchronizing a stream bound on another thread raises (mlx 0.31.2 thread-local encoders).
             _synchronize = getattr(mx, "synchronize", None)
@@ -557,42 +567,29 @@ if _IS_MLX:
 
             def max_memory_reserved(device = None):
                 """Return MLX peak memory in bytes for torch.cuda compatibility API."""
-                return int(get_gpu_memory_stats()[1] * 1024 * 1024 * 1024)
+                return _mlx_peak_memory_bytes()
 
             def empty_cache():
                 """Clear MLX cache through torch.cuda.empty_cache()."""
                 clear_gpu_memory()
 
-            def _mlx_active_memory_bytes():
-                """Current active MLX memory in bytes (not the peak high-water mark)."""
-                import mlx.core as mx
-
-                get_active = getattr(mx, "get_active_memory", None)
-                if get_active is None and hasattr(mx, "metal"):
-                    get_active = getattr(mx.metal, "get_active_memory", None)
-                return int(get_active()) if callable(get_active) else 0
-
             def memory_current(device = None):
                 """Return CURRENT MLX memory in bytes. torch.cuda.memory_reserved /
                 memory_allocated report live usage, not the peak (that is max_*)."""
-                return _mlx_active_memory_bytes()
+                return _mlx_memory_bytes("get_active_memory")
 
             def mem_get_info(device = None):
                 """Return (free, total) bytes for torch.cuda compatibility API.
                 Free uses CURRENT active memory, not the peak high-water mark, so
                 a capacity check stays accurate after a transient spike."""
                 total = int(get_gpu_memory_stats()[2] * 1024 * 1024 * 1024)
-                return (max(total - _mlx_active_memory_bytes(), 0), total)
+                return (max(total - memory_current(), 0), total)
 
             def reset_peak_memory_stats(device = None):
                 """Reset MLX's peak-memory counter so a later max_memory_reserved /
                 max_memory_allocated scopes to the run, not earlier model-load peaks."""
-                import mlx.core as mx
-
-                reset = getattr(mx, "reset_peak_memory", None)
-                if reset is None and hasattr(mx, "metal"):
-                    reset = getattr(mx.metal, "reset_peak_memory", None)
-                if callable(reset):
+                reset = _mlx_fn("reset_peak_memory")
+                if reset:
                     reset()
 
             def synchronize(device = None):
