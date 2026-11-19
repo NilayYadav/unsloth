@@ -635,6 +635,15 @@ def test_mlx_single_process_finalization_keeps_prior_contract():
     assert events[-1][0] == "error" and events[-1][1]["resume_blocked"] is True
 
 
+def test_mlx_default_output_dir_carries_the_project_name(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNSLOTH_STUDIO_HOME", str(tmp_path))
+    output_dir = Path(
+        _worker._resolve_mlx_output_dir({"project_name": "Pirate Bot"}, "unsloth/SmolLM2-135M")
+    )
+    assert output_dir.parent == tmp_path / "outputs"
+    assert output_dir.name.startswith("unsloth_SmolLM2-135M__project-pirate-bot_")
+
+
 def _adapter_setup_block():
     """The `continues_adapter = ...` line, the LoRA setup `if` and the wrap after it in _run_mlx_training."""
     body = ast.parse(textwrap.dedent(inspect.getsource(_worker._run_mlx_training))).body[0].body

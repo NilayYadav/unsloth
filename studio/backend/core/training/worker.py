@@ -2959,11 +2959,12 @@ def _start_mlx_stop_poller(stop_queue):
 
 
 def _resolve_mlx_output_dir(config, model_name):
-    from utils.paths import resolve_output_dir, default_run_dir_name
+    from utils.paths import resolve_output_dir
+    from utils.training_runs import build_default_output_dir_name
 
     output_dir = config.get("output_dir", "")
     if not output_dir:
-        output_dir = f"{default_run_dir_name(model_name)}_{int(time.time())}"
+        output_dir = build_default_output_dir_name(model_name, config.get("project_name"))
         return str(resolve_output_dir(output_dir))
     if config.get("allow_external_output_dir"):
         output_path = Path(output_dir).expanduser()
