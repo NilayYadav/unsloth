@@ -21,6 +21,7 @@ import {
   LR_SCHEDULER_OPTIONS,
   MLX_OPTIMIZER_OPTIONS,
   OPTIMIZER_OPTIONS,
+  mlxEffectiveOptimizer,
 } from "@/config/training";
 import { useTrainingConfigStore } from "@/features/training";
 import { useT } from "@/i18n";
@@ -114,11 +115,9 @@ export function TrainingHyperparametersSection({
   const [tab, setTab] = useState<HyperparameterTab>("optimization");
   const isMac = platformDeviceType === "mac";
   const optimizerOptions = isMac ? MLX_OPTIMIZER_OPTIONS : OPTIMIZER_OPTIONS;
-  const isCudaAliasOptimizer = OPTIMIZER_OPTIONS.some(
-    (option) => option.value === store.optimizerType,
-  );
-  const selectedOptimizer =
-    isMac && isCudaAliasOptimizer ? "adamw" : store.optimizerType;
+  const selectedOptimizer = isMac
+    ? mlxEffectiveOptimizer(store.optimizerType)
+    : store.optimizerType;
   const tabs = [
     { value: "optimization", label: t("studio.params.optimization") },
     { value: "schedule", label: t("studio.params.schedule") },

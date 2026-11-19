@@ -114,6 +114,7 @@ export const MLX_OPTIMIZER_OPTIONS: ReadonlyArray<{
   value: string;
   label: string;
 }> = [
+  { value: "adamw_8bit", label: "AdamW 8-bit" },
   { value: "adamw", label: "AdamW" },
   { value: "adam", label: "Adam" },
   { value: "lion", label: "Lion" },
@@ -121,6 +122,18 @@ export const MLX_OPTIMIZER_OPTIONS: ReadonlyArray<{
   { value: "sgd", label: "SGD" },
   { value: "adafactor", label: "Adafactor" },
 ];
+
+// MLX runs the CUDA-only optimizer names it has no own version of as AdamW.
+export function mlxEffectiveOptimizer(
+  optimizer: string | undefined,
+): string | undefined {
+  if (MLX_OPTIMIZER_OPTIONS.some((o) => o.value === optimizer)) {
+    return optimizer;
+  }
+  return OPTIMIZER_OPTIONS.some((o) => o.value === optimizer)
+    ? "adamw"
+    : optimizer;
+}
 
 export const LR_SCHEDULER_OPTIONS: ReadonlyArray<{
   value: string;

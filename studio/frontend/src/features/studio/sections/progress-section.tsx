@@ -20,7 +20,11 @@ import {
 } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { usePlatformStore } from "@/config/env";
-import { MLX_OPTIMIZER_OPTIONS, OPTIMIZER_OPTIONS } from "@/config/training";
+import {
+  MLX_OPTIMIZER_OPTIONS,
+  OPTIMIZER_OPTIONS,
+  mlxEffectiveOptimizer,
+} from "@/config/training";
 import { useIsAccountOwner } from "@/features/auth";
 import { setTrainingCompareHandoff } from "@/features/chat";
 import { tryFineTuneInDecisionApi } from "@/features/settings";
@@ -231,11 +235,9 @@ export function ProgressSection({
   const cfgLoraDropout = cfg?.loraDropout;
   const cfgLoraVariant = cfg?.loraVariant;
 
-  // On Mac the MLX backend runs CUDA optimizers as AdamW.
   const effectiveOptimizer =
-    platformDeviceType === "mac" &&
-    OPTIMIZER_OPTIONS.some((o) => o.value === cfgOptimizerType)
-      ? "adamw"
+    platformDeviceType === "mac"
+      ? mlxEffectiveOptimizer(cfgOptimizerType)
       : cfgOptimizerType;
   const optimizerLabel =
     [...OPTIMIZER_OPTIONS, ...MLX_OPTIMIZER_OPTIONS].find(
