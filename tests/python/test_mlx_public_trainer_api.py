@@ -1400,3 +1400,42 @@ def test_mlx_torch_cuda_compatibility_shim():
     batch = BatchEncoding({"input_ids": tensor})
     assert batch.to("cuda") is batch
     assert batch.to(device = "cuda") is batch
+
+
+class _CharTokenizer:
+    bos_token = bos_token_id = None
+    eos_token, eos_token_id = "$", ord("$")
+    pad_token, pad_token_id = "$", ord("$")
+
+    def encode(
+        self,
+        text,
+        add_special_tokens = True,
+    ):
+        return [ord(c) for c in text]
+
+    def decode(self, ids):
+        return "".join(map(chr, ids))
+
+
+def test_mlx_dpo_trainer_tokenizes_train_dataset_like_trl(tmp_path):
+    """TRL's DPOTrainer tokenizes at init; the Gemma 4 DPO notebook prints train_dataset[0]["prompt_ids"]."""
+    _import_mlx_unsloth()
+    from datasets import Dataset
+    from trl import DPOConfig, DPOTrainer
+
+    tokenizer = _CharTokenizer()
+    trainer = DPOTrainer(
+        model = _DummyModel(),
+        ref_model = None,
+        processing_class = tokenizer,
+        train_dataset = Dataset.from_list([{"prompt": "2+2=", "chosen": "4", "rejected": "5"}]),
+        args = DPOConfig(output_dir = str(tmp_path), max_length = 64, max_steps = 1),
+    )
+    row = trainer.train_dataset[0]
+    assert [tokenizer.decode(row[key]) for key in ("prompt_ids", "chosen_ids", "rejected_ids")] == [
+        "2+2=",
+        "4$",
+        "5$",
+    ]
+    assert row["prompt"] == "2+2=" and row["chosen"] == "4"

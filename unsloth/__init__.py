@@ -1909,6 +1909,45 @@ if _IS_MLX:
                         "with FastLanguageModel.from_pretrained, not a model name."
                     )
             super().__init__(**kwargs)
+            if self.preference_kind == "dpo":
+                self.train_dataset = self._unsloth_mlx_with_token_ids(self.train_dataset)
+
+        def _unsloth_mlx_with_token_ids(self, dataset):
+            # TRL's DPOTrainer tokenizes at init, and notebooks print train_dataset[0]["prompt_ids"].
+            datasets = _sys.modules.get("datasets")
+            if (
+                self._is_vlm
+                or self.formatting_func is not None
+                or datasets is None
+                or not isinstance(dataset, datasets.Dataset)
+                or "prompt_ids" in dataset.column_names
+            ):
+                return dataset
+            from unsloth_zoo.mlx.preference import (
+                resolve_preference_length_policy,
+                tokenize_preference_row,
+            )
+
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("ignore")
+                policy = resolve_preference_length_policy(
+                    "dpo", self.args, max_seq_length = self.args.max_seq_length
+                )
+
+            def token_ids(row):
+                encoded = tokenize_preference_row(
+                    self.tokenizer, row, length_policy = policy, append_eos = bool(self.args.append_eos)
+                )
+                return {
+                    "prompt_ids": list(encoded.chosen_prompt_ids),
+                    "chosen_ids": list(encoded.chosen_ids),
+                    "rejected_ids": list(encoded.rejected_ids),
+                }
+
+            try:
+                return dataset.map(token_ids)
+            except Exception:
+                return dataset
 
         def _unsloth_mlx_coerce_args(self, args, overrides):
             if self.preference_kind == "grpo" and args is not None:
