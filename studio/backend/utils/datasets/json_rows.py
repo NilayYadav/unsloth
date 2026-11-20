@@ -4,6 +4,7 @@
 """datasets types a JSON file from its first block, so a later row adding a key fails the whole load."""
 
 import json
+import os
 
 _CHUNK_ROWS = 10_000
 
@@ -50,6 +51,63 @@ def json_rows_features(files):
                     if schema is None
                     else pa.unify_schemas([schema, chunk], promote_options = "permissive")
                 )
-    except (OSError, ValueError, TypeError, pa.ArrowException):
+    except (OSError, ValueError, TypeError, OverflowError, pa.ArrowException):
         return None
     return None if schema is None else Features.from_arrow_schema(schema)
+
+
+def has_timestamp(data_type):
+    """The Arrow JSON reader turns ISO date strings into timestamps, at any depth."""
+    import pyarrow as pa
+
+    if isinstance(data_type, pa.Schema) or pa.types.is_struct(data_type):
+        return any(has_timestamp(field.type) for field in data_type)
+    if hasattr(data_type, "value_type"):
+        return has_timestamp(data_type.value_type)
+    return pa.types.is_timestamp(data_type)
+
+
+def head_rows(path, count):
+    rows = []
+    for chunk in _row_chunks(path):
+        rows.extend(chunk[: count - len(rows)])
+        if len(rows) >= count:
+            break
+    return rows
+
+
+def timestamps_as_strings(data_type):
+    """``data_type`` with every timestamp, at any depth, read as the string written."""
+    import pyarrow as pa
+
+    if isinstance(data_type, pa.Schema):
+        return pa.schema([f.with_type(timestamps_as_strings(f.type)) for f in data_type])
+    if pa.types.is_timestamp(data_type):
+        return pa.string()
+    if pa.types.is_struct(data_type):
+        return pa.struct([f.with_type(timestamps_as_strings(f.type)) for f in data_type])
+    if pa.types.is_large_list(data_type):
+        return pa.large_list(timestamps_as_strings(data_type.value_type))
+    if pa.types.is_list(data_type):
+        return pa.list_(timestamps_as_strings(data_type.value_type))
+    return data_type
+
+
+def _rows(files):
+    for path, *_ in files:
+        for rows in _row_chunks(path):
+            yield from rows
+
+
+def json_rows_dataset(files, cache_dir = None):
+    """Every row of ``files`` as parsed by ``json``, so strings stay strings; None if no schema fits."""
+    from datasets import Dataset
+
+    features = json_rows_features(files)
+    if features is None:
+        return None
+    # Size and mtime key the cache, so an edited file is reread.
+    stats = [(str(path), os.stat(path).st_size, os.stat(path).st_mtime_ns) for path in files]
+    return Dataset.from_generator(
+        _rows, features = features, cache_dir = cache_dir, gen_kwargs = {"files": stats}
+    )
