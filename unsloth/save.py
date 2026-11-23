@@ -5333,6 +5333,11 @@ def unsloth_save_pretrained_gguf(
 
     if tokenizer is None:
         raise ValueError("Unsloth: Saving to GGUF must have a tokenizer.")
+    # An FSDP2 writer reaches this inside its gather, which already chose it: no veto there.
+    if not is_main_process:
+        from .models.fsdp2_save import fsdp2_gather_active
+        if not fsdp2_gather_active():
+            return None
     if isinstance(tokenizer, (PreTrainedTokenizerBase, ProcessorMixin)):
         tokenizer = patch_saving_functions(tokenizer)
     # Read before the processor is unwrapped to its tokenizer below.
@@ -5341,8 +5346,6 @@ def unsloth_save_pretrained_gguf(
 
     # save_method="lora" exports the adapter itself as a GGUF LoRA, not a merged model.
     if save_method is not None and str(save_method).lower() == "lora":
-        if not is_main_process:
-            return None
         if push_to_hub:
             raise ValueError(
                 "Unsloth: Please use .push_to_hub_gguf(save_method='lora') instead of "
@@ -5952,7 +5955,25 @@ def _free_merge_if_disk_is_tight(
     return freed
 
 
+def _ddp_push_on_rank0(method):
+    """Plain DDP merged / GGUF Hub upload: rank 0 alone merges, converts and uploads, the others
+    return None without waiting (as `_tp_collective_save` does for push_to_hub)."""
+
+    def decorate(fn):
+        @functools.wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            if _plain_data_parallel_push(self, method, fn, args, kwargs):
+                from .models.tp_replica import tp_world_push
+                return tp_world_push(method, lambda: fn(self, *args, **kwargs))
+            return fn(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorate
+
+
 @_model_parallel_refuses_save("push_to_hub_gguf")
+@_ddp_push_on_rank0("push_to_hub")
 @_fsdp2_export_on_rank0("push_to_hub_gguf", adapter_only = _gguf_lora_only)
 def unsloth_push_to_hub_gguf(
     self,
@@ -5989,7 +6010,9 @@ def unsloth_push_to_hub_gguf(
     if tokenizer is None:
         raise ValueError("Unsloth: Saving to GGUF must have a tokenizer.")
     if not is_main_process:
-        return None
+        from .models.fsdp2_save import fsdp2_gather_active
+        if not fsdp2_gather_active():
+            return None
 
     # save_method="lora" exports the adapter itself as a GGUF LoRA, not a merged model.
     if save_method is not None and str(save_method).lower() == "lora":
@@ -6917,7 +6940,9 @@ def _push_merged_to_hub_revision(save_kwargs):
     from unsloth_zoo.saving_utils import get_original_model_id
 
     if not save_kwargs["is_main_process"]:
-        return
+        from unsloth.models.fsdp2_save import fsdp2_gather_active
+        if not fsdp2_gather_active():
+            return
     token = save_kwargs["token"]
     if token is None:
         token = get_token()
@@ -7538,6 +7563,11 @@ def unsloth_generic_save(
     else:
         raise_if_merging_mistral_format_view(model, save_method)
         raise_if_merging_inkling2(model, save_method)
+        # The FSDP2 writer (any rank of its mesh) is already inside the gather.
+        if not is_main_process:
+            from unsloth.models.fsdp2_save import fsdp2_gather_active
+            if not fsdp2_gather_active():
+                return
         from unsloth_zoo.saving_utils import merge_and_overwrite_lora
 
         # An older unsloth_zoo accepts `output_dtype` but still writes the base dtype.
@@ -7813,6 +7843,7 @@ def _fsdp2_merged_gather_options(model, args, kwargs):
 
 
 @_model_parallel_refuses_save("save_pretrained_merged")
+@_ddp_push_on_rank0("save_pretrained")
 @_fsdp2_collective_save(
     lambda self, args, kwargs: isinstance(self, PeftModel)
     and _is_adapter_save_method(_merged_save_method(args, kwargs)),
@@ -7978,6 +8009,7 @@ def unsloth_generic_save_pretrained_merged(
 
 # Like save_pretrained_merged: every rank calls it, rank 0 gathers, merges and uploads.
 @_model_parallel_refuses_save("push_to_hub_merged")
+@_ddp_push_on_rank0("push_to_hub")
 @_fsdp2_collective_save(
     lambda self, args, kwargs: isinstance(self, PeftModel)
     and _is_adapter_save_method(_merged_save_method(args, kwargs)),
