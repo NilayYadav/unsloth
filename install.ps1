@@ -159,6 +159,7 @@ function Install-UnslothStudio {
     # Defined before the first write.
     function Write-StudioLine {
         param([string]$Message = "", [string]$ForegroundColor)
+        if ($script:StudioMuteLines) { return }
         if ($script:StudioStdoutRedirected) {
             try { [Console]::Out.WriteLine($Message); [Console]::Out.Flush() } catch {}
             return
@@ -8861,13 +8862,72 @@ main()
             }
         } catch {}
     }
+    # "" or -1 hides every NVIDIA device (install.sh _cvd_hides_nvidia).
+    function Test-CudaMaskHidesNvidia {
+        if ($null -eq $env:CUDA_VISIBLE_DEVICES) { return $false }
+        $mask = $env:CUDA_VISIBLE_DEVICES -replace '\s', ''
+        return ($mask -eq '' -or $mask -eq '-1')
+    }
+    function Test-RocmTorchExplicitlyRequested {
+        return ("$env:UNSLOTH_FORCE_ROCM_TORCH".Trim() -match '^(?i)(1|true|yes|on)$')
+    }
+    # install.sh get_torch_index_url on an NVIDIA host; "cuda-forced" = flag set but no AMD wheels.
+    function Get-MixedHostTorchRoute {
+        param([bool]$AmdHasGpuWheels, [bool]$ForceRocm, [bool]$CudaMaskHidesNvidia, [AllowNull()][string]$NoticeArch)
+        if ($AmdHasGpuWheels -and ($ForceRocm -or $CudaMaskHidesNvidia)) { return "rocm" }
+        if ($ForceRocm) { return "cuda-forced" }
+        if ($NoticeArch) { return "cuda-notice" }
+        return "cuda"
+    }
+    # setup.ps1 Resolve-ShadowingGfxPick, so both scripts install for the same card.
+    function Resolve-MixedHostShadowingArch {
+        param([AllowNull()][string]$Picked, [AllowNull()][string[]]$Arches)
+        $shadowing = @("gfx90c", "gfx1013", "gfx1033", "gfx1035", "gfx1036", "gfx1103", "gfx1153")
+        if (-not $Picked -or $shadowing -notcontains $Picked) { return $Picked }
+        foreach ($mask in @($env:HIP_VISIBLE_DEVICES, $env:ROCR_VISIBLE_DEVICES, $env:CUDA_VISIBLE_DEVICES)) {
+            if ($null -ne $mask) { return $Picked }
+        }
+        foreach ($arch in @($Arches | Where-Object { $_ })) {
+            if ($shadowing -notcontains $arch -and ($archFamilyMap.ContainsKey($arch) -or $multiArchGfx -contains $arch)) { return $arch }
+        }
+        return $Picked
+    }
+    # First wheel-backed non-iGPU arch (setup.ps1 ShadowingIntegratedGfx plus Strix).
+    function Get-MixedHostNoticeArch {
+        param([AllowNull()][string[]]$Arches)
+        $integrated = @("gfx90c", "gfx1013", "gfx1033", "gfx1035", "gfx1036", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153")
+        foreach ($arch in @($Arches | Where-Object { $_ })) {
+            if (($archFamilyMap.ContainsKey($arch) -or $multiArchGfx -contains $arch) -and $integrated -notcontains $arch) { return $arch }
+        }
+        return $null
+    }
+    function Write-CudaMaskHidesAmdWarning {
+        Write-StudioLine ""
+        Write-StudioLine "[WARN] CUDA_VISIBLE_DEVICES=`"$env:CUDA_VISIBLE_DEVICES`" hid the NVIDIA GPU, so ROCm torch was selected." -ForegroundColor Yellow
+        Write-StudioLine "[WARN] ROCm reads CUDA_VISIBLE_DEVICES too: left set, it also hides the AMD GPU and" -ForegroundColor Yellow
+        Write-StudioLine "[WARN] Unsloth Studio / Desktop will run CPU-only. Unset it before launching" -ForegroundColor Yellow
+        Write-StudioLine "[WARN] (HIP_VISIBLE_DEVICES=0 picks the AMD card), and reinstall with" -ForegroundColor Yellow
+        Write-StudioLine "[WARN] UNSLOTH_FORCE_ROCM_TORCH=1 rather than the mask to ask for ROCm torch." -ForegroundColor Yellow
+        Write-StudioLine ""
+    }
+    # install.sh _notice_if_cuda_skipped_amd.
+    function Write-MixedHostCudaNotice {
+        param([string]$Arch)
+        Write-StudioLine ""
+        Write-StudioLine "[INFO] An AMD GPU ($Arch) was also found. CUDA PyTorch was installed for the NVIDIA GPU," -ForegroundColor Cyan
+        Write-StudioLine "[INFO] so training will not use the AMD GPU (one torch install serves one vendor)." -ForegroundColor Cyan
+        Write-StudioLine '[INFO] To train on the AMD GPU instead, re-run this installer with $env:UNSLOTH_FORCE_ROCM_TORCH = "1";' -ForegroundColor Cyan
+        Write-StudioLine "[INFO] the NVIDIA GPU then drops out of training until it is unset and the installer re-run." -ForegroundColor Cyan
+        if ($null -ne $env:HIP_VISIBLE_DEVICES -or $null -ne $env:ROCR_VISIBLE_DEVICES) {
+            Write-StudioLine "[INFO] HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES only choose among AMD GPUs; they do not" -ForegroundColor Cyan
+            Write-StudioLine "[INFO] select ROCm PyTorch, so UNSLOTH_FORCE_ROCM_TORCH=1 is needed as well." -ForegroundColor Cyan
+        }
+        Write-StudioLine "[INFO] GGUF chat can already run on the AMD GPU: Settings > System > GGUF inference engine > Compute backend." -ForegroundColor Cyan
+        Write-StudioLine ""
+    }
     # Name the card in the banner (name, compute_cap, driver in one query), honouring the
     # visible-device mask. A mask of "" or -1 hides every device: keep vendor-only wording.
-    $nvMaskHidesAll = $false
-    if ($null -ne $env:CUDA_VISIBLE_DEVICES) {
-        $nvMask = ($env:CUDA_VISIBLE_DEVICES -replace '\s', '')
-        $nvMaskHidesAll = ($nvMask -eq '' -or $nvMask -eq '-1')
-    }
+    $nvMaskHidesAll = Test-CudaMaskHidesNvidia
     if ($HasNvidiaSmi -and $NvidiaSmiExe -and -not $script:NvidiaSmiWedged -and -not $nvMaskHidesAll) {
         try {
             # Bounded runner; -StdoutOnly so stderr warnings cannot corrupt the CSV.
@@ -8960,7 +9020,15 @@ main()
     # Declared with its neighbours, not inside the block below: the arms that read
     # it are outside that gate, so an NVIDIA host would leave it undefined.
     $ROCmUnsupportedGfxArch = $null
-    if (-not $HasNvidiaSmi) {
+    $_hipAllArches = @()
+    # Mixed hosts are probed too (flag, mask, notice); a pin skips it, as in install.sh.
+    $ProbeAmdBesideNvidia = $HasNvidiaSmi -and -not $SkipTorch -and
+        [string]::IsNullOrWhiteSpace($env:UNSLOTH_TORCH_INDEX_URL) -and
+        [string]::IsNullOrWhiteSpace($env:UNSLOTH_TORCH_INDEX_FAMILY)
+    # Beside NVIDIA with neither flag nor hiding mask CUDA always wins: probe silently, for the notice only.
+    $script:StudioMuteLines = $ProbeAmdBesideNvidia -and -not $nvMaskHidesAll -and -not (Test-RocmTorchExplicitlyRequested)
+    try {
+    if (-not $HasNvidiaSmi -or $ProbeAmdBesideNvidia) {
         # Ignore the venv hipInfo.exe: an AMD wheel, not a HIP SDK, so amd-smi still auto-elevates.
         function Test-HipinfoIsVenvInternal {
             param([AllowNull()][string]$HipinfoPath)
@@ -9026,7 +9094,12 @@ main()
         if ($hipinfoExe) {
             $HipSdkInstalled = $true   # binary found → SDK is installed regardless of device state
             try {
-                $hipOut = & $hipinfoExe.Source 2>&1 | Out-String
+                # Beside NVIDIA a device-naming CUDA mask addresses the NVIDIA cards; HIP would apply it to AMD.
+                $_hipCvd = $env:CUDA_VISIBLE_DEVICES
+                $_hipDropCvd = $ProbeAmdBesideNvidia -and $null -ne $_hipCvd -and -not $nvMaskHidesAll -and $null -eq $env:HIP_VISIBLE_DEVICES
+                if ($_hipDropCvd) { Remove-Item Env:CUDA_VISIBLE_DEVICES }
+                try { $hipOut = & $hipinfoExe.Source 2>&1 | Out-String }
+                finally { if ($_hipDropCvd) { $env:CUDA_VISIBLE_DEVICES = $_hipCvd } }
                 if ($hipOut -match "(?i)gcnArchName") {
                     # hipinfo can crash after printing gcnArchName (#6043).
                     # Once the arch is printed, keep the ROCm wheel path.
@@ -9263,6 +9336,7 @@ main()
             }
         }
     }
+    } finally { $script:StudioMuteLines = $false }
 
     # ── WSL2 needs AMD Adrenalin >= 26.2.2; AMD referrer-gates it, so only link their page. ──
     function Show-AmdWslDriverHint {
@@ -9325,6 +9399,36 @@ main()
     $MultiArchTorchaudioVersion = "2.11.0"
     # "AMD gets GPU wheels here", not "AMD GPU present": unmapped arches install CPU torch.
     $AmdHasGpuWheels = [bool]($ROCmGfxArch -and ($archFamilyMap.ContainsKey($ROCmGfxArch) -or $multiArchGfx -contains $ROCmGfxArch))
+
+    # "rocm": from here on this is an AMD host, and Get-TorchIndexUrl returns /cpu so the AMD route runs.
+    $RocmTorchOverNvidia = $false
+    $MixedHostRoute = $null
+    $MixedHostAmdArch = $null
+    if ($ProbeAmdBesideNvidia) {
+        $_mixedPicked = Resolve-MixedHostShadowingArch -Picked $ROCmGfxArch -Arches $_hipAllArches
+        if ($_mixedPicked -and $_mixedPicked -ne $ROCmGfxArch) {
+            $ROCmGfxArch = $_mixedPicked; $ROCmGpuLabel = "AMD ROCm ($ROCmGfxArch)"; $ROCmGpuName = $null
+            $AmdHasGpuWheels = $true
+        }
+        $MixedHostRoute = Get-MixedHostTorchRoute -AmdHasGpuWheels $AmdHasGpuWheels `
+            -ForceRocm (Test-RocmTorchExplicitlyRequested) -CudaMaskHidesNvidia $nvMaskHidesAll `
+            -NoticeArch (Get-MixedHostNoticeArch -Arches (@($ROCmGfxArch) + @($_hipAllArches)))
+        if ($MixedHostRoute -eq "rocm") {
+            $RocmTorchOverNvidia = $true
+            $HasNvidiaSmi = $false
+            if (Test-RocmTorchExplicitlyRequested) {
+                Write-StudioLine "[INFO] UNSLOTH_FORCE_ROCM_TORCH is set and an AMD GPU is present -- selecting ROCm PyTorch over CUDA." -ForegroundColor Cyan
+                Write-StudioLine "[INFO] One torch install serves one vendor: the NVIDIA card will not be available to training until this is unset and the installer re-run." -ForegroundColor Cyan
+            }
+            if ($nvMaskHidesAll -and $null -eq $env:HIP_VISIBLE_DEVICES) { Write-CudaMaskHidesAmdWarning }
+        } else {
+            if ($MixedHostRoute -eq "cuda-notice") { $MixedHostAmdArch = Get-MixedHostNoticeArch -Arches (@($ROCmGfxArch) + @($_hipAllArches)) }
+            # NVIDIA keeps torch: forget the AMD probe.
+            $HasROCm = $false; $HipSdkInstalled = $false; $ROCmGpuLabel = $null; $ROCmGpuName = $null
+            $ROCmVersion = $null; $ROCmVersionFull = $null; $ROCmGfxArch = $null; $ROCmUnsupportedGfxArch = $null
+            $AmdHasGpuWheels = $false
+        }
+    }
 
     # ── Intel GPU detection (Arc / Data Center GPU Max / Flex) ──
     # Before the report chain: a WMI-named-only AMD adapter would otherwise hide a discrete Arc.
@@ -9536,6 +9640,7 @@ main()
         if ($script:WoaNativeCudaTorch -and $script:WoaTorchIndexUrl) {
             return $script:WoaTorchIndexUrl
         }
+        if ($RocmTorchOverNvidia) { return "$baseUrl/cpu" }
         $major = $null; $minor = $null; $caps = @()
         if ($NvidiaSmiExe) {
             try {
@@ -9913,6 +10018,12 @@ main()
     $TorchIndexPinned = (-not [string]::IsNullOrWhiteSpace($env:UNSLOTH_TORCH_INDEX_URL)) -or `
                         (-not [string]::IsNullOrWhiteSpace($env:UNSLOTH_TORCH_INDEX_FAMILY))
     $TorchIndexUrl = Get-TorchIndexUrl
+    if ($MixedHostRoute -eq "cuda-forced") {
+        Write-StudioLine "[WARN] UNSLOTH_FORCE_ROCM_TORCH is set, but no ROCm wheel index could be selected for this host." -ForegroundColor Yellow
+        Write-StudioLine "[WARN] Keeping the CUDA build rather than installing CPU PyTorch on a machine with a working NVIDIA GPU." -ForegroundColor Yellow
+    } elseif ($MixedHostAmdArch -and (Get-TorchIndexLeafName $TorchIndexUrl) -match '^cu\d') {
+        Write-MixedHostCudaNotice -Arch $MixedHostAmdArch
+    }
 
     # Must run AFTER Get-TorchIndexUrl above, which would overwrite it. A pin still wins.
     if ($script:IsIntelXpu -and -not $TorchIndexPinned -and -not $SkipTorch) {
