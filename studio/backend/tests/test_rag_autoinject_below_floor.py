@@ -64,13 +64,14 @@ def test_handbook_answer_below_floor_still_reaches_the_model(handbook):
     assert "20 paid vacation days" in json.dumps(out)
 
 
-def test_project_sources_below_floor_inject_nothing(handbook):
+def test_project_sources_below_floor_still_reach_the_model(handbook):
     handbook(store.project_scope("P"))
     out = _ask(
         "How many vacation days do I get?",
         {"project_id": "P", "thread_id": "T", "autoinject": True, "autoinject_min_score": 0.7},
     )
-    assert out is None
+    assert out is not None
+    assert "20 paid vacation days" in json.dumps(out)
 
 
 def test_nudge_below_floor_injects_nothing(handbook):
