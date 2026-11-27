@@ -73,7 +73,7 @@ class ProviderRegistryEntry(BaseModel):
         description = "Backend-only entry; the UI surfaces it via a custom preset, not the dropdown",
     )
 
-    auth_kind: Literal["api_key", "chatgpt_oauth"] = "api_key"
+    auth_kind: Literal["api_key", "chatgpt_oauth", "github_oauth"] = "api_key"
     base_url_editable: bool = True
     model_ids_editable: bool = True
     model_list_mode: Literal["remote", "curated"] = Field(
@@ -180,7 +180,7 @@ class ProviderResponse(BaseModel):
 
     has_api_key: bool = Field(False, description = "Whether this caller has a saved API key")
 
-    auth_kind: Literal["api_key", "chatgpt_oauth"] = "api_key"
+    auth_kind: Literal["api_key", "chatgpt_oauth", "github_oauth"] = "api_key"
     auth_status: Literal["disconnected", "connected", "reauthorization_required"] = "disconnected"
     models: list[str] = Field(
         default_factory = list,

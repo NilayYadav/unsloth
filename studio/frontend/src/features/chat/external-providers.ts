@@ -128,6 +128,7 @@ export function connectionApiFields(
 }
 
 const NON_VISION_PROVIDER_TYPES = new Set<string>([
+  "github_copilot",
   "cohere",
   "deepseek",
   "mistral",
@@ -363,7 +364,9 @@ export function supportsProviderMaxOutputTokens(
   if (!uiProviderType) return false;
   return (
     uiProviderType !== OPENAI_CODEX_PROVIDER_TYPE &&
-    backendProviderType !== OPENAI_CODEX_PROVIDER_TYPE
+    backendProviderType !== OPENAI_CODEX_PROVIDER_TYPE &&
+    uiProviderType !== "github_copilot" &&
+    backendProviderType !== "github_copilot"
   );
 }
 

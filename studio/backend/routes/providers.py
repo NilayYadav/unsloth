@@ -48,6 +48,7 @@ from core.inference.pricing import pricing_snapshot
 from core.inference.external_provider import ExternalProviderClient
 
 from core.inference import openai_codex_auth, openai_codex_client
+from routes.github_copilot_auth import router as github_copilot_auth_router
 from core.inference.provider_model_capabilities import (
     MODEL_CAPABILITY_PROVIDERS,
     MODELS_DEV_URL,
@@ -157,7 +158,7 @@ def _provider_response(row: dict) -> ProviderResponse:
         reasoning_config = row.get("reasoning_config"),
         is_enabled = bool(row["is_enabled"]),
         has_api_key = has_api_key,
-        auth_kind = ("chatgpt_oauth" if row["provider_type"] == "openai_codex" else "api_key"),
+        auth_kind = (get_provider_info(row["provider_type"]) or {}).get("auth_kind", "api_key"),
         auth_status = (
             openai_codex_auth.auth_status(row["id"])
             if row["provider_type"] == "openai_codex"
@@ -184,9 +185,14 @@ def _validate_share_request(
         raise HTTPException(
             status_code = 403, detail = "Only the installation owner can share connections."
         )
-    if provider_type == "openai_codex":
+    if provider_type in ("openai_codex", "github_copilot"):
         raise HTTPException(
-            status_code = 400, detail = "A ChatGPT subscription connection cannot be shared."
+            status_code = 400,
+            detail = (
+                "A ChatGPT subscription connection cannot be shared."
+                if provider_type == "openai_codex"
+                else "A Copilot subscription connection cannot be shared."
+            ),
         )
     if providers_db.base_url_carries_credential(base_url):
         # Other accounts are shown the base URL, so a credential inside it would be shared too.
@@ -217,6 +223,12 @@ def _validate_provider_auth_contract(
     persisted_models: list[str] | None = None,
     validated_account: str | None = None,
 ) -> None:
+    if info.get("auth_kind") == "github_oauth":
+        if encrypted_api_key or clear_api_key:
+            raise HTTPException(400, "Use GitHub sign-in to manage this subscription credential.")
+        if base_url is not None and base_url.rstrip("/") != info["base_url"]:
+            raise HTTPException(400, "GitHub Copilot subscription routing is fixed.")
+        return
     if info.get("auth_kind") != "chatgpt_oauth":
         return
     if encrypted_api_key or clear_api_key:
@@ -254,10 +266,14 @@ def _validate_max_output_tokens_contract(
     value: Optional[int] = None,
 ) -> None:
     """Rejects a non-null override on ChatGPT subscriptions, where the output cap is fixed."""
-    if field_was_set and value is not None and provider_type == "openai_codex":
+    if field_was_set and value is not None and provider_type in ("openai_codex", "github_copilot"):
         raise HTTPException(
             status_code = 400,
-            detail = "ChatGPT subscriptions use a fixed Max Tokens limit.",
+            detail = (
+                "ChatGPT subscriptions use a fixed Max Tokens limit."
+                if provider_type == "openai_codex"
+                else "Copilot subscriptions do not support a Max Tokens override."
+            ),
         )
 
 
@@ -610,7 +626,9 @@ async def migrate_provider_api_key(
 ):
     """Insert a browser legacy key only when this provider has no saved key."""
     require_ui_session(via_api_key)
-    _own_provider_or_error(provider_id)
+    row = _own_provider_or_error(provider_id)
+    if row["provider_type"] == "github_copilot":
+        raise HTTPException(400, "Use GitHub sign-in to manage this subscription credential.")
     api_key = resolve_provider_api_key_or_400(
         None, payload.encrypted_api_key, allow_saved_key = False
     )
@@ -637,6 +655,8 @@ async def delete_provider_config(
             raise HTTPException(status_code = 404, detail = "Provider config not found")
     require_ui_session(via_api_key)
     await openai_codex_auth.cancel_provider_flows(provider_id)
+    with current_credential_write(credential):
+        credential_secrets.delete_secret("github_copilot_oauth_flow", provider_id)
     credential_secrets.get_or_create_credential_encryption_key()
 
     async with openai_codex_auth.provider_oauth_write_guard(provider_id):
@@ -1346,3 +1366,6 @@ async def list_provider_models(
         ) from None
     finally:
         await client.close()
+
+
+router.include_router(github_copilot_auth_router)

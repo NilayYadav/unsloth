@@ -55,6 +55,7 @@ import { useSettingsDialogStore } from "@/features/settings";
 import { useT } from "@/i18n";
 import { ApiProviderLogo } from "./api-provider-logo";
 
+import { GitHubCopilotConnect } from "./github-copilot-connect";
 import { OpenAICodexConnect } from "./openai-codex-connect";
 import {
   type CodexSubscriptionModels,
@@ -376,9 +377,9 @@ export function ChatProvidersSettings({
   const selectedProviderContract = registryByType.get(
     toExternalBackendProviderType(providerType),
   );
-  const usesOAuth = selectedProviderContract?.auth_kind === "chatgpt_oauth";
-
-  const isCodexSubscription = usesOAuth;
+  const isCodexSubscription = selectedProviderContract?.auth_kind === "chatgpt_oauth";
+  const isCopilotSubscription = selectedProviderContract?.auth_kind === "github_oauth";
+  const usesOAuth = isCodexSubscription || isCopilotSubscription;
   const modelIdsEditable =
     selectedProviderContract?.model_ids_editable !== false;
   const showApiKeyField =
@@ -431,6 +432,7 @@ export function ChatProvidersSettings({
       ? `New ${selectedProviderLabel}`
       : "New";
   const missingModelCatalogApiKey =
+    !usesOAuth &&
     !isCustomProvider &&
     !isCuratedModelList &&
     apiKey.trim().length === 0 &&
@@ -728,7 +730,11 @@ export function ChatProvidersSettings({
       );
       return;
     }
-    if (!isCustomProvider && !apiKey.trim() && !editingProviderHasSavedKey) {
+    if (isCopilotSubscription && !editingProviderHasSavedKey) {
+      toast.info("Sign in with GitHub first.");
+      return;
+    }
+    if (!usesOAuth && !isCustomProvider && !apiKey.trim() && !editingProviderHasSavedKey) {
       toast.error("Add an API key first.");
       return;
     }
@@ -741,6 +747,7 @@ export function ChatProvidersSettings({
       toast.info("Save the new Base URL first, then load its models.");
       return;
     }
+    const catalogRequest = ++codexCatalogRequestRef.current;
     setModelsLoading(true);
     try {
       const baseUrl = parseBaseUrlForProvider(
@@ -758,6 +765,7 @@ export function ChatProvidersSettings({
         baseUrl,
         apiType: providerType === LEGACY_CUSTOM_PROVIDER_TYPE ? apiType : undefined,
       });
+      if (catalogRequest !== codexCatalogRequestRef.current) return;
       // The picker keeps only ids, so per-model capabilities are learned here or lost.
       learnCatalogModelCapabilities(providerType, models);
       const registryDefaults = supportsRemoteModelCatalog(providerType)
@@ -801,7 +809,7 @@ export function ChatProvidersSettings({
       const message = error instanceof Error ? error.message : "Unknown error";
       toast.error(`Could not load models: ${message}`);
     } finally {
-      setModelsLoading(false);
+      if (catalogRequest === codexCatalogRequestRef.current) setModelsLoading(false);
     }
   }
 
@@ -809,8 +817,8 @@ export function ChatProvidersSettings({
     if (editingProviderId) return editingProviderId;
     const backendProviderType = toExternalBackendProviderType(providerType);
     const entry = registryByType.get(backendProviderType);
-    if (entry?.auth_kind !== "chatgpt_oauth") {
-      throw new Error("This connection does not support ChatGPT authorization.");
+    if (entry?.auth_kind !== "chatgpt_oauth" && entry?.auth_kind !== "github_oauth") {
+      throw new Error("This connection does not support subscription authorization.");
     }
 
     setMutatingProvider(true);
@@ -877,6 +885,7 @@ export function ChatProvidersSettings({
     if (
       !isCustomProvider &&
       selectedRegistryEntry?.auth_kind !== "chatgpt_oauth" &&
+      selectedRegistryEntry?.auth_kind !== "github_oauth" &&
       !apiKey.trim()
     ) {
       toast.error("API key is required.");
@@ -1039,7 +1048,7 @@ export function ChatProvidersSettings({
     const editingContract = registryByType.get(
       toExternalBackendProviderType(existing.providerType),
     );
-    const isEditingOAuthProvider = existing.authKind === "chatgpt_oauth";
+    const isEditingOAuthProvider = existing.authKind === "chatgpt_oauth" || existing.authKind === "github_oauth";
     if (
       !isEditingCustomProvider &&
       !isEditingOAuthProvider &&
@@ -1939,6 +1948,31 @@ export function ChatProvidersSettings({
           </section>
 
 
+          {isCopilotSubscription ? (
+            <GitHubCopilotConnect
+              providerId={editingProviderId}
+              connected={editingProvider?.authStatus === "connected"}
+              ensureProvider={ensureCodexProvider}
+              onChanged={async (id, connected) => {
+                const request = ++codexCatalogRequestRef.current;
+                setModelsLoading(true);
+                try {
+                  const synced = await syncExternalProvidersFromBackend(providersRef.current);
+                  providersRef.current = synced;
+                  onProvidersChange(synced);
+                  const models = connected ? await listProviderModels({
+                    providerType: "github_copilot", providerId: id, apiKey: "",
+                  }) : [];
+                  if (request !== codexCatalogRequestRef.current) return;
+                  const ids = models.map((model) => model.id);
+                  setAvailableModels(ids);
+                  setSelectedModelIds((previous) => previous.filter((model) => ids.includes(model)));
+                } finally {
+                  if (request === codexCatalogRequestRef.current) setModelsLoading(false);
+                }
+              }}
+            />
+          ) : null}
           {isCodexSubscription ? (
             <OpenAICodexConnect
               providerId={editingProviderId}

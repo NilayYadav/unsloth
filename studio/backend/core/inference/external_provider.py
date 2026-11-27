@@ -1492,6 +1492,8 @@ class ExternalProviderClient:
         reasoning_config: Optional[dict] = None,
         managed_loopback: bool = False,
     ):
+        if provider_type == "github_copilot" and base_url.rstrip("/") != "https://github.com":
+            raise ValueError("GitHub Copilot subscription routing is fixed.")
         self.provider_type = provider_type
         self.api_type = api_type if provider_type == "custom" else "chat_completions"
         self.reasoning_config = (
@@ -1606,6 +1608,18 @@ class ExternalProviderClient:
         compaction_fallback: Optional[CompactionFallback] = None,
     ) -> AsyncGenerator[str, None]:
         """tool_choice none disables all tools so they cannot bill or leak; top_k and penalties are opt-in."""
+        if self.provider_type == "github_copilot":
+            from core.inference.github_copilot import stream_chat
+            async for line in stream_chat(
+                self.api_key,
+                messages,
+                model,
+                tools = tools,
+                enabled_tools = enabled_tools,
+                response_format = response_format,
+            ):
+                yield line
+            return
         tool_choice_disabled = (
             isinstance(tool_choice, str) and tool_choice.strip().lower() == "none"
         )
@@ -7245,6 +7259,9 @@ class ExternalProviderClient:
 
     async def list_models(self) -> list[dict[str, Any]]:
         """return each provider's OpenAI-compatible /models entries, including Anthropic."""
+        if self.provider_type == "github_copilot":
+            from core.inference.github_copilot import list_models
+            return await list_models(self.api_key)
         try:
             data, models = await self._models_payload(self._timeout)
             if self.provider_type == "ollama":
