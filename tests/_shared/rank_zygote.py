@@ -977,6 +977,7 @@ def _rank_main(fd, parent_sentinel):
     _rank["frozen"] = frozen
     _guard_env()
     _hide()
+    _guard_joins()
 
     stream = io.BytesIO(data)
     process.current_process()._inheriting = True
@@ -1039,6 +1040,38 @@ def _guard_env():
         return delitem(self, key)
 
     E.__setitem__, E.__delitem__ = __setitem__, __delitem__
+
+
+def _guard_joins():
+    """Re-execute the rank before it joins a process group while it may still re-execute later.
+
+    A re-execution replays the rank from its start. After a join, the replay rendezvouses again on the same
+    store keys, and a peer can read this rank's first address: its listener is gone with the old interpreter,
+    so gloo waits in init_process_group or the first collective until the test times out (gloo-ep, 2026-11-28:
+    a rank that imports transformers or safetensors after init_process_group, ahead of the conftest)."""
+    if _Z["conftest"] is None:
+        return  # a zygote that stops before the conftest hides nothing: its ranks never re-execute mid-run
+    from torch.distributed import distributed_c10d
+
+    original = distributed_c10d.init_process_group
+
+    def init_process_group(*args, **kwargs):
+        if _rank["decided"] is None:
+            _respawn("init_process_group before the conftest")
+        return original(*args, **kwargs)
+
+    init_process_group.__wrapped__ = original
+    _rank["joins"] = (original, init_process_group)
+    _set_joins(original, init_process_group)
+
+
+def _set_joins(old, new):
+    """Every loaded torch.distributed module that binds init_process_group (device_mesh imports it by name)."""
+    for name, module in list(sys.modules.items()):
+        if (name == "torch.distributed" or name.startswith("torch.distributed.")) and getattr(
+            module, "init_process_group", None
+        ) is old:
+            module.init_process_group = new
 
 
 class _HiddenFinder:
@@ -1143,6 +1176,10 @@ def _decide(module):
         _respawn(reason)
     _rank["decided"] = "hit"
     _rank["frozen"] = None  # the rank is where the conftest leaves it, as a spawned one would be
+    if _rank.get("joins") is not None:
+        _set_joins(
+            *reversed(_rank["joins"])
+        )  # it cannot re-execute any more: the plain function again
     import importlib._bootstrap_external as ext
 
     ext.SourceFileLoader.exec_module = ext.SourceFileLoader.exec_module._rank_zygote_original

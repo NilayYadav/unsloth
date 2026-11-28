@@ -94,6 +94,41 @@ def _rank_via_conftest(
         json.dump(_fingerprint(), f, sort_keys = True)
 
 
+def _rank_joins(rank, world, store_dir, order, out):
+    """A gloo harness: rank variables, the process group, then (join_first) an import the zygote's conftest
+    run made, ahead of the conftest, as test_ep_moe_families_gloo's gpt-oss and adapter-save ranks do."""
+    import datetime
+    import importlib.util
+
+    import torch.distributed as dist
+
+    os.environ.update(RANK = str(rank), WORLD_SIZE = str(world), LOCAL_RANK = str(rank))
+
+    def conftest():
+        spec = importlib.util.spec_from_file_location("_tp_conftest", CONFTEST)
+        spec.loader.exec_module(importlib.util.module_from_spec(spec))
+
+    if order == "conftest_first":
+        conftest()
+    dist.init_process_group(
+        "gloo",
+        store = dist.FileStore(os.path.join(store_dir, "rendezvous"), world),
+        rank = rank,
+        world_size = world,
+        timeout = datetime.timedelta(seconds = 60),
+    )
+    with open(os.path.join(store_dir, f"joined_{rank}"), "a", encoding = "utf-8") as f:
+        f.write(f"{os.getpid()}\n")
+    if order == "join_first":
+        import transformers  # noqa: F401
+        conftest()
+    total = torch.ones(1)
+    dist.all_reduce(total)
+    with open(out, "w", encoding = "utf-8") as f:
+        json.dump({"sum": float(total)}, f)
+    dist.destroy_process_group()
+
+
 def _rank_exit(code, queue):
     queue.put(("alive", os.getpid()))
     queue.close()
@@ -130,6 +165,35 @@ def _drive(tmp, cases):
                 json.load(open(o, encoding = "utf-8")) if os.path.exists(o) else None for o in outs
             ],
         }
+    for (
+        name
+    ) in JOIN_CASES:  # the first rank pair is observed, the second forks from a conftest zygote
+        store_dir = os.path.join(tmp, name)
+        os.makedirs(store_dir)
+        outs = [os.path.join(tmp, f"{name}_{r}.json") for r in range(2)]
+        procs = [
+            ctx.Process(target = _rank_joins, args = (r, 2, store_dir, name, outs[r])) for r in range(2)
+        ]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(180)
+        for p in procs:
+            if p.is_alive():
+                p.kill()
+                p.join(30)
+        joined = []
+        for r in range(2):
+            path = os.path.join(store_dir, f"joined_{r}")
+            with open(path, encoding = "utf-8") if os.path.exists(path) else open(os.devnull) as f:
+                joined.append(f.read().split())
+        report[name] = {
+            "codes": [p.exitcode for p in procs],
+            "joined": joined,
+            "ranks": [
+                json.load(open(o, encoding = "utf-8")) if os.path.exists(o) else None for o in outs
+            ],
+        }
     queue = ctx.Queue()
     codes = {}
     for code in (0, 7, "raise"):
@@ -154,6 +218,10 @@ CASES = {
     # The rank imports transformers itself before the conftest, so its zygote stops short of the conftest.
     "imports_first_again": ({}, "transformers"),
 }
+
+
+# Process group first, then a hidden import ahead of the conftest: the fork must re-execute before it joins.
+JOIN_CASES = ("conftest_first", "join_first")
 
 
 def _run(tmp_path, zygote):
@@ -236,11 +304,26 @@ def test_the_zygote_path_is_taken(runs):
     # imports_first's 2 ranks import transformers before the conftest, so they respawn.
     assert counts["hit"] >= 4, summary
     assert counts["start"] >= 8, summary
-    assert counts["respawn"] <= 2, summary
+    assert counts["respawn"] <= 4, summary
     assert set(reasons) <= {
         "spawned: observed",
         "imported transformers before the conftest",
+        "init_process_group before the conftest",
     }, summary
+
+
+def test_a_forked_rank_joins_its_process_group_once(runs):
+    """A rank that re-executed after init_process_group joined twice on the same store keys, and a peer
+    holding its first address hung in gloo (test_ep_moe_families_gloo on 4 vCPU runners)."""
+    spawned, forked, summary = runs
+    for report in (spawned, forked):
+        for name in JOIN_CASES:
+            case = report[name]
+            assert case["codes"] == [0, 0], case
+            assert [len(pids) for pids in case["joined"]] == [1, 1], case
+            assert [r["sum"] for r in case["ranks"]] == [2.0, 2.0], case
+    # The second pair forked, then re-executed at init_process_group: not after it.
+    assert summary["reasons"].get("init_process_group before the conftest") == 2, summary
 
 
 def test_exit_codes_exceptions_and_queues_come_back(runs):

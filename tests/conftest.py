@@ -158,6 +158,13 @@ def pytest_collection_modifyitems(config, items):
     check(config, items)
 
 
+@pytest.hookimpl(optionalhook = True)
+def pytest_xdist_make_scheduler(config, log):
+    """A worker crash must not hang --dist loadgroup; see tests/_shared/xdist_crash_requeue.py."""
+    from xdist_crash_requeue import make_scheduler
+    return make_scheduler(config, log)
+
+
 def _has_real_accelerator() -> bool:
     """Calls the probe before any spoof; the name is pinned by a test that reads this file's AST."""
     from real_accelerator import has_real_accelerator
