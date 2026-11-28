@@ -976,6 +976,7 @@ def _rank_main(fd, parent_sentinel):
     # Imports ahead ran under these values: a variable the test module sets before them restarts the rank.
     _rank["frozen"] = frozen
     _guard_env()
+    _guard_process_groups()
     _hide()
 
     stream = io.BytesIO(data)
@@ -1039,6 +1040,25 @@ def _guard_env():
         return delitem(self, key)
 
     E.__setitem__, E.__delitem__ = __setitem__, __delitem__
+
+
+def _guard_process_groups():
+    """Re-execute the rank at its first process group while it can still re-execute: once the group exists its
+    peers hold sockets to it and the store holds its keys, so a later re-exec rendezvouses a second time against
+    the first round's keys and the group hangs half connected (gloo-ep-2: a case imported transformers after
+    init_process_group). Every group, init_process_group's, new_group's and a DeviceMesh's, is made here."""
+    c10d = sys.modules.get("torch.distributed.distributed_c10d")
+    make = getattr(c10d, "_new_process_group_helper", None)
+    if make is None:
+        return
+
+    def _new_process_group_helper(*args, **kwargs):
+        if _rank is not None and _rank["decided"] is None and _Z["hidden"]:
+            _respawn("a process group before the conftest")
+        return make(*args, **kwargs)
+
+    _new_process_group_helper._rank_zygote_original = make
+    c10d._new_process_group_helper = _new_process_group_helper
 
 
 class _HiddenFinder:
@@ -1146,6 +1166,10 @@ def _decide(module):
     import importlib._bootstrap_external as ext
 
     ext.SourceFileLoader.exec_module = ext.SourceFileLoader.exec_module._rank_zygote_original
+    c10d = sys.modules.get("torch.distributed.distributed_c10d")
+    make = getattr(c10d, "_new_process_group_helper", None)
+    if hasattr(make, "_rank_zygote_original"):
+        c10d._new_process_group_helper = make._rank_zygote_original
     sys.meta_path[:] = [f for f in sys.meta_path if f is not _HiddenFinder]
     sys.modules.update(_Z["hidden"])
     for owner, key, _old, new in _Z["changes"]:
@@ -1198,6 +1222,12 @@ def _respawn(reason: str):
     """Re-execute this rank as a fresh spawned interpreter: same pid, same pipes, the parent's environment."""
     from multiprocessing import forkserver, resource_tracker, util
 
+    dist = sys.modules.get("torch.distributed")
+    if dist is not None and dist.is_available() and dist.is_initialized():
+        raise RuntimeError(
+            f"rank_zygote: {reason}, but this rank already joined a process group; re-executing it now would "
+            "rendezvous twice and hang. Make the import or set the variable before the group is created."
+        )
     _record("respawn", reason = reason)
     _tell_parent("respawn", reason)
     try:

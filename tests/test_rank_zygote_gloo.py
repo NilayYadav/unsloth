@@ -80,18 +80,38 @@ def _rank_via_conftest(
     env,
     out,
     import_first = None,
+    group_first = False,
 ):
     """The harness pattern: rank variables and the test's env, then the conftest by path, then unsloth."""
     os.environ.update(RANK = str(rank), WORLD_SIZE = str(world), LOCAL_RANK = str(rank))
     os.environ.update(env)
+    if group_first:
+        # As test_ep_moe_families_gloo's _worker: the group exists before the rank's first own import.
+        import datetime
+
+        import torch.distributed as dist
+
+        store = dist.FileStore(out.rsplit("_", 1)[0] + ".store", world)
+        dist.init_process_group(
+            "gloo",
+            store = store,
+            rank = rank,
+            world_size = world,
+            timeout = datetime.timedelta(seconds = 120),
+        )
     if import_first:
         __import__(import_first)
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("_tp_conftest", CONFTEST)
     spec.loader.exec_module(importlib.util.module_from_spec(spec))
+    fingerprint = _fingerprint()
+    if group_first:
+        import torch.distributed as dist
+        dist.barrier()
+        dist.destroy_process_group()
     with open(out, "w", encoding = "utf-8") as f:
-        json.dump(_fingerprint(), f, sort_keys = True)
+        json.dump(fingerprint, f, sort_keys = True)
 
 
 def _rank_exit(code, queue):
@@ -114,10 +134,12 @@ def _drive(tmp, cases):
     )  # installs the zygote when enabled
     ctx = multiprocessing.get_context("spawn")
     report = {}
-    for name, (env, import_first) in cases.items():
+    for name, (env, import_first, *group_first) in cases.items():
         outs = [os.path.join(tmp, f"{name}_{r}.json") for r in range(2)]
         procs = [
-            ctx.Process(target = _rank_via_conftest, args = (r, 2, env, outs[r], import_first))
+            ctx.Process(
+                target = _rank_via_conftest, args = (r, 2, env, outs[r], import_first, *group_first)
+            )
             for r in range(2)
         ]
         for p in procs:
@@ -153,6 +175,10 @@ CASES = {
     "imports_first": ({}, "transformers"),  # a new kind (its string argument): observed
     # The rank imports transformers itself before the conftest, so its zygote stops short of the conftest.
     "imports_first_again": ({}, "transformers"),
+    # A gloo group before that import: forked from a zygote that ran the conftest, the rank must re-execute
+    # before the group exists, not after (a second rendezvous against the first round's keys hangs).
+    "group_first": ({}, "transformers", True),
+    "group_first_again": ({}, "transformers", True),
 }
 
 
@@ -233,13 +259,15 @@ def test_the_env_layout_reaches_the_import(runs):
 def test_the_zygote_path_is_taken(runs):
     _, _, summary = runs
     counts, reasons = summary["counts"], summary["reasons"]
-    # imports_first's 2 ranks import transformers before the conftest, so they respawn.
+    # imports_first's 2 ranks import transformers before the conftest, so they respawn; group_first's
+    # forked ranks re-execute as their group is made.
     assert counts["hit"] >= 4, summary
     assert counts["start"] >= 8, summary
-    assert counts["respawn"] <= 2, summary
+    assert counts["respawn"] <= 4, summary
     assert set(reasons) <= {
         "spawned: observed",
         "imported transformers before the conftest",
+        "a process group before the conftest",
     }, summary
 
 
