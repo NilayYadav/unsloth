@@ -783,6 +783,7 @@ def _spawn(
         for p in procs:
             p.start()
         if os.environ.get("G184_STACKS"):
+            os.makedirs(os.environ["G184_STACKS"], exist_ok = True)
             with open(os.path.join(os.environ["G184_STACKS"], "spawn_log.txt"), "a") as f:
                 f.write(f"{time.time():.1f} START {case} tmp={tmp} pids={[p.pid for p in procs]} worker={os.environ.get('PYTEST_XDIST_WORKER')}\n")
         deadline = time.monotonic() + 600
