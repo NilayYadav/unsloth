@@ -99,8 +99,8 @@ def _rank_via_conftest(
             world_size = world,
             timeout = datetime.timedelta(seconds = 120),
         )
-    if import_first:
-        __import__(import_first)
+    for name in [import_first] if isinstance(import_first, str) else import_first or ():
+        __import__(name)
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("_tp_conftest", CONFTEST)
@@ -172,13 +172,13 @@ CASES = {
         None,
     ),  # same function: forked from a zygote keyed by the layout
     "plain_again": ({}, None),
+    # As test_ep_moe_families_gloo's dense case: a gloo group, then an import the conftest would make, in a
+    # rank of plain's kind (a list argument does not choose a kind), so forked from a zygote that ran the
+    # conftest. It must re-execute as the group is made: after it, a second rendezvous on the same store hangs.
+    "group_first": ({}, ["transformers"], True),
     "imports_first": ({}, "transformers"),  # a new kind (its string argument): observed
     # The rank imports transformers itself before the conftest, so its zygote stops short of the conftest.
     "imports_first_again": ({}, "transformers"),
-    # A gloo group before that import: forked from a zygote that ran the conftest, the rank must re-execute
-    # before the group exists, not after (a second rendezvous against the first round's keys hangs).
-    "group_first": ({}, "transformers", True),
-    "group_first_again": ({}, "transformers", True),
 }
 
 
@@ -259,11 +259,12 @@ def test_the_env_layout_reaches_the_import(runs):
 def test_the_zygote_path_is_taken(runs):
     _, _, summary = runs
     counts, reasons = summary["counts"], summary["reasons"]
-    # imports_first's 2 ranks import transformers before the conftest, so they respawn; group_first's
-    # forked ranks re-execute as their group is made.
+    # imports_first's 2 ranks import transformers before the conftest, so they respawn; group_first's 2 forked
+    # ranks re-execute as their group is made.
     assert counts["hit"] >= 4, summary
     assert counts["start"] >= 8, summary
     assert counts["respawn"] <= 4, summary
+    assert reasons.get("a process group before the conftest") == 2, summary
     assert set(reasons) <= {
         "spawned: observed",
         "imported transformers before the conftest",
